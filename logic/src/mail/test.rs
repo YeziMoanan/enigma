@@ -1,9 +1,18 @@
 use sqlx::sqlite::SqlitePoolOptions;
 
+fn init_test_data() {
+    let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("sonetto-data/excel2json");
+    let _ = config::init(data_dir.to_str().unwrap());
+}
+
 #[tokio::test]
 async fn mail_red_dot_only_changes_when_last_unread_mail_is_claimed() {
-    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
-    let _ = config::init(&data_dir);
+    init_test_data();
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -34,13 +43,7 @@ async fn mail_red_dot_only_changes_when_last_unread_mail_is_claimed() {
 
 #[tokio::test]
 async fn repeated_mail_claim_does_not_repeat_rewards() {
-    let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("sonetto-data/excel2json");
-    let _ = config::init(data_dir.to_str().unwrap());
+    init_test_data();
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
