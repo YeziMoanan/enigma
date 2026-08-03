@@ -3,6 +3,33 @@ use anyhow::Result;
 use bcrypt::{DEFAULT_COST, hash, verify};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction, prelude::FromRow};
 
+#[derive(Debug, Clone, Copy)]
+pub struct InitialMailDefinition {
+    pub category: &'static str,
+    pub mail_id: i32,
+    pub title: &'static str,
+    pub content: &'static str,
+    pub attachment: &'static str,
+    pub expire_time: i64,
+}
+
+const INITIAL_MAILS: [InitialMailDefinition; 1] = [InitialMailDefinition {
+    category: "welcome",
+    mail_id: 900001,
+    title: "Welcome to Reverse: 1999",
+    content: "Your journey begins here.",
+    attachment: "",
+    expire_time: 0,
+}];
+
+pub fn initial_mail_definitions() -> &'static [InitialMailDefinition] {
+    &INITIAL_MAILS
+}
+
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_ascii_lowercase()
+}
+
 #[derive(Debug, Clone)]
 pub struct UserAccount {
     pub id: i64,
@@ -30,13 +57,14 @@ pub struct TokenInfo {
 
 /// Get user account by email
 pub async fn get_user_by_email(pool: &SqlitePool, email: &str) -> Result<Option<UserAccount>> {
+    let email = normalize_email(email);
     let row = sqlx::query(
         "SELECT id, username, email, account_type, registration_account_type, vip_level,
                 first_join, need_real_name, real_name_status,
                 age, is_adult, need_activate, cipher_mark, account_tags
-         FROM users WHERE email = ?1",
+         FROM users WHERE LOWER(TRIM(email)) = ?1",
     )
-    .bind(email)
+    .bind(&email)
     .fetch_optional(pool)
     .await?;
 
@@ -100,8 +128,9 @@ pub async fn get_user_by_id(pool: &SqlitePool, user_id: i64) -> Result<Option<Us
 
 /// Verify user password
 pub async fn verify_user_password(pool: &SqlitePool, email: &str, password: &str) -> Result<bool> {
-    let row = sqlx::query("SELECT password_hash FROM users WHERE email = ?1")
-        .bind(email)
+    let email = normalize_email(email);
+    let row = sqlx::query("SELECT password_hash FROM users WHERE LOWER(TRIM(email)) = ?1")
+        .bind(&email)
         .fetch_optional(pool)
         .await?;
 
@@ -123,10 +152,11 @@ pub async fn create_user(
     token_info: &TokenInfo,
     now: i64,
 ) -> Result<UserAccount> {
+    let email = normalize_email(email);
     // Hash password
     let password_hash = hash(password, DEFAULT_COST)?;
     // Generate initial username from email (user can change later)
-    let username = email.split('@').next().unwrap_or(email).to_string();
+    let username = email.split('@').next().unwrap_or(&email).to_string();
     let mut tx = pool.begin().await?;
 
     sqlx::query(
@@ -141,7 +171,7 @@ pub async fn create_user(
     )
     .bind(user_id)
     .bind(&username)
-    .bind(email)
+    .bind(&email)
     .bind(&password_hash)
     .bind(10) // AccountType::Email
     .bind(1)
@@ -165,12 +195,13 @@ pub async fn create_user(
     .execute(&mut *tx)
     .await?;
     starter_data::load_all_starter_data_tx(&mut tx, user_id).await?;
+    insert_initial_mails(&mut tx, user_id, now).await?;
     tx.commit().await?;
 
     Ok(UserAccount {
         id: user_id,
         username,
-        email: email.to_string(),
+        email,
         account_type: 10,
         registration_account_type: 1,
         vip_level: 0,
@@ -221,10 +252,11 @@ pub async fn handle_user_login(
     token_info: TokenInfo,
     now: i64,
 ) -> Result<UserAccount> {
-    match get_user_by_email(pool, email).await? {
+    let email = normalize_email(email);
+    match get_user_by_email(pool, &email).await? {
         Some(user) => {
             // Verify password
-            if !verify_user_password(pool, email, password).await? {
+            if !verify_user_password(pool, &email, password).await? {
                 return Err(anyhow::anyhow!("Invalid password"));
             }
 
@@ -234,10 +266,62 @@ pub async fn handle_user_login(
         }
         None => {
             // Create new user with hashed password
-            let user_id = generate_user_id(email);
-            create_user(pool, user_id, email, password, &token_info, now).await
+            let user_id = generate_user_id(&email);
+            match create_user(pool, user_id, &email, password, &token_info, now).await {
+                Ok(user) => Ok(user),
+                Err(create_error) => {
+                    let Some(user) = get_user_by_email(pool, &email).await? else {
+                        return Err(create_error);
+                    };
+                    if !verify_user_password(pool, &email, password).await? {
+                        return Err(anyhow::anyhow!("Invalid password"));
+                    }
+                    update_user_login(pool, user.id, &token_info, now).await?;
+                    Ok(user)
+                }
+            }
         }
     }
+}
+
+async fn insert_initial_mails(
+    tx: &mut Transaction<'_, Sqlite>,
+    user_id: i64,
+    now: i64,
+) -> sqlx::Result<()> {
+    for definition in initial_mail_definitions() {
+        let marker = sqlx::query(
+            "INSERT OR IGNORE INTO user_initial_mail_deliveries (user_id, category, delivered_at)
+             VALUES (?, ?, ?)",
+        )
+        .bind(user_id)
+        .bind(definition.category)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
+
+        if marker.rows_affected() == 0 {
+            continue;
+        }
+
+        sqlx::query(
+            "INSERT INTO user_mails
+                (user_id, mail_id, params, attachment, state, create_time, sender, title, content, expire_time)
+             VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+        )
+        .bind(user_id)
+        .bind(definition.mail_id)
+        .bind(definition.category)
+        .bind(definition.attachment)
+        .bind(now)
+        .bind("Reverse: 1999")
+        .bind(definition.title)
+        .bind(definition.content)
+        .bind(definition.expire_time)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 #[derive(FromRow)]
@@ -342,4 +426,155 @@ fn generate_user_id(email: &str) -> i64 {
 
     // Ensure it's a reasonable range (e.g., 1000000 - 9999999)
     (1000000 + (hash % 9000000)) as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TokenInfo, handle_user_login, initial_mail_definitions, normalize_email};
+    use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+    use std::time::Duration;
+
+    #[test]
+    fn equivalent_email_format_has_one_identity() {
+        assert_eq!(
+            normalize_email("  Player@Example.COM "),
+            "player@example.com"
+        );
+    }
+
+    #[test]
+    fn initial_mail_is_explicitly_categorized_without_resource_injection() {
+        let definitions = initial_mail_definitions();
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].category, "welcome");
+        assert!(definitions[0].attachment.is_empty());
+        assert!(!definitions[0].title.is_empty());
+        assert!(!definitions[0].content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn initial_mail_delivery_is_idempotent() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE user_mails (
+                incr_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                mail_id INTEGER NOT NULL,
+                params TEXT NOT NULL DEFAULT '',
+                attachment TEXT NOT NULL DEFAULT '',
+                state INTEGER NOT NULL DEFAULT 0,
+                create_time INTEGER NOT NULL,
+                sender TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                expire_time INTEGER NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE user_initial_mail_deliveries (
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                delivered_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, category)
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for now in [10_i64, 20_i64] {
+            let mut tx = pool.begin().await.unwrap();
+            super::insert_initial_mails(&mut tx, 7, now).await.unwrap();
+            tx.commit().await.unwrap();
+        }
+
+        let mail_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_mails")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let delivery_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM user_initial_mail_deliveries")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(mail_count, 1);
+        assert_eq!(delivery_count, 1);
+    }
+
+    #[tokio::test]
+    async fn repeated_and_concurrent_login_create_one_account_and_one_initial_mail() {
+        let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("sonetto-data/excel2json");
+        config::init(data_dir.to_str().unwrap()).unwrap();
+        let database_path = std::env::temp_dir().join(format!(
+            "reverse1999-login-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&database_path)
+            .create_if_missing(true)
+            .busy_timeout(Duration::from_secs(10));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(options)
+            .await
+            .unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+
+        let token = TokenInfo {
+            token: "token".to_string(),
+            refresh_token: "refresh".to_string(),
+            expires_at: 100,
+        };
+        let first = handle_user_login(
+            &pool,
+            " Concurrent@Example.COM ",
+            "password",
+            token.clone(),
+            10,
+        );
+        let second = handle_user_login(
+            &pool,
+            "concurrent@example.com",
+            "password",
+            token.clone(),
+            20,
+        );
+        let (first, second) = tokio::join!(first, second);
+        let first = first.unwrap();
+        let second = second.unwrap();
+        assert_eq!(first.id, second.id);
+
+        handle_user_login(&pool, "CONCURRENT@example.com", "password", token, 30)
+            .await
+            .unwrap();
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let mail_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_mails")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let delivery_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM user_initial_mail_deliveries")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!((user_count, mail_count, delivery_count), (1, 1, 1));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
 }
