@@ -115,6 +115,7 @@ mod tests {
         router(MuipOptions {
             host: "127.0.0.1".to_string(),
             port: 0,
+            allow_unspecified_container_bind: false,
             token: "test-token".to_string(),
             gm_addr: "127.0.0.1:9".to_string(),
             db,

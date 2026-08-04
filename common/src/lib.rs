@@ -45,6 +45,10 @@ pub fn muip_port() -> u16 {
     config().muip.port
 }
 
+pub fn muip_allow_unspecified_container_bind() -> bool {
+    config().muip.allow_unspecified_container_bind
+}
+
 pub fn muip_token() -> &'static str {
     &config().muip.token
 }

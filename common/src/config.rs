@@ -29,6 +29,8 @@ pub struct MuipConfig {
     pub host: String,
     pub port: u16,
     #[serde(default)]
+    pub allow_unspecified_container_bind: bool,
+    #[serde(default)]
     pub token_file: Option<PathBuf>,
     #[serde(default)]
     pub token: String,
@@ -41,6 +43,7 @@ impl Default for MuipConfig {
         Self {
             host: "127.0.0.1".to_string(),
             port: 21100,
+            allow_unspecified_container_bind: false,
             token_file: None,
             token: "1999".to_string(),
             gm_host: "127.0.0.1".to_string(),
