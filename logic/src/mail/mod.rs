@@ -142,7 +142,7 @@ impl MailManager {
 
         let mut rewards = reward::RewardSet::default();
         for (_, attachment) in &mails {
-            rewards.extend(reward::parse(attachment));
+            rewards.extend(reward::parse_mail_attachment(attachment)?);
         }
         let incr_ids = mails
             .iter()

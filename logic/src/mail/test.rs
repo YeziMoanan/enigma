@@ -81,3 +81,37 @@ async fn repeated_mail_claim_does_not_repeat_rewards() {
     assert!(repeated.rewards.currency_ids.is_empty());
     assert!(repeated.material_changes.is_empty());
 }
+
+#[tokio::test]
+async fn invalid_attachment_rolls_back_all_mail_state_and_rewards() {
+    init_test_data();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at) VALUES (3, 'rollback', 0, 0);
+         INSERT INTO user_mails
+             (incr_id, user_id, mail_id, attachment, create_time, expire_time)
+         VALUES (4, 3, 4, '2#11#25', 0, 0), (5, 3, 5, 'broken', 0, 0);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(super::MailManager::new(3).claim_batch(&pool).await.is_err());
+    let claimed: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_mails WHERE user_id = 3 AND state = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let currency_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM currencies WHERE user_id = 3")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(claimed, 0);
+    assert_eq!(currency_rows, 0);
+}
