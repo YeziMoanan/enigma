@@ -6,7 +6,7 @@ game_port = 23301
 skip_tutorial = false
 
 [muip]
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 21100
 token = "1999"
 gm_host = "127.0.0.1"
