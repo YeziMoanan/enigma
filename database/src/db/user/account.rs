@@ -1,6 +1,7 @@
 use crate::db::{starter_data, user::access};
 use anyhow::Result;
-use bcrypt::{DEFAULT_COST, hash, verify};
+use bcrypt::{DEFAULT_COST, hash as bcrypt_hash, verify as bcrypt_verify};
+use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction, prelude::FromRow};
 
 #[derive(Debug, Clone, Copy)]
@@ -137,7 +138,7 @@ pub async fn verify_user_password(pool: &SqlitePool, email: &str, password: &str
     match row {
         Some(r) => {
             let password_hash: String = r.try_get("password_hash")?;
-            Ok(verify(password, &password_hash)?)
+            Ok(verify_password(password, &password_hash)?)
         }
         None => Ok(false),
     }
@@ -166,7 +167,7 @@ pub async fn create_user(
         return Err(anyhow::Error::new(access_error));
     }
 
-    let password_hash = hash(password, DEFAULT_COST)?;
+    let password_hash = hash_password(password)?;
 
     let insert = sqlx::query(
         "INSERT INTO users (
@@ -245,10 +246,22 @@ pub async fn create_user(
 }
 
 fn validate_password(password: &str) -> Result<(), access::AccountAccessError> {
-    if !(6..=64).contains(&password.chars().count()) || password.len() > 72 {
+    if !(6..=64).contains(&password.chars().count()) {
         return Err(access::AccountAccessError::InvalidPassword);
     }
     Ok(())
+}
+
+fn password_material(password: &str) -> [u8; 32] {
+    Sha256::digest(password.as_bytes()).into()
+}
+
+fn hash_password(password: &str) -> Result<String, bcrypt::BcryptError> {
+    bcrypt_hash(password_material(password), DEFAULT_COST)
+}
+
+fn verify_password(password: &str, password_hash: &str) -> Result<bool, bcrypt::BcryptError> {
+    bcrypt_verify(password_material(password), password_hash)
 }
 
 /// Update user tokens and last login time
@@ -818,19 +831,27 @@ mod tests {
     }
 
     #[test]
-    fn password_length_counts_characters_and_respects_bcrypt_limit() {
+    fn password_length_counts_characters_without_bcrypt_truncation() {
         let sixty_four_characters = format!("{}{}", "a".repeat(60), "密".repeat(4));
+        let over_seventy_two_bytes = "密".repeat(25);
         assert!(super::validate_password(&"密".repeat(6)).is_ok());
+        assert!(super::validate_password(&over_seventy_two_bytes).is_ok());
         assert_eq!(sixty_four_characters.chars().count(), 64);
         assert_eq!(sixty_four_characters.len(), 72);
         assert!(super::validate_password(&sixty_four_characters).is_ok());
 
-        for invalid in ["密".repeat(5), "密".repeat(25), "a".repeat(65)] {
+        for invalid in ["密".repeat(5), "a".repeat(65)] {
             assert!(matches!(
                 super::validate_password(&invalid),
                 Err(AccountAccessError::InvalidPassword)
             ));
         }
+
+        let first = format!("{}甲", "密".repeat(24));
+        let second = format!("{}乙", "密".repeat(24));
+        let hash = super::hash_password(&first).unwrap();
+        assert!(super::verify_password(&first, &hash).unwrap());
+        assert!(!super::verify_password(&second, &hash).unwrap());
     }
 
     #[tokio::test]
