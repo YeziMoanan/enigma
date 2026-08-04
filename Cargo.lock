@@ -1952,6 +1952,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverse1999_tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "logic",
+ "serde_json",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

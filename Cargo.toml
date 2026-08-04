@@ -12,6 +12,7 @@ members = [
     "config",
     "config_codegen",
     "battle_preview",
+    "reverse1999_tools",
 ]
 default-members = [
     "common",

@@ -1,0 +1,10 @@
+[package]
+name = "reverse1999_tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+config.workspace = true
+logic.workspace = true
+serde_json.workspace = true

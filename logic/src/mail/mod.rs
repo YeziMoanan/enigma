@@ -10,6 +10,9 @@ use sonettobuf::{
 };
 use sqlx::SqlitePool;
 
+pub mod catalog;
+pub mod manifest;
+
 #[derive(Default)]
 pub struct MailClaimOutcome {
     pub incr_ids: Vec<i64>,
