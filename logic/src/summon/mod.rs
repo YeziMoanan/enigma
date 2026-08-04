@@ -15,6 +15,7 @@ use sonettobuf::{
 use sqlx::SqlitePool;
 mod commands;
 mod parse;
+pub mod permanent_pool;
 mod pool;
 
 pub use commands::SummonCompletion;
