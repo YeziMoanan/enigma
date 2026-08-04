@@ -1,4 +1,4 @@
-use sqlx::{Sqlite, Transaction};
+use sqlx::{Sqlite, SqlitePool, Transaction};
 use std::{error::Error, fmt};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -9,8 +9,11 @@ pub enum RegistrationDecision {
 #[derive(Debug)]
 pub enum AccountAccessError {
     InvalidFormat,
+    InvalidPassword,
     Blacklisted,
     NotAllowlisted,
+    ActivationConflict,
+    UserNotFound,
     Database(sqlx::Error),
 }
 
@@ -18,8 +21,11 @@ impl fmt::Display for AccountAccessError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFormat => formatter.write_str("invalid account format"),
+            Self::InvalidPassword => formatter.write_str("invalid password"),
             Self::Blacklisted => formatter.write_str("account is blacklisted"),
             Self::NotAllowlisted => formatter.write_str("account is not allowlisted"),
+            Self::ActivationConflict => formatter.write_str("account activation conflict"),
+            Self::UserNotFound => formatter.write_str("user not found"),
             Self::Database(error) => error.fmt(formatter),
         }
     }
@@ -91,6 +97,38 @@ pub async fn registration_decision(
     .await?;
 
     Err(AccountAccessError::NotAllowlisted)
+}
+
+/// Check whether an existing account is still permitted to log in.
+/// Blacklists always take precedence; allowlist removal is a rejection, not an
+/// automatic blacklist mutation.
+pub async fn require_login_access(
+    pool: &SqlitePool,
+    user_id: i64,
+    account_key: &str,
+) -> Result<(), AccountAccessError> {
+    let blacklisted = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM account_blacklist WHERE account_key = ? LIMIT 1",
+    )
+    .bind(account_key)
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    if blacklisted {
+        return Err(AccountAccessError::Blacklisted);
+    }
+
+    let activated_user_id = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT activated_user_id FROM account_allowlist WHERE account_key = ? LIMIT 1",
+    )
+    .bind(account_key)
+    .fetch_optional(pool)
+    .await?;
+    if activated_user_id != Some(Some(user_id)) {
+        return Err(AccountAccessError::NotAllowlisted);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -221,5 +259,48 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(source, "unauthorized_registration");
+    }
+
+    #[tokio::test]
+    async fn existing_login_requires_bound_allowlist_and_prioritizes_blacklist() {
+        let pool = migrated_pool().await;
+        sqlx::query(
+            "INSERT INTO users (id, username, email, created_at, updated_at)
+             VALUES (7, 'player_7', 'player01', 10, 10)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO account_allowlist
+                (account_key, display_account, batch_id, imported_at, imported_by, activated_user_id)
+             VALUES ('player01', 'Player01', 'batch-1', 10, 'admin', 7)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            super::require_login_access(&pool, 7, "player01")
+                .await
+                .is_ok()
+        );
+        assert!(matches!(
+            super::require_login_access(&pool, 8, "player01").await,
+            Err(AccountAccessError::NotAllowlisted)
+        ));
+
+        sqlx::query(
+            "INSERT INTO account_blacklist
+                (account_key, source, reason, created_at, created_by)
+             VALUES ('player01', 'manual_ban', 'policy violation', 20, 'admin')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(matches!(
+            super::require_login_access(&pool, 7, "player01").await,
+            Err(AccountAccessError::Blacklisted)
+        ));
     }
 }

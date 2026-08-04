@@ -1,4 +1,4 @@
-use crate::db::starter_data;
+use crate::db::{starter_data, user::access};
 use anyhow::Result;
 use bcrypt::{DEFAULT_COST, hash, verify};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction, prelude::FromRow};
@@ -151,10 +151,22 @@ pub async fn create_user(
     token_info: &TokenInfo,
     now: i64,
 ) -> Result<UserAccount> {
-    let email = normalize_email(email);
-    // Hash password
+    let email = access::normalize_account(email).map_err(anyhow::Error::new)?;
+    validate_password(password)?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+
+    if let Err(access_error) = access::registration_decision(&mut tx, &email, now).await {
+        if matches!(access_error, access::AccountAccessError::NotAllowlisted) {
+            if let Err(commit_error) = tx.commit().await {
+                return Err(anyhow::Error::new(access::AccountAccessError::Database(
+                    commit_error,
+                )));
+            }
+        }
+        return Err(anyhow::Error::new(access_error));
+    }
+
     let password_hash = hash(password, DEFAULT_COST)?;
-    let mut tx = pool.begin().await?;
 
     let insert = sqlx::query(
         "INSERT INTO users (
@@ -197,6 +209,19 @@ pub async fn create_user(
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
+    let activation = sqlx::query(
+        "UPDATE account_allowlist SET activated_user_id = ?
+         WHERE account_key = ? AND activated_user_id IS NULL",
+    )
+    .bind(user_id)
+    .bind(&email)
+    .execute(&mut *tx)
+    .await?;
+    if activation.rows_affected() != 1 {
+        return Err(anyhow::Error::new(
+            access::AccountAccessError::ActivationConflict,
+        ));
+    }
     starter_data::load_all_starter_data_tx(&mut tx, user_id).await?;
     insert_initial_mails(&mut tx, user_id, now).await?;
     tx.commit().await?;
@@ -217,6 +242,13 @@ pub async fn create_user(
         cipher_mark: true,
         account_tags: String::new(),
     })
+}
+
+fn validate_password(password: &str) -> Result<(), access::AccountAccessError> {
+    if !(6..=64).contains(&password.len()) {
+        return Err(access::AccountAccessError::InvalidPassword);
+    }
+    Ok(())
 }
 
 /// Update user tokens and last login time
@@ -255,12 +287,17 @@ pub async fn handle_user_login(
     token_info: TokenInfo,
     now: i64,
 ) -> Result<UserAccount> {
-    let email = normalize_email(email);
+    let email = access::normalize_account(email).map_err(anyhow::Error::new)?;
     match get_user_by_email(pool, &email).await? {
         Some(user) => {
-            // Verify password
+            access::require_login_access(pool, user.id, &email)
+                .await
+                .map_err(anyhow::Error::new)?;
+            validate_password(password).map_err(anyhow::Error::new)?;
             if !verify_user_password(pool, &email, password).await? {
-                return Err(anyhow::anyhow!("Invalid password"));
+                return Err(anyhow::Error::new(
+                    access::AccountAccessError::InvalidPassword,
+                ));
             }
 
             // Update tokens
@@ -273,8 +310,14 @@ pub async fn handle_user_login(
                 let Some(user) = get_user_by_email(pool, &email).await? else {
                     return Err(create_error);
                 };
+                access::require_login_access(pool, user.id, &email)
+                    .await
+                    .map_err(anyhow::Error::new)?;
+                validate_password(password).map_err(anyhow::Error::new)?;
                 if !verify_user_password(pool, &email, password).await? {
-                    return Err(anyhow::anyhow!("Invalid password"));
+                    return Err(anyhow::Error::new(
+                        access::AccountAccessError::InvalidPassword,
+                    ));
                 }
                 update_user_login(pool, user.id, &token_info, now).await?;
                 Ok(user)
@@ -337,7 +380,7 @@ pub async fn get_user_token(pool: &SqlitePool, user_id: i64) -> Result<UserToken
     .bind(user_id)
     .fetch_optional(pool)
     .await?
-    .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+    .ok_or_else(|| anyhow::Error::new(access::AccountAccessError::UserNotFound))?;
 
     Ok(token)
 }
@@ -417,6 +460,7 @@ pub async fn update_user_level(pool: &SqlitePool, user_id: i64, level: i32) -> R
 #[cfg(test)]
 mod tests {
     use super::{TokenInfo, handle_user_login, initial_mail_definitions, normalize_email};
+    use crate::db::user::access::AccountAccessError;
     use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
     use std::{collections::HashMap, path::PathBuf, time::Duration};
 
@@ -447,6 +491,19 @@ mod tests {
             .unwrap();
         crate::run_migrations(&pool).await.unwrap();
         (pool, database_path)
+    }
+
+    async fn allow_account(pool: &SqlitePool, account_key: &str) {
+        sqlx::query(
+            "INSERT INTO account_allowlist
+                (account_key, display_account, batch_id, imported_at, imported_by)
+             VALUES (?, ?, 'test', 1, 'test')",
+        )
+        .bind(account_key)
+        .bind(account_key)
+        .execute(pool)
+        .await
+        .unwrap();
     }
 
     fn token() -> TokenInfo {
@@ -576,6 +633,8 @@ mod tests {
             .unwrap();
         crate::run_migrations(&pool).await.unwrap();
 
+        allow_account(&pool, "concurrent@example.com").await;
+
         let token = TokenInfo {
             token: "token".to_string(),
             refresh_token: "refresh".to_string(),
@@ -626,6 +685,8 @@ mod tests {
     async fn different_emails_with_legacy_hash_collision_get_distinct_ids() {
         let (pool, database_path) = account_test_pool("identity-collision").await;
         let (first_email, second_email) = legacy_collision();
+        allow_account(&pool, &first_email).await;
+        allow_account(&pool, &second_email).await;
         assert_eq!(legacy_user_id(&first_email), legacy_user_id(&second_email));
 
         let first = handle_user_login(&pool, &first_email, "password", token(), 10)
@@ -650,6 +711,9 @@ mod tests {
     async fn different_domains_with_same_local_part_create_distinct_accounts() {
         let (pool, database_path) = account_test_pool("identity-username").await;
 
+        allow_account(&pool, "shared@example.com").await;
+        allow_account(&pool, "shared@example.org").await;
+
         let first = handle_user_login(&pool, "shared@example.com", "password", token(), 10)
             .await
             .unwrap();
@@ -664,6 +728,195 @@ mod tests {
             .unwrap();
         assert_eq!(user_count, 2);
 
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn non_allowlisted_registration_is_rejected_and_durably_blacklisted() {
+        let (pool, database_path) = account_test_pool("unauthorized-registration").await;
+        let result =
+            handle_user_login(&pool, " blocked@example.com ", "password", token(), 10).await;
+        assert!(matches!(
+            result.unwrap_err().downcast_ref::<AccountAccessError>(),
+            Some(AccountAccessError::NotAllowlisted)
+        ));
+
+        let fresh = SqlitePool::connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&database_path)
+                .busy_timeout(Duration::from_secs(10)),
+        )
+        .await
+        .unwrap();
+        let source: String = sqlx::query_scalar(
+            "SELECT source FROM account_blacklist WHERE account_key = 'blocked@example.com'",
+        )
+        .fetch_one(&fresh)
+        .await
+        .unwrap();
+        assert_eq!(source, "unauthorized_registration");
+        fresh.close().await;
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn invalid_account_and_password_errors_are_typed_and_sanitized() {
+        let (pool, database_path) = account_test_pool("invalid-credentials").await;
+        allow_account(&pool, "valid@example.com").await;
+
+        let invalid_account = handle_user_login(
+            &pool,
+            "invalid account",
+            "password-secret",
+            TokenInfo {
+                token: "token-secret".to_string(),
+                refresh_token: "refresh-secret".to_string(),
+                expires_at: 100,
+            },
+            10,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            invalid_account.downcast_ref::<AccountAccessError>(),
+            Some(AccountAccessError::InvalidFormat)
+        ));
+        let invalid_account_message = invalid_account.to_string();
+        assert!(!invalid_account_message.contains("invalid account"));
+        assert!(!invalid_account_message.contains("password-secret"));
+        assert!(!invalid_account_message.contains("token-secret"));
+
+        let invalid_password = handle_user_login(&pool, "valid@example.com", "short", token(), 20)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            invalid_password.downcast_ref::<AccountAccessError>(),
+            Some(AccountAccessError::InvalidPassword)
+        ));
+        assert!(!invalid_password.to_string().contains("short"));
+
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let activated_user_id: Option<i64> = sqlx::query_scalar(
+            "SELECT activated_user_id FROM account_allowlist WHERE account_key = 'valid@example.com'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(user_count, 0);
+        assert_eq!(activated_user_id, None);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn allowlist_activation_binds_allocated_user_id() {
+        let (pool, database_path) = account_test_pool("allowlist-binding").await;
+        allow_account(&pool, "bound@example.com").await;
+        let user = handle_user_login(&pool, "BOUND@example.com", "password", token(), 10)
+            .await
+            .unwrap();
+        let activated: i64 = sqlx::query_scalar(
+            "SELECT activated_user_id FROM account_allowlist WHERE account_key = 'bound@example.com'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(activated, user.id);
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn concurrent_allowed_registration_still_creates_one_user() {
+        let (pool, database_path) = account_test_pool("concurrent-allowlisted").await;
+        allow_account(&pool, "parallel@example.com").await;
+        let first = handle_user_login(&pool, "parallel@example.com", "password", token(), 10);
+        let second = handle_user_login(&pool, " PARALLEL@example.com ", "password", token(), 20);
+        let (first, second) = tokio::join!(first, second);
+        assert_eq!(first.unwrap().id, second.unwrap().id);
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn existing_login_rejects_removed_allowlist_without_blacklisting() {
+        let (pool, database_path) = account_test_pool("removed-allowlist").await;
+        allow_account(&pool, "removed@example.com").await;
+        let user = handle_user_login(&pool, "removed@example.com", "password", token(), 10)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM account_allowlist WHERE account_key = 'removed@example.com'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result = handle_user_login(
+            &pool,
+            "removed@example.com",
+            "password",
+            TokenInfo {
+                token: "rotated".to_string(),
+                refresh_token: "rotated-refresh".to_string(),
+                expires_at: 200,
+            },
+            20,
+        )
+        .await;
+        assert!(matches!(
+            result.unwrap_err().downcast_ref::<AccountAccessError>(),
+            Some(AccountAccessError::NotAllowlisted)
+        ));
+        let blacklist_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_blacklist WHERE account_key = 'removed@example.com'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let stored_token: String = sqlx::query_scalar("SELECT token FROM users WHERE id = ?")
+            .bind(user.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(blacklist_count, 0);
+        assert_eq!(stored_token, "token");
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn existing_login_prioritizes_blacklist_over_password_verification() {
+        let (pool, database_path) = account_test_pool("blacklisted-login").await;
+        allow_account(&pool, "banned@example.com").await;
+        let user = handle_user_login(&pool, "banned@example.com", "password", token(), 10)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO account_blacklist
+                (account_key, user_id, source, reason, created_at, created_by)
+             VALUES ('banned@example.com', ?, 'manual_ban', 'test', 20, 'test')",
+        )
+        .bind(user.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result =
+            handle_user_login(&pool, "banned@example.com", "wrong-password", token(), 30).await;
+        assert!(matches!(
+            result.unwrap_err().downcast_ref::<AccountAccessError>(),
+            Some(AccountAccessError::Blacklisted)
+        ));
         pool.close().await;
         let _ = std::fs::remove_file(database_path);
     }
