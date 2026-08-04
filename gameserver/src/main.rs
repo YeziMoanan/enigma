@@ -37,6 +37,11 @@ async fn main() -> anyhow::Result<()> {
     );
     config::configs::init(excel_data_directory().to_str().unwrap())?;
     let tables = config::configs::get();
+    let permanent_pool_snapshot = excel_data_directory()
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("game data directory has no parent"))?
+        .join("reverse1999/permanent-six-stars-3.6.5.json");
+    logic::summon::permanent_pool::verify_snapshot(tables, &permanent_pool_snapshot)?;
     info!("Game data loaded");
 
     let state: &'static AppState = Box::leak(Box::new(AppState::new(db, tables)));

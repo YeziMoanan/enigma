@@ -1379,6 +1379,7 @@ dependencies = [
  "rand 0.9.4",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "thiserror",
  "tokio",

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 pub const SOURCE_DATA_SHA: &str = "04ef16b69e0508fe7d62671327350ada222e7323";
 
@@ -65,6 +66,16 @@ pub fn eligible_six_stars(tables: &config::GameDB) -> PermanentPoolSnapshot {
     }
 }
 
+pub fn verify_snapshot(tables: &config::GameDB, path: &Path) -> anyhow::Result<()> {
+    let bytes = std::fs::read(path)?;
+    let pinned: PermanentPoolSnapshot = serde_json::from_slice(&bytes)?;
+    anyhow::ensure!(
+        pinned == eligible_six_stars(tables),
+        "permanent-pool snapshot does not match the loaded game data"
+    );
+    Ok(())
+}
+
 fn exclusion_reason(
     tables: &config::GameDB,
     character: &config::character::Character,
@@ -103,6 +114,8 @@ fn referenced_skills(character: &config::character::Character) -> impl Iterator<
 
 #[cfg(test)]
 mod tests {
+    use sha2::{Digest, Sha256};
+
     #[test]
     fn pinned_data_selects_only_playable_online_six_stars() {
         let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
@@ -131,5 +144,24 @@ mod tests {
                 .windows(2)
                 .all(|pair| pair[0].id < pair[1].id)
         );
+    }
+
+    #[test]
+    fn pinned_snapshot_is_byte_reproducible() {
+        let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+        let _ = config::init(&data_dir);
+        let first = serde_json::to_vec_pretty(&super::eligible_six_stars(config::configs::get()))
+            .expect("serialize snapshot");
+        let second = serde_json::to_vec_pretty(&super::eligible_six_stars(config::configs::get()))
+            .expect("serialize snapshot");
+        assert_eq!(first, second);
+        assert_eq!(Sha256::digest(&first), Sha256::digest(&second));
+
+        let artifact = std::fs::read(format!(
+            "{}/../data/reverse1999/permanent-six-stars-3.6.5.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("committed permanent-pool snapshot");
+        assert_eq!(artifact, first);
     }
 }
