@@ -1,7 +1,10 @@
+mod account_api;
 mod routes;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
+use std::net::IpAddr;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -11,15 +14,17 @@ pub struct MuipOptions {
     pub port: u16,
     pub token: String,
     pub gm_addr: String,
+    pub db: SqlitePool,
 }
 
 impl MuipOptions {
-    pub fn from_config() -> Self {
+    pub fn from_config(db: SqlitePool) -> Self {
         Self {
             host: common::muip_host().to_string(),
             port: common::muip_port(),
             token: common::muip_token().to_string(),
             gm_addr: common::muip_gm_addr(),
+            db,
         }
     }
 }
@@ -33,7 +38,6 @@ pub enum GmRequest {
     Heroes { player_uid: i64 },
     Materials { query: MaterialQuery },
     DisconnectPlayer { player_uid: i64 },
-    Execute { player_uid: String, command: String },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -85,13 +89,17 @@ pub struct MaterialQuery {
 }
 
 pub async fn run(options: MuipOptions) -> anyhow::Result<()> {
+    let host: IpAddr = options.host.parse()?;
+    if !host.is_loopback() {
+        anyhow::bail!("MUIP host must be loopback-only");
+    }
     let addr = format!("{}:{}", options.host, options.port);
     let listener = TcpListener::bind(&addr)
         .await
         .with_context(|| format!("failed to bind MUIP server on {addr}"))?;
 
     info!("MUIP HTTP server listening on {}", listener.local_addr()?);
-    axum::serve(listener, routes::router(options.token, options.gm_addr)).await?;
+    axum::serve(listener, routes::router(options)).await?;
     Ok(())
 }
 

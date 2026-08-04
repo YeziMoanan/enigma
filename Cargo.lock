@@ -1447,9 +1447,14 @@ dependencies = [
  "anyhow",
  "axum",
  "common",
+ "config",
+ "database",
  "serde",
  "serde_json",
+ "sha2",
+ "sqlx",
  "tokio",
+ "tower",
  "tracing",
 ]
 

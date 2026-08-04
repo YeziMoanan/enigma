@@ -70,10 +70,6 @@ async fn handle_connection(stream: TcpStream, state: &'static AppState) -> std::
         GmRequest::Heroes { player_uid } => hero_upgrade_catalog(state, player_uid).await,
         GmRequest::Materials { query } => materials(state, query).await,
         GmRequest::DisconnectPlayer { player_uid } => disconnect_player(state, player_uid).await,
-        GmRequest::Execute {
-            player_uid,
-            command,
-        } => execute(state, player_uid, command).await,
     };
 
     write_response(&mut writer, response).await
