@@ -41,6 +41,14 @@ impl AppState {
         self.sessions.remove(&player_id);
     }
 
+    pub async fn disconnect_session(&self, player_id: i64) -> bool {
+        let Some((_, sender)) = self.sessions.remove(&player_id) else {
+            return false;
+        };
+        let _ = sender.send(CommandPacket::Disconnect).await;
+        true
+    }
+
     pub fn online_player_ids(&self) -> Vec<i64> {
         let mut players = self
             .sessions

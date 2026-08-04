@@ -71,6 +71,7 @@ async fn write_loop(
 ) -> anyhow::Result<()> {
     while let Some(packet) = rx.recv().await {
         match packet {
+            CommandPacket::Disconnect => break,
             CommandPacket::Push {
                 cmd_id,
                 body,

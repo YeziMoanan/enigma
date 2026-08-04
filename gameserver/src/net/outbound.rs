@@ -2,6 +2,7 @@ use sonettobuf::CmdId;
 
 #[derive(Clone)]
 pub enum CommandPacket {
+    Disconnect,
     Reply {
         cmd_id: CmdId,
         body: Vec<u8>,

@@ -69,6 +69,7 @@ async fn handle_connection(stream: TcpStream, state: &'static AppState) -> std::
         GmRequest::Dungeons => dungeon_catalog(),
         GmRequest::Heroes { player_uid } => hero_upgrade_catalog(state, player_uid).await,
         GmRequest::Materials { query } => materials(state, query).await,
+        GmRequest::DisconnectPlayer { player_uid } => disconnect_player(state, player_uid).await,
         GmRequest::Execute {
             player_uid,
             command,
@@ -140,6 +141,14 @@ fn list_players(state: &AppState) -> GmResponse {
     response.online = players.len();
     response.players = players;
     response
+}
+
+async fn disconnect_player(state: &AppState, player_uid: i64) -> GmResponse {
+    if state.disconnect_session(player_uid).await {
+        GmResponse::ok(format!("player {player_uid} disconnected"))
+    } else {
+        GmResponse::ok(format!("player {player_uid} is already offline"))
+    }
 }
 
 fn dungeon_catalog() -> GmResponse {
@@ -1497,12 +1506,37 @@ fn parse_positive(value: &str, label: &str) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        MaterialKind, build_hero_upgrade_catalog, dungeon_catalog, entries_for_kind,
-        is_premium_hero_skin,
+        MaterialKind, build_hero_upgrade_catalog, disconnect_player, dungeon_catalog,
+        entries_for_kind, is_premium_hero_skin,
     };
-    use crate::net::app::AppState;
+    use crate::net::{app::AppState, outbound::CommandPacket};
     use database::models::game::heros::UserHeroModel;
     use std::collections::HashSet;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn fixed_disconnect_request_removes_exact_session_sender() {
+        let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+        let _ = config::init(&data_dir);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        database::run_migrations(&pool).await.unwrap();
+        let state = AppState::new(pool, config::configs::get());
+        let (sender, mut receiver) = mpsc::channel(1);
+        state.register_session(31, sender);
+
+        let response = disconnect_player(&state, 31).await;
+
+        assert_eq!(response.retcode, 0);
+        assert!(state.get_session_sender(31).is_none());
+        assert!(matches!(
+            receiver.recv().await,
+            Some(CommandPacket::Disconnect)
+        ));
+    }
 
     #[test]
     fn dungeon_catalog_lists_story_and_resource_episodes() {

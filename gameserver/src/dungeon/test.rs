@@ -948,6 +948,7 @@ async fn act229_victory_uses_only_act229_settlement() {
     let commands = std::iter::from_fn(|| packets.try_recv().ok())
         .map(|packet| match packet {
             CommandPacket::Push { cmd_id, .. } | CommandPacket::Reply { cmd_id, .. } => cmd_id,
+            CommandPacket::Disconnect => panic!("unexpected disconnect packet"),
         })
         .collect::<Vec<_>>();
     assert_eq!(

@@ -32,6 +32,7 @@ pub enum GmRequest {
     Dungeons,
     Heroes { player_uid: i64 },
     Materials { query: MaterialQuery },
+    DisconnectPlayer { player_uid: i64 },
     Execute { player_uid: String, command: String },
 }
 
@@ -92,4 +93,19 @@ pub async fn run(options: MuipOptions) -> anyhow::Result<()> {
     info!("MUIP HTTP server listening on {}", listener.local_addr()?);
     axum::serve(listener, routes::router(options.token, options.gm_addr)).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GmRequest;
+
+    #[test]
+    fn disconnect_request_has_a_fixed_typed_shape() {
+        let request: GmRequest =
+            serde_json::from_str(r#"{"type":"disconnect_player","player_uid":31}"#).unwrap();
+        assert!(matches!(
+            request,
+            GmRequest::DisconnectPlayer { player_uid: 31 }
+        ));
+    }
 }

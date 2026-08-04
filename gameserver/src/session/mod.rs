@@ -4,7 +4,7 @@ use crate::{
 };
 use byteorder::{BE, ByteOrder};
 use common::time::ServerTime;
-use database::db::user::account;
+use database::db::user::{access, account};
 use logic::task::UserTask;
 use sqlx::SqlitePool;
 
@@ -71,6 +71,14 @@ pub async fn validate_login(
     req: LoginRequest,
 ) -> Result<LoginSession, AppError> {
     let user_id = extract_user_id(&req.account_id)?;
+    let user = account::get_user_by_id(pool, user_id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::Custom("User not found".into()))?;
+    access::require_login_access(pool, user_id, &user.email)
+        .await
+        .map_err(|_| AppError::Custom("Login rejected".into()))?;
+
     let token = account::get_login_token(pool, user_id)
         .await
         .map_err(AppError::from)?
