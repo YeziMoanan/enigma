@@ -7,7 +7,7 @@ use axum::{
     routing::{get, post},
 };
 
-use crate::{MuipOptions, account_api};
+use crate::{MuipOptions, account_api, mail_api};
 
 pub fn router(options: MuipOptions) -> Router {
     let state = account_api::ApiState::new(options.token, options.gm_addr, options.db);
@@ -42,6 +42,23 @@ pub fn router(options: MuipOptions) -> Router {
         )
         .route(
             "/api/reverse1999/audit/{request_id}",
+            get(account_api::request_status),
+        )
+        .route("/api/reverse1999/catalog", get(mail_api::catalog))
+        .route(
+            "/api/reverse1999/accounts/{account}/mail",
+            post(mail_api::send_mail),
+        )
+        .route(
+            "/api/reverse1999/mail-campaigns/preview",
+            post(mail_api::campaign_preview),
+        )
+        .route(
+            "/api/reverse1999/mail-campaigns",
+            post(mail_api::apply_campaign),
+        )
+        .route(
+            "/api/reverse1999/requests/{request_id}",
             get(account_api::request_status),
         )
         .route_layer(middleware::from_fn_with_state(

@@ -42,6 +42,10 @@ impl ApiState {
     pub(crate) fn token(&self) -> &str {
         &self.token
     }
+
+    pub(crate) fn db(&self) -> &SqlitePool {
+        &self.db
+    }
 }
 
 #[derive(Debug)]

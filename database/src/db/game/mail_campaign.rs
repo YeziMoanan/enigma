@@ -1,21 +1,21 @@
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, Transaction};
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::OnceLock};
 
 const INITIAL_MANIFEST: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../data/reverse1999/initial-mail-full-v1.json"
 ));
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct InitialMailManifest {
     pub campaign_id: String,
     pub source_data_sha: String,
     pub mails: Vec<ManifestMail>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ManifestMail {
     pub sequence: i32,
     pub category: String,
@@ -25,17 +25,24 @@ pub struct ManifestMail {
     pub entries: Vec<ManifestEntry>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ManifestEntry {
     pub material_type: i32,
     pub id: i32,
     pub quantity: i32,
 }
 
-pub fn initial_manifest() -> anyhow::Result<InitialMailManifest> {
-    let manifest: InitialMailManifest = serde_json::from_slice(INITIAL_MANIFEST)?;
-    validate_manifest(&manifest)?;
-    Ok(manifest)
+pub fn initial_manifest() -> anyhow::Result<&'static InitialMailManifest> {
+    static MANIFEST: OnceLock<Result<InitialMailManifest, String>> = OnceLock::new();
+    match MANIFEST.get_or_init(|| {
+        let manifest: InitialMailManifest =
+            serde_json::from_slice(INITIAL_MANIFEST).map_err(|error| error.to_string())?;
+        validate_manifest(&manifest).map_err(|error| error.to_string())?;
+        Ok(manifest)
+    }) {
+        Ok(manifest) => Ok(manifest),
+        Err(error) => anyhow::bail!(error.clone()),
+    }
 }
 
 pub fn initial_manifest_sha256() -> String {
@@ -53,7 +60,7 @@ pub async fn deliver_initial_campaign(
     let manifest = initial_manifest()?;
     let manifest_sha256 = initial_manifest_sha256();
     let mut delivered = 0;
-    for mail in manifest.mails {
+    for mail in &manifest.mails {
         let exists = sqlx::query_scalar::<_, i64>(
             "SELECT 1 FROM user_mail_campaign_deliveries
              WHERE campaign_id = ? AND user_id = ? AND sequence = ? LIMIT 1",

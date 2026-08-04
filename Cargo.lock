@@ -1449,6 +1449,7 @@ dependencies = [
  "common",
  "config",
  "database",
+ "logic",
  "serde",
  "serde_json",
  "sha2",

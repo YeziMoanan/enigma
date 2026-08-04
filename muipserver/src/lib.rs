@@ -1,4 +1,5 @@
 mod account_api;
+mod mail_api;
 mod routes;
 
 use anyhow::Context;
