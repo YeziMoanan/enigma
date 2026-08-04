@@ -21,6 +21,10 @@ pub fn host() -> &'static str {
     &config().server.host
 }
 
+pub fn dns() -> &'static str {
+    &config().server.dns
+}
+
 pub fn http_port() -> u16 {
     config().server.http_port
 }
