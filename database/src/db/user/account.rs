@@ -245,7 +245,7 @@ pub async fn create_user(
 }
 
 fn validate_password(password: &str) -> Result<(), access::AccountAccessError> {
-    if !(6..=64).contains(&password.len()) {
+    if !(6..=64).contains(&password.chars().count()) || password.len() > 72 {
         return Err(access::AccountAccessError::InvalidPassword);
     }
     Ok(())
@@ -766,9 +766,11 @@ mod tests {
         let (pool, database_path) = account_test_pool("invalid-credentials").await;
         allow_account(&pool, "valid@example.com").await;
 
+        let rejected_account = "leak-check account@example.com";
+
         let invalid_account = handle_user_login(
             &pool,
-            "invalid account",
+            rejected_account,
             "password-secret",
             TokenInfo {
                 token: "token-secret".to_string(),
@@ -784,7 +786,8 @@ mod tests {
             Some(AccountAccessError::InvalidFormat)
         ));
         let invalid_account_message = invalid_account.to_string();
-        assert!(!invalid_account_message.contains("invalid account"));
+        assert_eq!(invalid_account_message, "invalid account format");
+        assert!(!invalid_account_message.contains(rejected_account));
         assert!(!invalid_account_message.contains("password-secret"));
         assert!(!invalid_account_message.contains("token-secret"));
 
@@ -812,6 +815,22 @@ mod tests {
 
         pool.close().await;
         let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn password_length_counts_characters_and_respects_bcrypt_limit() {
+        let sixty_four_characters = format!("{}{}", "a".repeat(60), "密".repeat(4));
+        assert!(super::validate_password(&"密".repeat(6)).is_ok());
+        assert_eq!(sixty_four_characters.chars().count(), 64);
+        assert_eq!(sixty_four_characters.len(), 72);
+        assert!(super::validate_password(&sixty_four_characters).is_ok());
+
+        for invalid in ["密".repeat(5), "密".repeat(25), "a".repeat(65)] {
+            assert!(matches!(
+                super::validate_password(&invalid),
+                Err(AccountAccessError::InvalidPassword)
+            ));
+        }
     }
 
     #[tokio::test]
