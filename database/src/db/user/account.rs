@@ -1,31 +1,8 @@
-use crate::db::{starter_data, user::access};
+use crate::db::{game::mail_campaign, starter_data, user::access};
 use anyhow::Result;
 use bcrypt::{DEFAULT_COST, hash as bcrypt_hash, verify as bcrypt_verify};
 use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction, prelude::FromRow};
-
-#[derive(Debug, Clone, Copy)]
-pub struct InitialMailDefinition {
-    pub category: &'static str,
-    pub mail_id: i32,
-    pub title: &'static str,
-    pub content: &'static str,
-    pub attachment: &'static str,
-    pub expire_time: i64,
-}
-
-const INITIAL_MAILS: [InitialMailDefinition; 1] = [InitialMailDefinition {
-    category: "welcome",
-    mail_id: 900001,
-    title: "Welcome to Reverse: 1999",
-    content: "Your journey begins here.",
-    attachment: "",
-    expire_time: 0,
-}];
-
-pub fn initial_mail_definitions() -> &'static [InitialMailDefinition] {
-    &INITIAL_MAILS
-}
 
 pub fn normalize_email(email: &str) -> String {
     email.trim().to_ascii_lowercase()
@@ -224,7 +201,7 @@ pub async fn create_user(
         ));
     }
     starter_data::load_all_starter_data_tx(&mut tx, user_id).await?;
-    insert_initial_mails(&mut tx, user_id, now).await?;
+    mail_campaign::deliver_initial_campaign(&mut tx, user_id, now).await?;
     tx.commit().await?;
 
     Ok(UserAccount {
@@ -339,46 +316,6 @@ pub async fn handle_user_login(
     }
 }
 
-async fn insert_initial_mails(
-    tx: &mut Transaction<'_, Sqlite>,
-    user_id: i64,
-    now: i64,
-) -> sqlx::Result<()> {
-    for definition in initial_mail_definitions() {
-        let marker = sqlx::query(
-            "INSERT OR IGNORE INTO user_initial_mail_deliveries (user_id, category, delivered_at)
-             VALUES (?, ?, ?)",
-        )
-        .bind(user_id)
-        .bind(definition.category)
-        .bind(now)
-        .execute(&mut **tx)
-        .await?;
-
-        if marker.rows_affected() == 0 {
-            continue;
-        }
-
-        sqlx::query(
-            "INSERT INTO user_mails
-                (user_id, mail_id, params, attachment, state, create_time, sender, title, content, expire_time)
-             VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
-        )
-        .bind(user_id)
-        .bind(definition.mail_id)
-        .bind(definition.category)
-        .bind(definition.attachment)
-        .bind(now)
-        .bind("Reverse: 1999")
-        .bind(definition.title)
-        .bind(definition.content)
-        .bind(definition.expire_time)
-        .execute(&mut **tx)
-        .await?;
-    }
-    Ok(())
-}
-
 #[derive(FromRow)]
 pub struct UserToken {
     pub token: String,
@@ -472,7 +409,8 @@ pub async fn update_user_level(pool: &SqlitePool, user_id: i64, level: i32) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{TokenInfo, handle_user_login, initial_mail_definitions, normalize_email};
+    use super::{TokenInfo, handle_user_login, normalize_email};
+    use crate::db::game::mail_campaign;
     use crate::db::user::access::AccountAccessError;
     use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
     use std::{collections::HashMap, path::PathBuf, time::Duration};
@@ -556,68 +494,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn initial_mail_is_explicitly_categorized_without_resource_injection() {
-        let definitions = initial_mail_definitions();
-        assert_eq!(definitions.len(), 1);
-        assert_eq!(definitions[0].category, "welcome");
-        assert!(definitions[0].attachment.is_empty());
-        assert!(!definitions[0].title.is_empty());
-        assert!(!definitions[0].content.is_empty());
-    }
-
-    #[tokio::test]
-    async fn initial_mail_delivery_is_idempotent() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query(
-            "CREATE TABLE user_mails (
-                incr_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                mail_id INTEGER NOT NULL,
-                params TEXT NOT NULL DEFAULT '',
-                attachment TEXT NOT NULL DEFAULT '',
-                state INTEGER NOT NULL DEFAULT 0,
-                create_time INTEGER NOT NULL,
-                sender TEXT NOT NULL DEFAULT '',
-                title TEXT NOT NULL DEFAULT '',
-                content TEXT NOT NULL DEFAULT '',
-                expire_time INTEGER NOT NULL
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "CREATE TABLE user_initial_mail_deliveries (
-                user_id INTEGER NOT NULL,
-                category TEXT NOT NULL,
-                delivered_at INTEGER NOT NULL,
-                PRIMARY KEY (user_id, category)
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        for now in [10_i64, 20_i64] {
-            let mut tx = pool.begin().await.unwrap();
-            super::insert_initial_mails(&mut tx, 7, now).await.unwrap();
-            tx.commit().await.unwrap();
-        }
-
-        let mail_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_mails")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        let delivery_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM user_initial_mail_deliveries")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(mail_count, 1);
-        assert_eq!(delivery_count, 1);
-    }
-
     #[tokio::test]
     async fn repeated_and_concurrent_login_create_one_account_and_one_initial_mail() {
         let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -683,12 +559,18 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        let delivery_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM user_initial_mail_deliveries")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!((user_count, mail_count, delivery_count), (1, 1, 1));
+        let delivery_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_mail_campaign_deliveries WHERE user_id = ?",
+        )
+        .bind(first.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let expected = mail_campaign::initial_manifest().unwrap().mails.len() as i64;
+        assert_eq!(
+            (user_count, mail_count, delivery_count),
+            (1, expected, expected)
+        );
 
         pool.close().await;
         let _ = std::fs::remove_file(database_path);
