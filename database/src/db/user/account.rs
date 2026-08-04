@@ -146,7 +146,6 @@ pub async fn verify_user_password(pool: &SqlitePool, email: &str, password: &str
 /// Create a new user account
 pub async fn create_user(
     pool: &SqlitePool,
-    user_id: i64,
     email: &str,
     password: &str,
     token_info: &TokenInfo,
@@ -155,22 +154,19 @@ pub async fn create_user(
     let email = normalize_email(email);
     // Hash password
     let password_hash = hash(password, DEFAULT_COST)?;
-    // Generate initial username from email (user can change later)
-    let username = email.split('@').next().unwrap_or(&email).to_string();
     let mut tx = pool.begin().await?;
 
-    sqlx::query(
+    let insert = sqlx::query(
         "INSERT INTO users (
-            id, username, email, password_hash, account_type, registration_account_type,
+            username, email, password_hash, account_type, registration_account_type,
             token, refresh_token, token_expires_at,
             vip_level, level, exp,
             need_real_name, real_name_status, age, is_adult,
             need_activate, cipher_mark, first_join, account_tags,
             created_at, updated_at, last_login_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)"
     )
-    .bind(user_id)
-    .bind(&username)
+    .bind(&email)
     .bind(&email)
     .bind(&password_hash)
     .bind(10) // AccountType::Email
@@ -194,6 +190,13 @@ pub async fn create_user(
     .bind(now)
     .execute(&mut *tx)
     .await?;
+    let user_id = insert.last_insert_rowid();
+    let username = format!("player_{user_id}");
+    sqlx::query("UPDATE users SET username = ? WHERE id = ?")
+        .bind(&username)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
     starter_data::load_all_starter_data_tx(&mut tx, user_id).await?;
     insert_initial_mails(&mut tx, user_id, now).await?;
     tx.commit().await?;
@@ -264,23 +267,19 @@ pub async fn handle_user_login(
             update_user_login(pool, user.id, &token_info, now).await?;
             Ok(user)
         }
-        None => {
-            // Create new user with hashed password
-            let user_id = generate_user_id(&email);
-            match create_user(pool, user_id, &email, password, &token_info, now).await {
-                Ok(user) => Ok(user),
-                Err(create_error) => {
-                    let Some(user) = get_user_by_email(pool, &email).await? else {
-                        return Err(create_error);
-                    };
-                    if !verify_user_password(pool, &email, password).await? {
-                        return Err(anyhow::anyhow!("Invalid password"));
-                    }
-                    update_user_login(pool, user.id, &token_info, now).await?;
-                    Ok(user)
+        None => match create_user(pool, &email, password, &token_info, now).await {
+            Ok(user) => Ok(user),
+            Err(create_error) => {
+                let Some(user) = get_user_by_email(pool, &email).await? else {
+                    return Err(create_error);
+                };
+                if !verify_user_password(pool, &email, password).await? {
+                    return Err(anyhow::anyhow!("Invalid password"));
                 }
+                update_user_login(pool, user.id, &token_info, now).await?;
+                Ok(user)
             }
-        }
+        },
     }
 }
 
@@ -415,24 +414,69 @@ pub async fn update_user_level(pool: &SqlitePool, user_id: i64, level: i32) -> R
     Ok(())
 }
 
-/// Generate a deterministic user ID from email
-fn generate_user_id(email: &str) -> i64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    email.to_lowercase().hash(&mut hasher);
-    let hash = hasher.finish();
-
-    // Ensure it's a reasonable range (e.g., 1000000 - 9999999)
-    (1000000 + (hash % 9000000)) as i64
-}
-
 #[cfg(test)]
 mod tests {
     use super::{TokenInfo, handle_user_login, initial_mail_definitions, normalize_email};
     use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
-    use std::time::Duration;
+    use std::{collections::HashMap, path::PathBuf, time::Duration};
+
+    async fn account_test_pool(label: &str) -> (SqlitePool, PathBuf) {
+        let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("sonetto-data/excel2json");
+        let _ = config::init(data_dir.to_str().unwrap());
+        let database_path = std::env::temp_dir().join(format!(
+            "reverse1999-{label}-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&database_path)
+            .create_if_missing(true)
+            .busy_timeout(Duration::from_secs(10));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(options)
+            .await
+            .unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        (pool, database_path)
+    }
+
+    fn token() -> TokenInfo {
+        TokenInfo {
+            token: "token".to_string(),
+            refresh_token: "refresh".to_string(),
+            expires_at: 100,
+        }
+    }
+
+    fn legacy_user_id(email: &str) -> i64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        email.to_lowercase().hash(&mut hasher);
+        1_000_000 + (hasher.finish() % 9_000_000) as i64
+    }
+
+    fn legacy_collision() -> (String, String) {
+        let mut seen = HashMap::new();
+        for index in 0..100_000 {
+            let email = format!("collision-{index}@example.com");
+            let id = legacy_user_id(&email);
+            if let Some(first) = seen.insert(id, email.clone()) {
+                return (first, email);
+            }
+        }
+        panic!("expected to find a collision in the legacy 9,000,000-ID space");
+    }
 
     #[test]
     fn equivalent_email_format_has_one_identity() {
@@ -573,6 +617,52 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!((user_count, mail_count, delivery_count), (1, 1, 1));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn different_emails_with_legacy_hash_collision_get_distinct_ids() {
+        let (pool, database_path) = account_test_pool("identity-collision").await;
+        let (first_email, second_email) = legacy_collision();
+        assert_eq!(legacy_user_id(&first_email), legacy_user_id(&second_email));
+
+        let first = handle_user_login(&pool, &first_email, "password", token(), 10)
+            .await
+            .unwrap();
+        let second = handle_user_login(&pool, &second_email, "password", token(), 20)
+            .await
+            .unwrap();
+
+        assert_ne!(first.id, second.id);
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(user_count, 2);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn different_domains_with_same_local_part_create_distinct_accounts() {
+        let (pool, database_path) = account_test_pool("identity-username").await;
+
+        let first = handle_user_login(&pool, "shared@example.com", "password", token(), 10)
+            .await
+            .unwrap();
+        let second = handle_user_login(&pool, "shared@example.org", "password", token(), 20)
+            .await
+            .unwrap();
+
+        assert_ne!(first.id, second.id);
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(user_count, 2);
 
         pool.close().await;
         let _ = std::fs::remove_file(database_path);
