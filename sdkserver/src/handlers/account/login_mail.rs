@@ -12,7 +12,7 @@ pub async fn post(
     let now = ServerTime::now_ms();
 
     tracing::info!(
-        "Login attempt - Email: {}, Device: {}, OS: {}",
+        "Login attempt - Account: {}, Device: {}, OS: {}",
         req.account,
         req.device_info.device_name,
         req.device_info.os_version
@@ -31,15 +31,7 @@ pub async fn post(
     };
 
     // Handle login with password verification
-    let user = match handle_user_login(
-        &state.db,
-        &req.account, // Email
-        &req.pwd,     // Password hash from client
-        token_info,
-        now,
-    )
-    .await
-    {
+    let user = match handle_user_login(&state.db, &req.account, &req.pwd, token_info, now).await {
         Ok(user) => user,
         Err(e) => {
             tracing::warn!("Login failed for {}: {}", req.account, e);
@@ -48,7 +40,7 @@ pub async fn post(
     };
 
     tracing::info!(
-        "Login successful - User ID: {}, Email: {}, First join: {}",
+        "Login successful - User ID: {}, Account: {}, First join: {}",
         user.id,
         req.account,
         user.first_join
@@ -110,7 +102,7 @@ fn generate_token() -> String {
 fn create_error_response() -> AccountLoginRsp {
     AccountLoginRsp {
         code: 401,
-        msg: "Invalid email or password".to_string(),
+        msg: "Invalid account or password".to_string(),
         data: AccountLoginRspData {
             token: String::new(),
             expires_in: 0,

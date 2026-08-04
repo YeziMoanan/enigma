@@ -29,14 +29,14 @@ pub async fn post(query: Query<HashMap<String, String>>) -> Json<AccountSdkInitR
             is_ignore_file_missing: Some(false),
             is_open_c_m_p: Some(false),
             show_buttons: Some(ShowButtons { notice: true }),
-            login_account_types: None,
+            login_account_types: Some(vec![10]),
             user_center_items: None,
-            only_mail: None,
+            only_mail: Some(true),
             is_unsupport_change_volume: false,
         }
     } else {
         AccountSdkInitRspData {
-            login_account_types: Some(vec![1, 5, 10, 11, 12, 13, 14]), //needed else client doesnt show login???
+            login_account_types: Some(vec![10]),
             user_center_items: Some(vec![
                 UserCenterItem {
                     r#type: 1,
@@ -55,7 +55,7 @@ pub async fn post(query: Query<HashMap<String, String>>) -> Json<AccountSdkInitR
                     lab_title: "账号注销".to_string(),
                 },
             ]),
-            only_mail: Some(false),
+            only_mail: Some(true),
             is_unsupport_change_volume: false,
             game_channel: None,
             biz_switch: None,
@@ -74,4 +74,24 @@ pub async fn post(query: Query<HashMap<String, String>>) -> Json<AccountSdkInitR
     };
 
     Json(rsp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::post;
+    use axum::extract::Query;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn both_init_branches_expose_only_account_login() {
+        let without_query = post(Query(HashMap::new())).await.0;
+        assert_eq!(without_query.data.login_account_types, Some(vec![10]));
+        assert_eq!(without_query.data.only_mail, Some(true));
+
+        let mut query = HashMap::new();
+        query.insert("channel".to_string(), "200".to_string());
+        let with_query = post(Query(query)).await.0;
+        assert_eq!(with_query.data.login_account_types, Some(vec![10]));
+        assert_eq!(with_query.data.only_mail, Some(true));
+    }
 }

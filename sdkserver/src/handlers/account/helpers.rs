@@ -5,6 +5,7 @@ use crate::models::response::{
 };
 use anyhow::Result;
 use common::time::ServerTime;
+use database::db::user::access;
 use rand::Rng;
 use sqlx::Row;
 use sqlx::prelude::FromRow;
@@ -46,7 +47,11 @@ pub async fn get_user_with_token_validation(
     .await?
     .ok_or_else(|| anyhow::anyhow!("User not found"))?;
 
-    // Validate token
+    let account_key: String = row.try_get("email")?;
+    access::require_login_access(&state.db, user_id, &account_key)
+        .await
+        .map_err(anyhow::Error::new)?;
+
     let stored_token: String = row.try_get("token")?;
     if stored_token != token {
         return Err(anyhow::anyhow!("Invalid token"));
