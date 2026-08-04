@@ -1,3 +1,4 @@
+use super::permanent_pool::eligible_six_stars;
 use super::*;
 
 const PERMILLE: f64 = 1_000.0;
@@ -361,6 +362,17 @@ pub(crate) fn build_gacha_pool(
         }
     }
 
+    if summon_type == SummonType::Normal {
+        six_all.extend(
+            eligible_six_stars(tables)
+                .included
+                .into_iter()
+                .map(|hero| hero.id),
+        );
+        six_all.sort_unstable();
+        six_all.dedup();
+    }
+
     Ok(GachaPool {
         six_normal: six_all
             .into_iter()
@@ -377,4 +389,117 @@ pub(crate) fn build_gacha_pool(
         three,
         two,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::summon::permanent_pool::eligible_six_stars;
+
+    #[test]
+    fn normal_pool_contains_every_eligible_six_star() {
+        let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+        let _ = config::init(&data_dir);
+        let tables = config::configs::get();
+        let normal = tables
+            .summon_pool
+            .iter()
+            .find(|pool| SummonType::from(pool.r#type) == SummonType::Normal)
+            .expect("normal summon pool");
+        let pool = build_gacha_pool(normal.id, None).expect("build normal pool");
+        let expected = eligible_six_stars(tables)
+            .included
+            .into_iter()
+            .map(|hero| hero.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(pool.six_normal, expected);
+    }
+
+    #[test]
+    fn normal_pool_keeps_configured_probability_and_pity() {
+        let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+        let _ = config::init(&data_dir);
+        let normal = config::configs::get()
+            .summon_pool
+            .iter()
+            .find(|pool| SummonType::from(pool.r#type) == SummonType::Normal)
+            .expect("normal summon pool");
+        let rules = GachaRules::from_pool(normal).expect("normal summon rules");
+
+        assert_eq!(rules.rarity_weights, parse_weighted(&normal.init_weight));
+        assert_eq!(rules.soft_pity, 60);
+        assert_eq!(rules.hard_pity, 70);
+        assert_eq!(rules.six_rate(0), 0.015);
+        assert_eq!(rules.six_rate(60), 0.015);
+        assert_eq!(rules.six_rate(61), 0.04);
+        assert_eq!(rules.six_rate(70), 1.0);
+    }
+
+    #[test]
+    fn non_normal_pools_keep_their_configured_candidates() {
+        let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+        let _ = config::init(&data_dir);
+        let tables = config::configs::get();
+
+        for pool_cfg in tables.summon_pool.iter() {
+            let summon_type = SummonType::from(pool_cfg.r#type);
+            if matches!(
+                summon_type,
+                SummonType::Normal | SummonType::CustomPick | SummonType::StrongCustomOnePick
+            ) {
+                continue;
+            }
+            let Ok(pool) = build_gacha_pool(pool_cfg.id, None) else {
+                continue;
+            };
+            let (six_up, five_up, six_up_weighted) = if summon_type == SummonType::DoubleSsrUp {
+                let (six, five) = parse_up_heroes(&pool_cfg.up_weight);
+                (six, five, parse_weighted(&pool_cfg.double_ssr_up_rates))
+            } else {
+                let (six, five) = parse_up_heroes(&pool_cfg.up_weight);
+                (six, five, Vec::new())
+            };
+            let mut by_rarity = std::collections::BTreeMap::<i32, Vec<i32>>::new();
+            for row in tables.summon_entries(pool_cfg.id) {
+                by_rarity
+                    .entry(row.rare)
+                    .or_default()
+                    .extend(parse_ids(&row.summon_id));
+            }
+
+            assert_eq!(pool.six_up, six_up, "pool {} six_up", pool_cfg.id);
+            assert_eq!(
+                pool.six_up_weighted, six_up_weighted,
+                "pool {} six_up_weighted",
+                pool_cfg.id
+            );
+            assert_eq!(pool.five_up, five_up, "pool {} five_up", pool_cfg.id);
+            assert_eq!(
+                pool.six_normal,
+                by_rarity
+                    .remove(&5)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|id| !pool.six_up.contains(id))
+                    .collect::<Vec<_>>(),
+                "pool {} six_normal",
+                pool_cfg.id
+            );
+            assert_eq!(
+                pool.five_normal,
+                by_rarity
+                    .remove(&4)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|id| !pool.five_up.contains(id))
+                    .collect::<Vec<_>>(),
+                "pool {} five_normal",
+                pool_cfg.id
+            );
+            assert_eq!(pool.four, by_rarity.remove(&3).unwrap_or_default());
+            assert_eq!(pool.three, by_rarity.remove(&2).unwrap_or_default());
+            assert_eq!(pool.two, by_rarity.remove(&1).unwrap_or_default());
+        }
+    }
 }
