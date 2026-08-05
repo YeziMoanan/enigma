@@ -124,7 +124,7 @@ async fn ordinary_summon_still_uses_the_pool_without_advancing_a_guide() {
 }
 
 #[tokio::test]
-async fn missing_summon_tickets_are_paid_from_the_configured_currency() {
+async fn ten_pull_uses_one_regular_ticket_when_no_special_ticket_exists() {
     let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
     let _ = config::init(&data_dir);
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -148,11 +148,11 @@ async fn missing_summon_tickets_are_paid_from_the_configured_currency() {
     .await
     .unwrap();
 
-    let selected = select_summon_cost(&pool, 28, "1#140002#1|1#140001#10".into())
+    let selected = select_summon_cost(&pool, 28, "1#140002#1|1#140001#10".into(), true)
         .await
         .unwrap();
-    assert_eq!(selected.items, [(140001, 4)]);
-    assert_eq!(selected.currencies, [(2, 1080)]);
+    assert_eq!(selected.items, [(140001, 1)]);
+    assert!(selected.currencies.is_empty());
 }
 
 #[tokio::test]
