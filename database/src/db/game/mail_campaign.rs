@@ -1,3 +1,4 @@
+use crate::models::game::mail::localized_text;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, Transaction};
@@ -79,15 +80,15 @@ pub async fn deliver_initial_campaign(
             "INSERT INTO user_mails
                 (user_id, mail_id, params, attachment, state, create_time, sender, title, content,
                  expire_time)
-             VALUES (?, ?, ?, ?, 0, ?, '重返未来1999', ?, ?, 0)",
+             VALUES (?, 0, ?, ?, 0, ?, ?, ?, ?, 0)",
         )
         .bind(user_id)
-        .bind(910_000 + mail.sequence)
         .bind(format!("{}:{}", manifest.campaign_id, mail.category))
         .bind(&mail.attachment)
         .bind(now)
-        .bind(&mail.title)
-        .bind(&mail.body)
+        .bind(localized_text("重返未来1999"))
+        .bind(localized_text(&mail.title))
+        .bind(localized_text(&mail.body))
         .execute(&mut **tx)
         .await?;
         let mail_incr_id = result.last_insert_rowid();
@@ -153,7 +154,17 @@ fn validate_manifest(manifest: &InitialMailManifest) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    const CLIENT_LANGUAGES: [&str; 8] = ["zh", "tw", "en", "kr", "jp", "de", "fr", "thai"];
+
+    fn assert_localized_text(encoded: &str, expected: &str) {
+        let value: Value = serde_json::from_str(encoded).unwrap();
+        for language in CLIENT_LANGUAGES {
+            assert_eq!(value[language], expected);
+        }
+    }
 
     #[test]
     fn embedded_manifest_is_valid_and_globally_sequenced() {
@@ -208,5 +219,66 @@ mod tests {
         .unwrap();
         assert_eq!(mail_count as usize, expected);
         assert_eq!(ledger_count as usize, expected);
+
+        let first = initial_manifest().unwrap().mails.first().unwrap();
+        let (mail_id, sender, title, content, state): (i32, String, String, String, i32) =
+            sqlx::query_as(
+                "SELECT mail_id, sender, title, content, state
+                 FROM user_mails WHERE user_id = 7 ORDER BY incr_id LIMIT 1",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(mail_id, 0);
+        assert_eq!(state, 0);
+        assert_localized_text(&sender, "重返未来1999");
+        assert_localized_text(&title, &first.title);
+        assert_localized_text(&content, &first.body);
+    }
+
+    #[tokio::test]
+    async fn legacy_campaign_mail_repair_preserves_claimed_state() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, created_at, updated_at)
+             VALUES (8, 'legacy-mail', 0, 0);
+             INSERT INTO user_mails
+                (incr_id, user_id, mail_id, params, attachment, state, create_time,
+                 sender, title, content, expire_time)
+             VALUES (81, 8, 910001, 'initial-full-v1:货币', '2#11#25', 1, 10,
+                     '重返未来1999', '货币-1', '公益服', 0);
+             INSERT INTO user_mail_campaign_deliveries
+                (campaign_id, user_id, sequence, mail_incr_id, manifest_sha256, delivered_at)
+             VALUES ('initial-full-v1', 8, 1, 81, 'legacy', 10);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/091_dynamic_custom_mails.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (mail_id, sender, title, content, state): (i32, String, String, String, i32) =
+            sqlx::query_as(
+                "SELECT mail_id, sender, title, content, state
+                 FROM user_mails WHERE incr_id = 81",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(mail_id, 0);
+        assert_eq!(state, 1);
+        assert_localized_text(&sender, "重返未来1999");
+        assert_localized_text(&title, "货币-1");
+        assert_localized_text(&content, "公益服");
     }
 }

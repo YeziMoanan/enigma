@@ -83,6 +83,34 @@ async fn repeated_mail_claim_does_not_repeat_rewards() {
 }
 
 #[tokio::test]
+async fn claimed_mail_remains_in_mailbox() {
+    init_test_data();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at) VALUES (4, 'retained', 0, 0);
+         INSERT INTO user_mails
+            (incr_id, user_id, mail_id, attachment, state, create_time, expire_time)
+         VALUES (6, 4, 0, '2#11#25', 0, 0, 0);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let manager = super::MailManager::new(4);
+    manager.claim_batch(&pool).await.unwrap();
+    let mailbox = manager.get_all(&pool).await.unwrap();
+
+    assert_eq!(mailbox.mails.len(), 1);
+    assert_eq!(mailbox.mails[0].incr_id, Some(6));
+    assert_eq!(mailbox.mails[0].state, Some(1));
+}
+
+#[tokio::test]
 async fn invalid_attachment_rolls_back_all_mail_state_and_rewards() {
     init_test_data();
     let pool = SqlitePoolOptions::new()

@@ -5,6 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use database::db::{game::mail_campaign, user::access};
+use database::models::game::mail::localized_text;
 use logic::mail::catalog::{CatalogEntry, build_initial_catalog};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -159,13 +160,14 @@ pub(crate) async fn send_mail(
     let insert = sqlx::query(
         "INSERT INTO user_mails
             (user_id, mail_id, params, attachment, state, create_time, sender, title, content, expire_time)
-         VALUES (?, 920001, 'platform-admin', ?, 0, ?, '重返未来1999', ?, ?, 0)",
+         VALUES (?, 0, 'platform-admin', ?, 0, ?, ?, ?, ?, 0)",
     )
     .bind(user_id)
     .bind(attachment)
     .bind(now_ms())
-    .bind(input.title.trim())
-    .bind(input.body.trim())
+    .bind(localized_text("重返未来1999"))
+    .bind(localized_text(input.title.trim()))
+    .bind(localized_text(input.body.trim()))
     .execute(&mut *tx)
     .await
     .map_err(MailApiError::unavailable)?;
@@ -533,6 +535,35 @@ mod tests {
             .unwrap();
         assert_eq!(first, replay);
         assert_eq!(count, 1);
+
+        let (mail_id, sender, title, content, state): (i32, String, String, String, i32) =
+            sqlx::query_as(
+                "SELECT mail_id, sender, title, content, state
+                 FROM user_mails WHERE user_id = 1",
+            )
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(mail_id, 0);
+        assert_eq!(state, 0);
+        for encoded in [&sender, &title, &content] {
+            let value: serde_json::Value = serde_json::from_str(encoded).unwrap();
+            for language in ["zh", "tw", "en", "kr", "jp", "de", "fr", "thai"] {
+                assert!(value.get(language).and_then(|item| item.as_str()).is_some());
+            }
+        }
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&sender).unwrap()["zh"],
+            "重返未来1999"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&title).unwrap()["zh"],
+            "test"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&content).unwrap()["zh"],
+            "test"
+        );
     }
 
     #[tokio::test]
