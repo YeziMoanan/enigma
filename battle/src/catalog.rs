@@ -83,6 +83,28 @@ impl BattleCatalog {
             .collect()
     }
 
+    pub(crate) fn buff_has_effect_count(self, buff_id: i32) -> bool {
+        self.game_data
+            .skill_buff
+            .get(buff_id)
+            .is_some_and(|buff| buff.effect_count > 0)
+    }
+
+    pub(crate) fn buff_expires_after_owner_attack(self, buff_id: i32) -> bool {
+        let Some(buff) = self.game_data.skill_buff.get(buff_id) else {
+            return false;
+        };
+        let type_id = if buff.type_id == 0 {
+            buff.id
+        } else {
+            buff.type_id
+        };
+        self.game_data
+            .skill_bufftype
+            .get(type_id)
+            .is_some_and(|buff_type| buff_type.take_act == "1")
+    }
+
     pub(crate) fn try_global() -> Option<Self> {
         config::try_get().map(Self::new)
     }
@@ -321,6 +343,20 @@ mod tests {
 
         assert_eq!(blood_domain.allied_buffs, vec![308801312]);
         assert_eq!(blood_domain.self_skills, vec![308801821]);
+    }
+
+    #[test]
+    fn normalizes_buff_consumption_and_action_expiry() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert!(catalog.buff_has_effect_count(6240530));
+        assert!(!catalog.buff_has_effect_count(610091));
+        assert!(catalog.buff_has_effect_count(90201));
+        assert!(!catalog.buff_expires_after_owner_attack(90201));
+        assert!(catalog.buff_expires_after_owner_attack(2220010));
+        assert!(!catalog.buff_has_effect_count(-1));
+        assert!(!catalog.buff_expires_after_owner_attack(-1));
     }
 
     #[test]

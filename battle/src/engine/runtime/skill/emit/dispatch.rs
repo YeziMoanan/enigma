@@ -752,11 +752,13 @@ pub(in crate::engine::runtime) fn emit_ops(
             });
         }
         for feature in damage.avoided {
-            let ops = crate::engine::skill::buff_act::dodge_spec_skill::trigger_rule_ops(&feature)
-                .ok_or_else(|| SkillOpError::UnregisteredBuffAct {
-                    opcode: feature.act_id().unwrap_or_default(),
-                    type_name: feature.act_type.clone(),
-                })?;
+            let ops = crate::engine::skill::buff_act::dodge_spec_skill::trigger_rule_ops(
+                managers, &feature,
+            )
+            .ok_or_else(|| SkillOpError::UnregisteredBuffAct {
+                opcode: feature.act_id().unwrap_or_default(),
+                type_name: feature.act_type.clone(),
+            })?;
             outputs.extend(ops.into_iter().map(|op| SkillEmissionOp {
                 op,
                 owner: behavior::registry::OutputOwner::Skill,
