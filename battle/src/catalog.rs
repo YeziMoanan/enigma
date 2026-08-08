@@ -224,6 +224,18 @@ impl BattleCatalog {
         crate::engine::skill::buff_act::registry::find(opcode, &act.r#type)
     }
 
+    pub(crate) fn buff_act_origin(
+        self,
+        opcode: i32,
+        expected_kind: crate::engine::skill::buff_act::registry::BuffActKind,
+    ) -> Option<CommandOrigin> {
+        let definition = self.buff_act_definition(opcode)?;
+        (definition.kind == expected_kind).then_some(CommandOrigin {
+            domain: RuleDomain::BuffAct,
+            key: definition.key,
+        })
+    }
+
     pub(crate) fn skill_effect_id(self, skill_id: i32) -> i32 {
         self.game_data
             .skill
@@ -936,6 +948,39 @@ mod tests {
         );
         assert!(catalog.buff_feature_tokens(-1).is_empty());
         assert!(catalog.buff_act_definition(-1).is_none());
+    }
+
+    #[test]
+    fn resolves_exact_buff_act_command_origins() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.buff_act_origin(
+                1062,
+                crate::engine::skill::buff_act::registry::BuffActKind::HeatScaleDecrCounter,
+            ),
+            Some(CommandOrigin {
+                domain: RuleDomain::BuffAct,
+                key: crate::engine::skill::rule::DefinitionKey::new(1062, "HeatScaleDecrCounter",),
+            })
+        );
+        assert!(
+            catalog
+                .buff_act_origin(
+                    1062,
+                    crate::engine::skill::buff_act::registry::BuffActKind::AddAttrBySpecialCount,
+                )
+                .is_none()
+        );
+        assert!(
+            catalog
+                .buff_act_origin(
+                    -1,
+                    crate::engine::skill::buff_act::registry::BuffActKind::HeatScaleDecrCounter,
+                )
+                .is_none()
+        );
     }
 
     #[test]

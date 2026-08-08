@@ -514,12 +514,7 @@ pub fn configured_command_origin(
     act_id: i32,
     expected_kind: registry::BuffActKind,
 ) -> Option<CommandOrigin> {
-    let act_type = &config::try_get()?.buff_act.get(act_id)?.r#type;
-    let definition = registry::find(act_id, act_type)?;
-    (definition.kind == expected_kind).then_some(CommandOrigin {
-        domain: RuleDomain::BuffAct,
-        key: definition.key,
-    })
+    crate::catalog::BattleCatalog::try_global()?.buff_act_origin(act_id, expected_kind)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -179,10 +179,10 @@ pub fn round_start_attribute_rule_ops_for_team(
             .with_raw_delta(-depleted_raw),
         )));
         for counter in heat_scale::decr_counter_infos(depleted_raw, &features, team) {
-            let Some(counter_origin) = buff_act::configured_command_origin(
-                counter.act_id,
-                BuffActKind::HeatScaleDecrCounter,
-            ) else {
+            let Some(counter_origin) = managers
+                .catalog()
+                .buff_act_origin(counter.act_id, BuffActKind::HeatScaleDecrCounter)
+            else {
                 continue;
             };
             let mut act_info = managers
