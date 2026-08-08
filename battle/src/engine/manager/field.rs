@@ -146,15 +146,19 @@ impl FieldManager {
         self.round_transfers.clear();
     }
 
-    pub fn attribute_delta(&self, uid: i64, attr_id: AttrId, pool: &TargetPool) -> i32 {
+    pub fn attribute_delta(
+        &self,
+        game_data: &config::GameDB,
+        uid: i64,
+        attr_id: AttrId,
+        pool: &TargetPool,
+    ) -> i32 {
         let Some(entity_team) = pool.team_type(uid) else {
             return 0;
         };
         self.states()
             .filter_map(|state| {
-                let row = config::try_get()?
-                    .magic_circle
-                    .get(state.definition.field_id)?;
+                let row = game_data.magic_circle.get(state.definition.field_id)?;
                 Some(if state.team == entity_team {
                     row.self_attrs.as_str()
                 } else {
@@ -496,7 +500,23 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(manager.attribute_delta(10, AttrId::DmgBonus, &pool), 150);
-        assert_eq!(manager.attribute_delta(-1, AttrId::DmgBonus, &pool), 0);
+        assert_eq!(
+            manager.attribute_delta(
+                crate::test_support::game_data(),
+                10,
+                AttrId::DmgBonus,
+                &pool
+            ),
+            150
+        );
+        assert_eq!(
+            manager.attribute_delta(
+                crate::test_support::game_data(),
+                -1,
+                AttrId::DmgBonus,
+                &pool
+            ),
+            0
+        );
     }
 }

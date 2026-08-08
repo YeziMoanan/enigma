@@ -47,7 +47,7 @@ pub struct DamageRuntime<'a> {
     pub buffs: &'a BuffManager,
     pub target_buffs: &'a BuffManager,
     pub hp: &'a HpManager,
-    pub fields: Option<&'a FieldManager>,
+    pub fields: Option<(&'a FieldManager, &'a config::GameDB)>,
     pub emitter: Option<&'a crate::engine::manager::emitter::EmitterManager>,
     pub team_inspiration: i32,
 }
@@ -525,7 +525,9 @@ pub(super) fn direct_damage(
             (
                 "circle",
                 fields
-                    .map(|fields| fields.attribute_delta(entity.uid, attr_id, runtime.pool))
+                    .map(|(fields, game_data)| {
+                        fields.attribute_delta(game_data, entity.uid, attr_id, runtime.pool)
+                    })
                     .unwrap_or_default(),
             ),
             (

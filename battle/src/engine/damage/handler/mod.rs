@@ -545,7 +545,7 @@ impl BehaviorHandler for Handler {
                         buffs: &context.managers.buff,
                         target_buffs: &context.managers.buff,
                         hp: &context.managers.hp,
-                        fields: Some(&context.managers.field),
+                        fields: Some((&context.managers.field, context.managers.game_data())),
                         emitter: None,
                         team_inspiration: 0,
                     },
