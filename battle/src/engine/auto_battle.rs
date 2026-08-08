@@ -382,8 +382,10 @@ fn target_options(
         active_skill_id: skill_id,
         active_skill_source_uid: source_uid,
         active_skill_is_attack: attack,
-        active_skill_rank: config::try_get()
-            .and_then(|db| db.skill.get(skill_id))
+        active_skill_rank: managers
+            .game_data()
+            .skill
+            .get(skill_id)
             .map(|skill| skill.skill_rank)
             .unwrap_or_default(),
         active_skill_type: catalog.skill_type(skill_id),
