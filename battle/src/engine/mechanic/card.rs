@@ -69,8 +69,7 @@ impl CardMechanic {
     }
 
     pub fn required_ultimate_cost(&self, managers: &BattleManagers, entity: &TargetEntity) -> i32 {
-        let configured =
-            crate::engine::skill::effect::catalog::configured_big_skill_point(entity.ex_skill);
+        let configured = managers.catalog().skill_big_skill_point(entity.ex_skill);
         if ExPointKind::from_wire(managers.ex_point.kind(entity.uid)) != ExPointKind::Common {
             return configured.max(0);
         }
@@ -168,9 +167,9 @@ impl CardMechanic {
                 })
     }
 
-    pub fn is_device_card(&self, card: &CardInfo) -> bool {
+    pub fn is_device_card(&self, managers: &BattleManagers, card: &CardInfo) -> bool {
         card.skill_id.is_some_and(|skill_id| {
-            crate::engine::skill::effect::catalog::configured_effect_tag(skill_id)
+            managers.catalog().skill_effect_tag(skill_id)
                 == crate::engine::skill::effect::catalog::SkillEffectTag::Device as i32
         })
     }

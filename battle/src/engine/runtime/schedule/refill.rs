@@ -240,7 +240,7 @@ fn run_card_refill(
             .is_some_and(|entity| {
                 crate::engine::mechanic::card::CardMechanic.is_ultimate(&card, entity)
             });
-        let is_device = crate::engine::mechanic::card::CardMechanic.is_device_card(&card);
+        let is_device = crate::engine::mechanic::card::CardMechanic.is_device_card(managers, &card);
         if is_ultimate
             && !ready_ultimates
                 .iter()

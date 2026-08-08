@@ -105,6 +105,38 @@ impl BattleCatalog {
             .is_some_and(|buff_type| buff_type.take_act == "1")
     }
 
+    pub(crate) fn skill_effect_id(self, skill_id: i32) -> i32 {
+        self.game_data
+            .skill
+            .get(skill_id)
+            .map(|skill| skill.skill_effect)
+            .filter(|effect_id| *effect_id != 0)
+            .unwrap_or(skill_id)
+    }
+
+    pub(crate) fn skill_big_skill_point(self, skill_id: i32) -> i32 {
+        self.skill_effect(skill_id)
+            .map(|effect| effect.big_skill_point)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn skill_is_big(self, skill_id: i32) -> bool {
+        self.skill_effect(skill_id)
+            .is_some_and(|effect| effect.is_big_skill != 0)
+    }
+
+    pub(crate) fn skill_effect_tag(self, skill_id: i32) -> i32 {
+        self.skill_effect(skill_id)
+            .map(|effect| effect.effect_tag)
+            .unwrap_or_default()
+    }
+
+    fn skill_effect(self, skill_id: i32) -> Option<&'static config::skill_effect::SkillEffect> {
+        self.game_data
+            .skill_effect
+            .get(self.skill_effect_id(skill_id))
+    }
+
     pub(crate) fn try_global() -> Option<Self> {
         config::try_get().map(Self::new)
     }
@@ -357,6 +389,26 @@ mod tests {
         assert!(catalog.buff_expires_after_owner_attack(2220010));
         assert!(!catalog.buff_has_effect_count(-1));
         assert!(!catalog.buff_expires_after_owner_attack(-1));
+    }
+
+    #[test]
+    fn normalizes_card_skill_metadata() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.skill_effect_id(30020131), 710331);
+        assert_eq!(catalog.skill_big_skill_point(30020131), 5);
+        assert!(catalog.skill_is_big(30020131));
+        assert_eq!(catalog.skill_effect_tag(30020131), 3);
+        assert_eq!(catalog.skill_big_skill_point(30610131), 5);
+        assert_eq!(catalog.skill_big_skill_point(31390111), 0);
+        assert!(catalog.skill_is_big(30610131));
+        assert!(!catalog.skill_is_big(31390111));
+        assert_eq!(catalog.skill_effect_tag(31446011), 14);
+        assert_eq!(catalog.skill_effect_tag(31390111), 3);
+        assert_eq!(catalog.skill_big_skill_point(-1), 0);
+        assert!(!catalog.skill_is_big(-1));
+        assert_eq!(catalog.skill_effect_tag(-1), 0);
     }
 
     #[test]
