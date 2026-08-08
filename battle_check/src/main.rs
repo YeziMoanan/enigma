@@ -45,7 +45,7 @@ fn main() -> Result<()> {
         scan::collect_episode_roots(episode_id, db, &mut skills, &mut report)?;
         println!("episode={episode_id}");
         if options.simulate_opening {
-            opening::print(episode_id)?;
+            opening::print(db, episode_id)?;
         }
     }
 

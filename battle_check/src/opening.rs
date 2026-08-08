@@ -4,17 +4,16 @@ use anyhow::{Context, Result};
 use battle::{catalog::BattleCatalog, engine::runtime::BattleRuntime};
 use sonettobuf::{CardInfo, FightGroup};
 
-pub(crate) fn print(episode_id: i32) -> Result<()> {
+pub(crate) fn print(db: &'static config::GameDB, episode_id: i32) -> Result<()> {
     std::thread::Builder::new()
         .name("battle-check-opening".to_owned())
         .stack_size(32 * 1024 * 1024)
-        .spawn(move || run(episode_id))?
+        .spawn(move || run(db, episode_id))?
         .join()
         .map_err(|_| io::Error::other("opening simulation thread panicked"))?
 }
 
-fn run(episode_id: i32) -> Result<()> {
-    let db = config::configs::get();
+fn run(db: &'static config::GameDB, episode_id: i32) -> Result<()> {
     let episode = db
         .episode
         .get(episode_id)
