@@ -198,6 +198,16 @@ impl BattleCatalog {
             .collect()
     }
 
+    pub(crate) fn buff_pool(self, buff_id: i32) -> Option<Vec<i32>> {
+        self.game_data.skill_buff.get(buff_id).map(|row| {
+            row.features
+                .split('#')
+                .filter_map(|entry| entry.split(',').next()?.trim().parse().ok())
+                .filter(|buff_id| *buff_id > 0)
+                .collect()
+        })
+    }
+
     pub(crate) fn buff_type_id(self, buff_id: i32) -> i32 {
         self.game_data
             .skill_buff
@@ -926,6 +936,18 @@ mod tests {
         );
         assert!(catalog.buff_feature_tokens(-1).is_empty());
         assert!(catalog.buff_act_definition(-1).is_none());
+    }
+
+    #[test]
+    fn normalizes_random_buff_pools_in_order() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.buff_pool(30830151),
+            Some(vec![308301511, 308301512, 308301513, 308301514])
+        );
+        assert!(catalog.buff_pool(-1).is_none());
     }
 
     #[test]

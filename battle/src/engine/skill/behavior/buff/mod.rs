@@ -335,13 +335,6 @@ fn add_buff_from_skill_additions_ops(
     .map(|command| vec![RuleOp::Command(BattleCommand::Buff(command))])
 }
 
-fn pool_buff_ids(raw: &str) -> Vec<i32> {
-    raw.split('#')
-        .filter_map(|entry| entry.split(',').next()?.trim().parse().ok())
-        .filter(|buff_id| *buff_id > 0)
-        .collect()
-}
-
 fn reduce_channel_count_command(
     managers: &BattleManagers,
     target_uid: i64,
