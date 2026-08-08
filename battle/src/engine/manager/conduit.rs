@@ -23,6 +23,7 @@ pub struct ConduitDevice {
     pub uid: i64,
     pub selected_group: i32,
     pub skill_groups: Vec<Vec<ConduitSkill>>,
+    skill_aliases: BTreeMap<i32, i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -722,6 +723,11 @@ impl ConduitManager {
                     .iter_mut()
                     .find(|device| device.uid == source_uid)
                     .ok_or(ConduitError::MissingDevice(source_uid))?;
+                let skill_id = device
+                    .skill_aliases
+                    .get(&skill_id)
+                    .copied()
+                    .unwrap_or(skill_id);
                 let skill = device
                     .skill_groups
                     .iter_mut()
@@ -825,6 +831,7 @@ impl ConduitManager {
                 }
             }
         }
+        let skill_aliases = conduit_skill_aliases(character, &skill_groups);
         self.areas
             .entry(team)
             .or_insert_with(|| ConduitArea {
@@ -837,8 +844,39 @@ impl ConduitManager {
                 uid,
                 selected_group: 1,
                 skill_groups,
+                skill_aliases,
             });
     }
+}
+
+fn conduit_skill_aliases(
+    character: &config::character::Character,
+    skill_groups: &[Vec<ConduitSkill>],
+) -> BTreeMap<i32, i32> {
+    let base_groups = [
+        crate::engine::entity::skill::parse_skill_group(&character.skill, 1),
+        crate::engine::entity::skill::parse_skill_group(&character.skill, 2),
+        vec![character.ex_skill],
+    ];
+    let mut aliases = BTreeMap::new();
+    for (base_skills, configured_skills) in base_groups.iter().zip(skill_groups) {
+        let Some(last_configured) = configured_skills.last() else {
+            continue;
+        };
+        for (index, base_skill_id) in base_skills.iter().copied().enumerate() {
+            if base_skill_id <= 0 {
+                continue;
+            }
+            let configured_skill_id = configured_skills
+                .get(index)
+                .unwrap_or(last_configured)
+                .skill_id;
+            if base_skill_id != configured_skill_id {
+                aliases.insert(base_skill_id, configured_skill_id);
+            }
+        }
+    }
+    aliases
 }
 
 fn configured_device_id(
@@ -1052,6 +1090,55 @@ mod tests {
                 group: 2,
             }
         );
+    }
+
+    #[test]
+    fn base_card_skill_stops_the_matching_upgraded_device_skill() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            attacker: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(10),
+                    model_id: Some(3149),
+                    ex_skill_level: Some(5),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut manager = ConduitManager::seed(&fight);
+
+        assert!(!manager.owns_skill(10, 31490111));
+        assert!(manager.can_begin_skill(10, 31494111, 0));
+        assert!(matches!(
+            manager
+                .execute(ConduitCommand::StopSkill {
+                    origin: ORIGIN,
+                    source_uid: 10,
+                    team: 1,
+                    skill_id: 31490111,
+                })
+                .unwrap(),
+            ConduitChange::SkillStopped {
+                source_uid: 10,
+                team: 1,
+                skill_id: 31494111,
+                ..
+            }
+        ));
+        assert!(!manager.can_begin_skill(10, 31494111, 0));
+
+        assert!(manager.can_begin_skill(10, 31494131, 0));
+        manager
+            .execute(ConduitCommand::StopSkill {
+                origin: ORIGIN,
+                source_uid: 10,
+                team: 1,
+                skill_id: 31490131,
+            })
+            .unwrap();
+        assert!(!manager.can_begin_skill(10, 31494131, 0));
     }
 
     #[test]
