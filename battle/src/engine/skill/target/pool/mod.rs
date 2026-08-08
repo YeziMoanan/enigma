@@ -488,7 +488,11 @@ impl TargetEntity {
         }
 
         let attr = entity.attr.as_ref();
-        let ex = base_ex_attributes(entity);
+        let ex = catalog.entity_ex_attributes(
+            entity.model_id.unwrap_or_default(),
+            entity.level,
+            entity.entity_type,
+        );
         Some(Self {
             uid: entity.uid?,
             level: entity.level.unwrap_or_default(),
@@ -583,85 +587,6 @@ impl TargetEntity {
             .iter()
             .any(|career| other.careers.contains(career))
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ExAttributes {
-    crit_rate: i32,
-    crit_resist: i32,
-    crit_dmg: i32,
-    crit_def: i32,
-    add_dmg: i32,
-    drop_dmg: i32,
-}
-
-impl Default for ExAttributes {
-    fn default() -> Self {
-        Self {
-            crit_rate: 0,
-            crit_resist: 0,
-            crit_dmg: 1000,
-            crit_def: 0,
-            add_dmg: 0,
-            drop_dmg: 0,
-        }
-    }
-}
-
-fn base_ex_attributes(entity: &FightEntityInfo) -> ExAttributes {
-    let Some(db) = config::try_get() else {
-        return ExAttributes::default();
-    };
-    let model_id = entity.model_id.unwrap_or_default();
-    if entity.entity_type == Some(1) {
-        return db
-            .character_level
-            .iter()
-            .find(|row| row.hero_id == model_id && row.level == entity.level.unwrap_or_default())
-            .map(|row| ExAttributes {
-                crit_rate: row.cri,
-                crit_resist: row.recri,
-                crit_dmg: row.cri_dmg,
-                crit_def: row.cri_def,
-                add_dmg: row.add_dmg,
-                drop_dmg: row.drop_dmg,
-            })
-            .unwrap_or_default();
-    }
-    let Some(monster) = db.monster.get(model_id) else {
-        return ExAttributes::default();
-    };
-    if let Some(stats) = crate::engine::entity::stats::monster_instance_ex_stats(
-        model_id,
-        entity.level.unwrap_or_default(),
-    ) {
-        return ExAttributes {
-            crit_rate: stats.cri,
-            crit_resist: stats.recri,
-            crit_dmg: stats.cri_dmg,
-            crit_def: stats.cri_def,
-            add_dmg: stats.add_dmg,
-            drop_dmg: stats.drop_dmg,
-        };
-    }
-    let level = entity.level.unwrap_or(monster.level_true);
-    let template_id = if monster.template != 0 {
-        monster.template
-    } else {
-        monster.id
-    };
-    db.monster_template
-        .iter()
-        .find(|row| row.template == template_id)
-        .map(|row| ExAttributes {
-            crit_rate: row.cri + row.cri_grow * level,
-            crit_resist: row.recri + row.recri_grow * level,
-            crit_dmg: row.cri_dmg + row.cri_dmg_grow * level,
-            crit_def: row.cri_def + row.cri_def_grow * level,
-            add_dmg: row.add_dmg + row.add_dmg_grow * level,
-            drop_dmg: row.drop_dmg + row.drop_dmg_grow * level,
-        })
-        .unwrap_or_default()
 }
 
 impl TargetBuff {

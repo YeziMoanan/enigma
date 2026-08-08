@@ -22,6 +22,29 @@ pub(crate) struct ConfiguredBuffFeature {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EntityExAttributes {
+    pub crit_rate: i32,
+    pub crit_resist: i32,
+    pub crit_dmg: i32,
+    pub crit_def: i32,
+    pub add_dmg: i32,
+    pub drop_dmg: i32,
+}
+
+impl Default for EntityExAttributes {
+    fn default() -> Self {
+        Self {
+            crit_rate: 0,
+            crit_resist: 0,
+            crit_dmg: 1000,
+            crit_def: 0,
+            add_dmg: 0,
+            drop_dmg: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LingeringGlowAttributeBuff {
     pub buff_id: i32,
     pub origin: CommandOrigin,
@@ -369,6 +392,66 @@ impl BattleCatalog {
         tags.sort_unstable();
         tags.dedup();
         tags
+    }
+
+    pub(crate) fn entity_ex_attributes(
+        self,
+        model_id: i32,
+        level: Option<i32>,
+        entity_type: Option<i32>,
+    ) -> EntityExAttributes {
+        if entity_type == Some(1) {
+            return self
+                .game_data
+                .character_level
+                .iter()
+                .find(|row| row.hero_id == model_id && row.level == level.unwrap_or_default())
+                .map(|row| EntityExAttributes {
+                    crit_rate: row.cri,
+                    crit_resist: row.recri,
+                    crit_dmg: row.cri_dmg,
+                    crit_def: row.cri_def,
+                    add_dmg: row.add_dmg,
+                    drop_dmg: row.drop_dmg,
+                })
+                .unwrap_or_default();
+        }
+        let Some(monster) = self.game_data.monster.get(model_id) else {
+            return EntityExAttributes::default();
+        };
+        if let Some(stats) = crate::engine::entity::stats::monster_instance_ex_stats_with_game_data(
+            self.game_data,
+            model_id,
+            level.unwrap_or_default(),
+        ) {
+            return EntityExAttributes {
+                crit_rate: stats.cri,
+                crit_resist: stats.recri,
+                crit_dmg: stats.cri_dmg,
+                crit_def: stats.cri_def,
+                add_dmg: stats.add_dmg,
+                drop_dmg: stats.drop_dmg,
+            };
+        }
+        let level = level.unwrap_or(monster.level_true);
+        let template_id = if monster.template != 0 {
+            monster.template
+        } else {
+            monster.id
+        };
+        self.game_data
+            .monster_template
+            .iter()
+            .find(|row| row.template == template_id)
+            .map(|row| EntityExAttributes {
+                crit_rate: row.cri + row.cri_grow * level,
+                crit_resist: row.recri + row.recri_grow * level,
+                crit_dmg: row.cri_dmg + row.cri_dmg_grow * level,
+                crit_def: row.cri_def + row.cri_def_grow * level,
+                add_dmg: row.add_dmg + row.add_dmg_grow * level,
+                drop_dmg: row.drop_dmg + row.drop_dmg_grow * level,
+            })
+            .unwrap_or_default()
     }
 
     fn configured_battle(
@@ -823,6 +906,43 @@ mod tests {
             vec![101, 105, 117]
         );
         assert!(catalog.entity_battle_tags(-1, -1, -1).is_empty());
+    }
+
+    #[test]
+    fn normalizes_entity_ex_attributes() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.entity_ex_attributes(3081, Some(1), Some(1)),
+            EntityExAttributes {
+                crit_rate: 0,
+                crit_resist: 0,
+                crit_dmg: 1300,
+                crit_def: 0,
+                add_dmg: 0,
+                drop_dmg: 0,
+            }
+        );
+        assert_eq!(
+            catalog.entity_ex_attributes(30110801, Some(170), Some(2)),
+            EntityExAttributes {
+                crit_rate: 48,
+                crit_resist: 0,
+                crit_dmg: 1200,
+                crit_def: 387,
+                add_dmg: 140,
+                drop_dmg: 318,
+            }
+        );
+        assert_eq!(
+            catalog.entity_ex_attributes(-1, None, Some(1)),
+            EntityExAttributes::default()
+        );
+        assert_eq!(
+            catalog.entity_ex_attributes(-1, None, Some(2)),
+            EntityExAttributes::default()
+        );
     }
 
     #[test]

@@ -225,7 +225,14 @@ impl Stats {
 }
 
 pub fn monster_instance_ex_stats(model_id: i32, level: i32) -> Option<Stats> {
-    let game = configs::get();
+    monster_instance_ex_stats_with_game_data(configs::get(), model_id, level)
+}
+
+pub(crate) fn monster_instance_ex_stats_with_game_data(
+    game: &config::GameDB,
+    model_id: i32,
+    level: i32,
+) -> Option<Stats> {
     let monster = game.monster.get(model_id)?;
     let skill = game.monster_skill_template.get(monster.skill_template)?;
     let instance = game.monster_instance.get(skill.instance)?;
@@ -309,7 +316,8 @@ pub fn monster_stats(model_id: i32, level: i32) -> Option<Stats> {
         if instance.multi_hp > 1 {
             hp /= instance.multi_hp;
         }
-        let hidden = monster_instance_ex_stats(model_id, level).unwrap_or_default();
+        let hidden =
+            monster_instance_ex_stats_with_game_data(game, model_id, level).unwrap_or_default();
         return Some(Stats {
             hp,
             atk: scale(
