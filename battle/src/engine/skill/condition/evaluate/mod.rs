@@ -1209,7 +1209,8 @@ fn has_master_halo(uid: i64, managers: Option<&BattleManagers>) -> bool {
             .buff
             .active_for(uid)
             .filter_map(|buff| {
-                config::try_get()?
+                managers
+                    .game_data()
                     .skill_buff
                     .get(buff.buff_id?)
                     .map(|row| &row.features)
