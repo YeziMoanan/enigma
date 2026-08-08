@@ -494,7 +494,7 @@ pub async fn edit_roads(
     delete_ids: &[i32],
     roads: &[RoadInfo],
 ) -> Result<Vec<RoadInfo>> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     begin_room_edit_in_transaction(&mut tx, user_id).await?;
     for id in delete_ids {
         sqlx::query("DELETE FROM user_roads WHERE user_id = ? AND id = ?")
@@ -555,7 +555,7 @@ pub async fn place_building(
     uid: i64,
     placement: Option<(i32, i32, i32)>,
 ) -> Result<Option<crate::models::game::buildings::Building>> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     begin_room_edit_in_transaction(&mut tx, user_id).await?;
     let building = buildings::set_building_placement(&mut tx, user_id, uid, placement).await?;
     tx.commit().await?;
@@ -746,7 +746,7 @@ pub async fn use_block(
     x: i32,
     y: i32,
 ) -> Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let package: Option<BlockPackage> = sqlx::query_as(
         "SELECT user_id, block_package_id, unused_block_ids, used_block_ids
          FROM user_block_packages WHERE user_id = ? AND block_package_id = ?",
@@ -822,7 +822,7 @@ pub async fn unuse_blocks(pool: &SqlitePool, user_id: i64, block_ids: &[i32]) ->
     if block_ids.iter().any(|block_id| is_initial_block(*block_id)) {
         bail!("initial room blocks cannot be removed");
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     begin_room_edit_in_transaction(&mut tx, user_id).await?;
     for block_id in block_ids {
         sqlx::query("DELETE FROM user_blocks WHERE user_id = ? AND block_id = ?")

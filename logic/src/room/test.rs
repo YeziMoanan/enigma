@@ -256,6 +256,53 @@ async fn room_theme_bonus_waits_for_an_existing_writer_instead_of_failing_locked
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[tokio::test]
+async fn using_a_room_block_waits_for_an_existing_writer_instead_of_failing_locked() {
+    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+    config::init(&data_dir).unwrap();
+    let name = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("enigma-room-block-contention-{name}"));
+    let pool = database::connect_to(&database::DatabaseSettings {
+        db_name: dir.join("sonetto.db").to_string_lossy().to_string(),
+    })
+    .await
+    .unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at)
+         VALUES (41, 'room-block-reader', 0, 0), (42, 'room-block-writer', 0, 0);
+         INSERT INTO user_block_packages
+            (user_id, block_package_id, unused_block_ids, used_block_ids)
+         VALUES (41, 6, '[101]', '[]');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut writer = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+    sqlx::query("UPDATE users SET updated_at = 1 WHERE id = 42")
+        .execute(&mut *writer)
+        .await
+        .unwrap();
+    let use_pool = pool.clone();
+    let use_block = tokio::spawn(async move {
+        block_packages::use_block(&use_pool, 41, 101, 6, 0, 0, 0).await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    writer.commit().await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), use_block)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    pool.close().await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn formula_materials_scale_static_format() {
     let costs = scaled_formula_materials("1#110101#3|1#110201#4", 2);
