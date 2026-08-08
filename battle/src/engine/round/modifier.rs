@@ -50,13 +50,7 @@ pub fn action_point_bonus(
                 .iter()
                 .filter_map(|branch| match branch.driver {
                     None => Some(slot.conditions.clone()),
-                    Some(crate::engine::skill::rule::route::ConditionDriver::Setup(setup))
-                        if matches!(
-                            setup.stage,
-                            crate::engine::skill::rule::SetupStage::RoundStart
-                                | crate::engine::skill::rule::SetupStage::RoundStartCondition
-                        ) =>
-                    {
+                    Some(crate::engine::skill::rule::route::ConditionDriver::Setup(setup)) => {
                         Some(satisfied_conditions(&slot.conditions, setup.key))
                     }
                     _ => None,

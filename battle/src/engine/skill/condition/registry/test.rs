@@ -944,6 +944,26 @@ fn skill_target_count_is_a_filter_with_an_event_dependency() {
 }
 
 #[test]
+fn regeneration_period_buff_gates_keep_their_exact_predicates() {
+    for (opcode, type_name, mode) in [
+        (19012, "HasBuffId", BuffConditionMode::Present),
+        (57012, "NoBuffId", BuffConditionMode::Absent),
+    ] {
+        assert_eq!(
+            parse(opcode, type_name, &["11410091".into()]),
+            Some(ParsedConditionKind::BuffId {
+                mode,
+                buff_ids: vec![11410091],
+            })
+        );
+        let definition = find_key(opcode, type_name).unwrap();
+        assert_eq!(definition.role, ConditionRole::Predicate);
+        assert!(definition.dependencies.is_empty());
+        assert!(definition.filters_behavior_targets);
+    }
+}
+
+#[test]
 fn mei_leier_round_end_buff_gate_uses_entity_settlement() {
     let definition = find_key(19303, "HasBuffId").unwrap();
     assert_eq!(

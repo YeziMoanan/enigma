@@ -145,6 +145,47 @@ fn opening_round_collects_static_ap_rules_without_runtime_dispatch() {
 }
 
 #[test]
+fn enter_fight_action_point_rule_is_collected_without_runtime_dispatch() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        version: Some(7),
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(-1),
+                current_hp: Some(100),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut runtime = BattleRuntime::new(fight);
+    runtime.extend_battle_rule_skills([crate::engine::fight::rules::OwnedBattleSkill {
+        owner_uid: crate::engine::fight::rules::ATTACKER_SIDE_UID,
+        skill_id: 2301,
+    }]);
+
+    runtime
+        .build_start_steps(CardSetup {
+            hand: Vec::new(),
+            draw_pile: Vec::new(),
+            deck_num: 0,
+        })
+        .unwrap();
+    let round = runtime.start_round().unwrap();
+
+    assert_eq!(round.act_point, Some(2));
+}
+
+#[test]
 fn round_modifier_with_output_keeps_its_setup_command() {
     crate::test_support::init_config();
     let fight = Fight {
