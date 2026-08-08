@@ -15,15 +15,15 @@ impl TargetRequest {
     }
 }
 
-pub fn target_count(code: i32) -> i32 {
-    config::try_get()
-        .and_then(|db| db.ai_monster_target.get(code))
+pub fn target_count(db: &config::GameDB, code: i32) -> i32 {
+    db.ai_monster_target
+        .get(code)
         .map(|row| row.target_number)
         .unwrap_or_default()
 }
 
-pub fn damage_target_count_kind(code: i32) -> i32 {
-    match target_count(code) {
+pub fn damage_target_count_kind(db: &config::GameDB, code: i32) -> i32 {
+    match target_count(db, code) {
         1 => 1,
         count if count > 1 => 2,
         _ => 0,
@@ -38,9 +38,10 @@ mod tests {
     fn configured_target_count_distinguishes_single_and_mass_attacks() {
         crate::test_support::init_config();
 
-        assert_eq!(damage_target_count_kind(1), 1);
-        assert_eq!(damage_target_count_kind(201), 2);
-        assert_eq!(damage_target_count_kind(202), 2);
-        assert_eq!(damage_target_count_kind(i32::MAX), 0);
+        let db = crate::test_support::game_data();
+        assert_eq!(damage_target_count_kind(db, 1), 1);
+        assert_eq!(damage_target_count_kind(db, 201), 2);
+        assert_eq!(damage_target_count_kind(db, 202), 2);
+        assert_eq!(damage_target_count_kind(db, i32::MAX), 0);
     }
 }

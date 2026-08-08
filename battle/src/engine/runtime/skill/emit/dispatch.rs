@@ -125,6 +125,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     };
     execution.context.damage_target_count_kind =
         crate::engine::skill::target::request::damage_target_count_kind(
+            managers.game_data(),
             execution.context.logic_target,
         );
     execution.context.extra_skill_kind = invocation
@@ -141,8 +142,12 @@ pub(in crate::engine::runtime) fn emit_ops(
         if matches!(trigger, SkillOpTrigger::Active) && invocation.card_index > 0 {
             execution.context.active_skill_slot =
                 pool.skill_slot(invocation.plan.source_uid, invocation.plan.skill_id);
-            execution.context.active_skill_rank =
-                crate::engine::entity::skill::skill_rank(invocation.plan.skill_id);
+            execution.context.active_skill_rank = managers
+                .game_data()
+                .skill
+                .get(invocation.plan.skill_id)
+                .map(|row| row.skill_rank)
+                .unwrap_or_default();
             execution.context.active_skill_type = catalog.skill_type(effect_skill_id);
             execution.context.active_skill_effect_tag = catalog.effect_tag(effect_skill_id);
         }
@@ -155,7 +160,7 @@ pub(in crate::engine::runtime) fn emit_ops(
         execution.record_targets([uid]);
     }
     if let SkillOpTrigger::Event(event) = trigger {
-        apply_event_context(&mut execution.context, event);
+        apply_event_context(managers.game_data(), &mut execution.context, event);
     }
     let source_team =
         pool.team_type(invocation.plan.source_uid)
@@ -255,7 +260,13 @@ pub(in crate::engine::runtime) fn emit_ops(
         if !effect_started_subscribers.skills.is_empty()
             || !effect_started_subscribers.buff_acts.is_empty()
         {
-            outputs.push(effect_started_op(&invocation, catalog, pool, execution));
+            outputs.push(effect_started_op(
+                &invocation,
+                managers,
+                catalog,
+                pool,
+                execution,
+            ));
         }
     }
     let has_row_damage = catalog.damage_rate(effect_skill_id) > 0
@@ -607,8 +618,14 @@ pub(in crate::engine::runtime) fn emit_ops(
         }
     }
     if active_phase == Some(SkillPhase::Immediate) {
-        let mut phase_completed =
-            phase_completed_op(&invocation, catalog, pool, execution, SkillPhase::Immediate);
+        let mut phase_completed = phase_completed_op(
+            &invocation,
+            managers,
+            catalog,
+            pool,
+            execution,
+            SkillPhase::Immediate,
+        );
         if let Some(cost) = execution.take_action_cost() {
             let RuleOp::SkillLifecycle(lifecycle) = phase_completed.op else {
                 unreachable!("a completed phase emits a skill lifecycle")
@@ -873,6 +890,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     if publishes_lifecycle && active_phase == Some(SkillPhase::HitPassives) {
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -881,6 +899,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     } else if publishes_lifecycle && active_phase == Some(SkillPhase::AfterDamage) {
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -889,6 +908,7 @@ pub(in crate::engine::runtime) fn emit_ops(
         if continuation.is_none() {
             outputs.push(phase_completed_op(
                 &invocation,
+                managers,
                 catalog,
                 pool,
                 execution,
@@ -898,6 +918,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     } else if publishes_lifecycle && active_phase == Some(SkillPhase::AfterHit) {
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -906,6 +927,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     } else if publishes_lifecycle && active_phase.is_some() && continuation.is_none() {
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -913,6 +935,7 @@ pub(in crate::engine::runtime) fn emit_ops(
         ));
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -952,7 +975,12 @@ pub(in crate::engine::runtime) fn emit_ops(
                         skill_slot: pool
                             .skill_slot(invocation.plan.source_uid, invocation.plan.skill_id),
                         is_attack: catalog.is_attack(effect_skill_id),
-                        rank: crate::engine::entity::skill::skill_rank(invocation.plan.skill_id),
+                        rank: managers
+                            .game_data()
+                            .skill
+                            .get(invocation.plan.skill_id)
+                            .map(|row| row.skill_rank)
+                            .unwrap_or_default(),
                         skill_type: catalog.skill_type(effect_skill_id),
                         effect_tag: catalog.effect_tag(effect_skill_id),
                         additional_moxie: invocation.additional_moxie,

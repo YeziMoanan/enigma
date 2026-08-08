@@ -391,6 +391,7 @@ fn target_options(
         active_skill_type: catalog.skill_type(skill_id),
         active_skill_effect_tag: catalog.effect_tag(skill_id),
         damage_target_count_kind: crate::engine::skill::target::request::damage_target_count_kind(
+            managers.game_data(),
             code,
         ),
         ..Default::default()
