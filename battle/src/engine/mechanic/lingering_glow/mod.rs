@@ -124,17 +124,15 @@ pub fn round_start_attribute_rule_ops_for_team(
         let Some(state) = managers.gauge.get(key(create.team)) else {
             continue;
         };
-        let Some((buff_id, act_id)) = heat_scale::attribute_buff() else {
+        let Some(attribute_buff) = managers.catalog().lingering_glow_attribute_buff() else {
             continue;
         };
+        let buff_id = attribute_buff.buff_id;
+        let act_id = attribute_buff.origin.key.opcode;
         if state.current <= 0 {
             continue;
         }
-        let Some(buff_origin) =
-            buff_act::configured_command_origin(act_id, BuffActKind::AttrByHeatScale)
-        else {
-            continue;
-        };
+        let buff_origin = attribute_buff.origin;
         let remaining = state.current / 2;
         let depleted = state.current - remaining;
         let targets = managers

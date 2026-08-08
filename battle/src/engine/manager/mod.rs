@@ -130,14 +130,18 @@ pub(crate) struct HpExecution {
 }
 
 impl BattleManagers {
-    pub(crate) fn game_data(&self) -> &'static config::GameDB {
+    pub(crate) fn catalog(&self) -> crate::catalog::BattleCatalog {
         if let Some(catalog) = self.catalog_data {
-            return catalog.game_data();
+            return catalog;
         }
         #[cfg(test)]
-        return crate::test_support::game_data();
+        return crate::catalog::BattleCatalog::new(crate::test_support::game_data());
         #[cfg(not(test))]
         panic!("battle managers were not constructed with a catalog")
+    }
+
+    pub(crate) fn game_data(&self) -> &'static config::GameDB {
+        self.catalog().game_data()
     }
 
     pub(crate) fn fight_version(&self) -> i32 {
