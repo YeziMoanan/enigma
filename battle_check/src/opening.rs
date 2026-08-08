@@ -28,7 +28,7 @@ fn run(episode_id: i32) -> Result<()> {
         battle::dungeon::FightOptions::default(),
         None,
     )?;
-    let mut runtime = BattleRuntime::new(built.fight);
+    let mut runtime = BattleRuntime::new(db, built.fight);
     let round = runtime.start_round().map_err(anyhow::Error::msg)?;
     let push = runtime.card_info_push();
 

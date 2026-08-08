@@ -485,7 +485,9 @@ pub fn run_finished_round_transition(managers: &BattleManagers) -> (DrainResult,
     (fight_steps, next_round_begin_steps)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_start(
+    game_data: &config::GameDB,
     managers: &mut BattleManagers,
     pool: &TargetPool,
     catalog: &SkillEffectCatalog,
@@ -743,7 +745,15 @@ pub fn run_start(
         if stage == SetupStage::EnterFight {
             append(
                 &mut result,
-                run_wave_start_triggers(managers, pool, catalog, determinism, context, 1)?,
+                run_wave_start_triggers(
+                    game_data,
+                    managers,
+                    pool,
+                    catalog,
+                    determinism,
+                    context,
+                    1,
+                )?,
             );
         }
         if stage == SetupStage::RoundStart && priority == 2 {

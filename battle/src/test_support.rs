@@ -17,3 +17,8 @@ pub(crate) fn init_config() {
     )
     .expect("test game data must load");
 }
+
+pub(crate) fn game_data() -> &'static config::GameDB {
+    init_config();
+    config::configs::get()
+}

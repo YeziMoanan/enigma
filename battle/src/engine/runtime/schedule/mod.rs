@@ -122,6 +122,7 @@ pub use start::*;
 use start::{RoundStartSettlementPlan, raspberry_losses, run_round_start_owner_settlement};
 
 pub fn run_wave_start_triggers(
+    game_data: &config::GameDB,
     managers: &mut BattleManagers,
     pool: &TargetPool,
     catalog: &SkillEffectCatalog,
@@ -129,11 +130,8 @@ pub fn run_wave_start_triggers(
     context: TargetContext,
     wave: i32,
 ) -> Result<DrainResult, DrainError> {
-    let actions = crate::engine::fight::trigger::wave_start_actions(
-        config::configs::get(),
-        context.battle_id,
-        wave,
-    )?;
+    let actions =
+        crate::engine::fight::trigger::wave_start_actions(game_data, context.battle_id, wave)?;
     if actions.is_empty() {
         return Ok(DrainResult::default());
     }

@@ -135,7 +135,12 @@ fn generate_reply(
         .unwrap_or_default();
     let (ex_attributes, sp_attributes) = preview_attributes(&fight, path)?;
     let opening_determinism = captured_opening_determinism(&fight, &captured_round);
-    let mut runtime = BattleRuntime::new_with_attributes(fight, ex_attributes, sp_attributes);
+    let mut runtime = BattleRuntime::new_with_attributes(
+        config::configs::get(),
+        fight,
+        ex_attributes,
+        sp_attributes,
+    );
     runtime.extend_battle_rule_skills(tower_rule_skills);
     runtime
         .start_round_with_determinism(opening_determinism)

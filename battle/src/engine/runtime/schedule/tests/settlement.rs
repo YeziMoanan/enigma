@@ -169,6 +169,7 @@ fn setup_reserves_summoned_lanes_before_the_next_buff() {
     let mut managers = BattleManagers::seeded(&fight);
 
     run_start(
+        crate::test_support::game_data(),
         &mut managers,
         &pool,
         crate::engine::skill::effect::catalog::global(),

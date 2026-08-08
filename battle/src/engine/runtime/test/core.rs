@@ -8,7 +8,7 @@ fn entity_info_projects_manager_owned_state() {
     };
 
     crate::test_support::init_config();
-    let mut runtime = BattleRuntime::new(Fight {
+    let mut runtime = runtime(Fight {
         attacker: Some(FightTeam {
             entitys: vec![FightEntityInfo {
                 uid: Some(10),
@@ -56,7 +56,7 @@ fn third_wave_entity_info_uses_the_latest_authoritative_roster() {
     crate::test_support::init_config();
     let (entitys, sub_entitys) =
         crate::engine::fight::defender::Defender::build_wave_entities(161301, 3, 2, 0).unwrap();
-    let mut runtime = BattleRuntime::new(Fight {
+    let mut runtime = runtime(Fight {
         battle_id: Some(1613),
         episode_id: Some(10624),
         version: Some(7),
@@ -171,7 +171,7 @@ fn end_fight_statistics_project_owned_runtime_history() {
     };
 
     crate::test_support::init_config();
-    let mut runtime = BattleRuntime::new(Fight {
+    let mut runtime = runtime(Fight {
         attacker: Some(FightTeam {
             entitys: vec![FightEntityInfo {
                 uid: Some(10),

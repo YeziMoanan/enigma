@@ -416,6 +416,7 @@ impl ActiveBattle {
             .and_then(|team| team.assist_boss.as_ref())
             .and_then(|boss| boss.level);
         let mut runtime = ::battle::engine::runtime::BattleRuntime::new_with_attributes(
+            config::configs::get(),
             built.fight,
             built.ex_attributes,
             built.sp_attributes,

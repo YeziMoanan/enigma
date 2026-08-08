@@ -60,7 +60,7 @@ impl BattleRuntime {
                 let skill_id = request.skill_id?;
                 let use_count = self.cloth_skill_uses.get(&skill_id).copied().unwrap_or(0);
                 let (cost, next_cost, cooldown) =
-                    cloth_skill_terms(&self.fight, skill_id, use_count)?;
+                    cloth_skill_terms(self.game_data(), &self.fight, skill_id, use_count)?;
                 let skill_info = self
                     .fight
                     .attacker
@@ -403,9 +403,14 @@ impl BattleRuntime {
     }
 }
 
-fn cloth_skill_terms(fight: &Fight, skill_id: i32, use_count: usize) -> Option<(i32, i32, i32)> {
+fn cloth_skill_terms(
+    game_data: &config::GameDB,
+    fight: &Fight,
+    skill_id: i32,
+    use_count: usize,
+) -> Option<(i32, i32, i32)> {
     let cloth_id = fight.attacker.as_ref()?.cloth_id.unwrap_or(1);
-    let cloth = config::configs::get()
+    let cloth = game_data
         .cloth_level
         .iter()
         .find(|cloth| cloth.id == cloth_id && cloth.level == 1)?;

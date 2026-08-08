@@ -54,6 +54,7 @@ pub fn run_action_phase_start(
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_conduit_phase(
+    game_data: &config::GameDB,
     fight: &sonettobuf::Fight,
     managers: &mut BattleManagers,
     pool: &TargetPool,
@@ -75,7 +76,7 @@ pub fn run_conduit_phase(
             .selected_skills(source_uid)
             .map_err(|error| DrainError::Command(error.into()))?;
         catalog.extend_roots_and_warn(
-            config::configs::get(),
+            game_data,
             skills.iter().map(|skill| skill.skill_id),
             std::iter::empty(),
         );

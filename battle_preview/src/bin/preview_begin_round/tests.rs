@@ -43,7 +43,12 @@ fn captured_twins_selection_has_a_committed_runtime_source() {
     let value = captured_start_reply(&path).unwrap();
     let fight: Fight = serde_json::from_value(value["fight"].clone()).unwrap();
     let (ex_attributes, sp_attributes) = preview_attributes(&fight, &path).unwrap();
-    let mut runtime = BattleRuntime::new_with_attributes(fight, ex_attributes, sp_attributes);
+    let mut runtime = BattleRuntime::new_with_attributes(
+        config::configs::get(),
+        fight,
+        ex_attributes,
+        sp_attributes,
+    );
     runtime.start_round().unwrap();
     let captured = captured_round(&path).unwrap();
     seed_captured_randomness(&mut runtime, &captured);

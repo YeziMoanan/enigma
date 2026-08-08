@@ -48,6 +48,7 @@ impl BattleRuntime {
         &mut self,
         request: &BeginRoundRequest,
     ) -> Result<FightRound, String> {
+        let game_data = self.game_data();
         let active_round = self.round_state.cur_round;
         self.round_state.begin_round();
         self.fight.cur_round = Some(self.round_state.cur_round);
@@ -71,7 +72,7 @@ impl BattleRuntime {
             .chain(self.determinism.card_play_skill_ids())
             .collect::<Vec<_>>();
         self.catalog.extend_roots_and_warn(
-            config::configs::get(),
+            game_data,
             request
                 .opers
                 .iter()
@@ -83,7 +84,7 @@ impl BattleRuntime {
         let captured_ai_choices = self.determinism.take_ai_skills();
         if let Some(choices) = &captured_ai_choices {
             self.catalog.extend_roots_and_warn(
-                config::configs::get(),
+                game_data,
                 choices.iter().map(|choice| choice.skill_id),
                 std::iter::empty(),
             );
@@ -150,6 +151,7 @@ impl BattleRuntime {
             Default::default()
         } else {
             schedule::run_conduit_phase(
+                game_data,
                 &self.fight,
                 &mut self.managers,
                 &pool,
@@ -336,7 +338,7 @@ impl BattleRuntime {
         {
             wave_entering_uids = change.entering_uids.clone();
             catalog.extend_entities_and_warn(
-                config::configs::get(),
+                game_data,
                 crate::engine::manager::wave::entering_entities(&change),
             );
             pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
@@ -367,7 +369,7 @@ impl BattleRuntime {
                 None,
             );
             catalog.extend_roots_and_warn(
-                config::configs::get(),
+                game_data,
                 next_ai.iter().filter_map(|card| card.skill_id),
                 std::iter::empty(),
             );
@@ -460,7 +462,7 @@ impl BattleRuntime {
             )
             .0;
             catalog.extend_roots_and_warn(
-                config::configs::get(),
+                game_data,
                 cards.iter().filter_map(|card| card.skill_id),
                 std::iter::empty(),
             );
