@@ -755,6 +755,7 @@ mod tests {
         };
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &BattleRoster {
                 user_id: 1,
                 ..Default::default()
@@ -798,6 +799,7 @@ mod tests {
         };
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &BattleRoster {
                 user_id: 1,
                 ..Default::default()
@@ -867,6 +869,7 @@ mod tests {
         };
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &roster,
             10002,
             1002,
@@ -946,6 +949,7 @@ mod tests {
         );
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &roster,
             10003,
             1003,
@@ -991,9 +995,16 @@ mod tests {
             ..Default::default()
         };
 
-        let built =
-            super::super::build_fight(&roster, 10101, 10101, &group, FightOptions::default(), None)
-                .unwrap();
+        let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            &roster,
+            10101,
+            10101,
+            &group,
+            FightOptions::default(),
+            None,
+        )
+        .unwrap();
         let entity = &built.fight.attacker.unwrap().entitys[0];
 
         assert_eq!(entity.equip_uid, Some(0));
@@ -1046,9 +1057,16 @@ mod tests {
             ..Default::default()
         };
 
-        let built =
-            super::super::build_fight(&roster, 10101, 10101, &group, FightOptions::default(), None)
-                .unwrap();
+        let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            &roster,
+            10101,
+            10101,
+            &group,
+            FightOptions::default(),
+            None,
+        )
+        .unwrap();
         let entity = &built.fight.attacker.unwrap().entitys[0];
 
         assert_eq!(entity.equip_uid, Some(primary_uid));
@@ -1112,6 +1130,7 @@ mod tests {
         };
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &roster,
             38510113,
             116385108,
@@ -1154,6 +1173,7 @@ mod tests {
         crate::test_support::init_config();
 
         let error = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &BattleRoster {
                 user_id: 1,
                 ..Default::default()
@@ -1203,6 +1223,7 @@ mod tests {
         );
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &BattleRoster {
                 user_id: 1,
                 compose_support: Some(hero),

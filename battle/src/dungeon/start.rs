@@ -17,6 +17,7 @@ pub struct FightOptions {
 }
 
 pub fn build_fight(
+    catalog: crate::catalog::BattleCatalog,
     roster: &BattleRoster,
     episode_id: i32,
     battle_id: i32,
@@ -52,7 +53,7 @@ pub fn build_fight(
             is_finish: Some(false),
             cur_wave: Some(1),
             battle_id: Some(battle_id),
-            version: Some(versions::current()?),
+            version: Some(versions::current(catalog)?),
             is_record: Some(options.use_record),
             episode_id: Some(episode_id),
             fight_act_type: Some(FightActType::Normal.into()),

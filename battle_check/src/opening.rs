@@ -21,6 +21,7 @@ fn run(episode_id: i32) -> Result<()> {
         .with_context(|| format!("episode {episode_id} is missing"))?;
     let configured = db.teaching_card.get(episode_id);
     let built = battle::dungeon::build_fight(
+        BattleCatalog::new(db),
         &battle::dungeon::BattleRoster::default(),
         episode_id,
         episode.battle_id,

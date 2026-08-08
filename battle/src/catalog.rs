@@ -7,9 +7,17 @@ pub(crate) struct LingeringGlowAttributeBuff {
     pub origin: CommandOrigin,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfiguredFightVersion {
+    Missing,
+    Invalid,
+    Value(i32),
+}
+
 #[derive(Clone, Copy)]
 pub struct BattleCatalog {
     game_data: &'static config::GameDB,
+    fight_version: ConfiguredFightVersion,
     impromptu_definition: Option<ImpromptuDefinition>,
     lingering_glow_attribute_buff: Option<LingeringGlowAttributeBuff>,
 }
@@ -18,6 +26,9 @@ impl BattleCatalog {
     pub fn new(game_data: &'static config::GameDB) -> Self {
         Self {
             game_data,
+            fight_version: configured_fight_version(
+                game_data.r#const.get(1707).map(|row| row.value.as_str()),
+            ),
             impromptu_definition: impromptu_definition(game_data),
             lingering_glow_attribute_buff: lingering_glow_attribute_buff(game_data),
         }
@@ -27,6 +38,10 @@ impl BattleCatalog {
         self.game_data
     }
 
+    pub(crate) fn fight_version(self) -> ConfiguredFightVersion {
+        self.fight_version
+    }
+
     pub(crate) fn lingering_glow_attribute_buff(self) -> Option<LingeringGlowAttributeBuff> {
         self.lingering_glow_attribute_buff
     }
@@ -34,6 +49,15 @@ impl BattleCatalog {
     pub(crate) fn impromptu_definition(self) -> Option<ImpromptuDefinition> {
         self.impromptu_definition
     }
+}
+
+fn configured_fight_version(raw: Option<&str>) -> ConfiguredFightVersion {
+    let Some(raw) = raw else {
+        return ConfiguredFightVersion::Missing;
+    };
+    raw.parse()
+        .map(ConfiguredFightVersion::Value)
+        .unwrap_or(ConfiguredFightVersion::Invalid)
 }
 
 pub(crate) fn impromptu_definition(game_data: &config::GameDB) -> Option<ImpromptuDefinition> {
@@ -106,6 +130,27 @@ mod tests {
                     key: crate::engine::skill::rule::DefinitionKey::new(1053, "AttrByHeatScale"),
                 },
             })
+        );
+    }
+
+    #[test]
+    fn normalizes_fight_version() {
+        crate::test_support::init_config();
+        let game_data = crate::test_support::game_data();
+
+        assert_eq!(
+            BattleCatalog::new(game_data).fight_version(),
+            ConfiguredFightVersion::Value(
+                game_data.r#const.get(1707).unwrap().value.parse().unwrap()
+            )
+        );
+        assert_eq!(
+            configured_fight_version(None),
+            ConfiguredFightVersion::Missing
+        );
+        assert_eq!(
+            configured_fight_version(Some("not-an-integer")),
+            ConfiguredFightVersion::Invalid
         );
     }
 

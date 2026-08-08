@@ -27,7 +27,15 @@ pub async fn build_fight(
         params,
     )?;
     let roster = load_roster(db, player_id, &plan, fight_group).await?;
-    battle::dungeon::build_fight(&roster, episode_id, battle_id, fight_group, options, params)
+    battle::dungeon::build_fight(
+        battle::catalog::BattleCatalog::new(config::configs::get()),
+        &roster,
+        episode_id,
+        battle_id,
+        fight_group,
+        options,
+        params,
+    )
 }
 
 async fn load_roster(
