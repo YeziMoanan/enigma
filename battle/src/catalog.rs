@@ -240,6 +240,33 @@ impl BattleCatalog {
             .unwrap_or_default()
     }
 
+    pub(crate) fn skill_extra_kind(self, skill_id: i32) -> i32 {
+        self.skill_effect(skill_id)
+            .map(|effect| effect.is_extra)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn skill_type(self, skill_id: i32) -> i32 {
+        self.skill_effect(skill_id)
+            .map(|effect| effect.r#type)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn skill_is_attack(self, skill_id: i32) -> bool {
+        self.skill_effect(skill_id).is_some_and(|effect| {
+            effect.damage_rate > 0
+                || matches!(
+                    effect.effect_tag,
+                    tag if tag
+                        == crate::engine::skill::effect::catalog::SkillEffectTag::RealityDamage
+                            as i32
+                        || tag
+                            == crate::engine::skill::effect::catalog::SkillEffectTag::MentalDamage
+                                as i32
+                )
+        })
+    }
+
     pub(crate) fn skill_is_ultimate_for_model(self, skill_id: i32, model_id: i32) -> bool {
         self.game_data
             .skill
@@ -839,6 +866,9 @@ mod tests {
         assert_eq!(catalog.skill_big_skill_point(30020131), 5);
         assert!(catalog.skill_is_big(30020131));
         assert_eq!(catalog.skill_effect_tag(30020131), 3);
+        assert_eq!(catalog.skill_extra_kind(30020131), 0);
+        assert_eq!(catalog.skill_type(30020131), 0);
+        assert!(catalog.skill_is_attack(30020131));
         assert_eq!(catalog.skill_big_skill_point(30610131), 5);
         assert_eq!(catalog.skill_big_skill_point(31390111), 0);
         assert!(catalog.skill_is_big(30610131));
@@ -852,6 +882,9 @@ mod tests {
         assert_eq!(catalog.skill_big_skill_point(-1), 0);
         assert!(!catalog.skill_is_big(-1));
         assert_eq!(catalog.skill_effect_tag(-1), 0);
+        assert_eq!(catalog.skill_extra_kind(-1), 0);
+        assert_eq!(catalog.skill_type(-1), 0);
+        assert!(!catalog.skill_is_attack(-1));
     }
 
     #[test]
