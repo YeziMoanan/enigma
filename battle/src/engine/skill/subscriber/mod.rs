@@ -520,7 +520,7 @@ fn additional_skill_owners(pool: &TargetPool, managers: &BattleManagers) -> Vec<
                 .map(move |&skill_id| (owner_uid, skill_id))
         })
         .chain(managers.battle_rule.owned_skills())
-        .chain(managers.summon.active_unique_skills())
+        .chain(managers.summon.active_unique_skills(managers.game_data()))
         .chain(pool.assist_boss_skill_owners())
         .collect()
 }

@@ -150,16 +150,14 @@ impl SummonManager {
             operation: command.operation,
         })
     }
-    pub fn active_unique_skills(&self) -> Vec<(i64, i32)> {
-        let Some(db) = config::try_get() else {
-            return Vec::new();
-        };
+    pub fn active_unique_skills(&self, game_data: &config::GameDB) -> Vec<(i64, i32)> {
         let mut active = self.active.keys().copied().collect::<Vec<_>>();
         active.sort_by_key(|(owner_uid, summoned_id)| (*owner_uid, -summoned_lane(*summoned_id)));
         active
             .into_iter()
             .flat_map(|(owner_uid, summoned_id)| {
-                db.summoned
+                game_data
+                    .summoned
                     .get(summoned_id)
                     .into_iter()
                     .flat_map(move |row| {

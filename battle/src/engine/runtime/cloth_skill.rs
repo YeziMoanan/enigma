@@ -157,6 +157,7 @@ impl BattleRuntime {
                 let bound = self.managers.entity_snapshot(bound_uid)?;
                 let (owner_buff_id, bound_buff_id) =
                     crate::engine::manager::contract::binding_buffs(
+                        self.game_data(),
                         owner.ex_skill_level.unwrap_or_default(),
                         bound.career?,
                     )?;

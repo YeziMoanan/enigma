@@ -37,7 +37,11 @@ impl BehaviorHandler for Handler {
         if behavior.spec.kind == BehaviorKind::NotifyUpgradeHero {
             let upgrade_id = behavior.arg(0)?;
             let entity = context.managers.entity_snapshot(context.target_uid)?;
-            if !crate::engine::manager::upgrade::has_available_option(&entity, upgrade_id)? {
+            if !crate::engine::manager::upgrade::has_available_option(
+                context.managers.game_data(),
+                &entity,
+                upgrade_id,
+            )? {
                 return Some(Vec::new());
             }
         }
