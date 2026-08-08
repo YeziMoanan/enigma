@@ -162,6 +162,15 @@ fn fight_catalog_follows_buff_act_linked_skill_aliases() {
 }
 
 #[test]
+fn fight_catalog_follows_layered_passive_skill_links() {
+    init_config();
+
+    let catalog = SkillEffectCatalog::from_roots(config::configs::get(), [], [109360003]);
+
+    assert!(catalog.get(109360031).is_some());
+}
+
+#[test]
 fn fight_catalog_follows_shield_counter_skill() {
     init_config();
 

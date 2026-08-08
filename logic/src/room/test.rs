@@ -1,6 +1,7 @@
 use super::*;
 use database::models::game::block_packages::BlockInfo as StoredBlockInfo;
 use sqlx::sqlite::SqlitePoolOptions;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 async fn room_test_pool(user_id: i64, username: &str) -> SqlitePool {
     let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
@@ -201,6 +202,58 @@ async fn room_tasks_follow_confirmed_room_state() {
     assert_eq!((task(60001).progress, task(60001).has_finished), (5, true));
     assert_eq!((task(60002).progress, task(60002).has_finished), (1, true));
     assert_eq!(task(60007).progress, 108);
+}
+
+#[tokio::test]
+async fn room_theme_bonus_waits_for_an_existing_writer_instead_of_failing_locked() {
+    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+    config::init(&data_dir).unwrap();
+    let theme = config::configs::get()
+        .room_theme
+        .iter()
+        .find(|theme| theme.collection_bonus.is_empty())
+        .expect("room theme without a collection reward");
+    let name = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("enigma-room-theme-contention-{name}"));
+    let pool = database::connect_to(&database::DatabaseSettings {
+        db_name: dir.join("sonetto.db").to_string_lossy().to_string(),
+    })
+    .await
+    .unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at)
+         VALUES (21, 'room-theme-contended', 0, 0), (22, 'room-theme-writer', 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut writer = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+    sqlx::query("UPDATE users SET updated_at = 1 WHERE id = 22")
+        .execute(&mut *writer)
+        .await
+        .unwrap();
+    let claim_pool = pool.clone();
+    let theme_id = theme.id;
+    let claim = tokio::spawn(async move {
+        RoomManager::new(21)
+            .room_theme_collection_bonus(&claim_pool, config::configs::get(), theme_id)
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    writer.commit().await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), claim)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    pool.close().await;
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

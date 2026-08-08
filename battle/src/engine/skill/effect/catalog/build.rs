@@ -210,6 +210,9 @@ impl SkillEffectCatalog {
                         | Some(BuffActKind::SpecialCountCastChannel) => {
                             skills.extend(values.get(1).copied())
                         }
+                        Some(BuffActKind::AddPassiveSkillByLayer) => {
+                            skills.extend(values.get(2).copied())
+                        }
                         Some(BuffActKind::AddCardCastChannel) => skills.extend(
                             crate::engine::skill::buff_act::add_card_cast_channel::referenced_skill(
                                 &values[1..],

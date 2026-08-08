@@ -302,7 +302,7 @@ impl RoomManager {
             .room_theme
             .get(theme_id)
             .ok_or(AppError::InvalidRequest)?;
-        let mut tx = db.begin().await?;
+        let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
         let claimed = block_packages::claim_room_theme_bonus_in_transaction(
             &mut tx,
             self.player_id,
