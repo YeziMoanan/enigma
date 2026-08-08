@@ -700,9 +700,7 @@ fn condition_kind_matches(
                 .played()
                 .iter()
                 .filter(|played| allies.iter().any(|ally| ally.uid == played.caster_uid))
-                .filter(|played| {
-                    crate::engine::entity::skill::card_skill_rank(&played.card) >= *minimum_rank
-                })
+                .filter(|played| managers.catalog().card_skill_rank(&played.card) >= *minimum_rank)
                 .count()
                 >= *threshold as usize
         }),

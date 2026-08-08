@@ -5,7 +5,6 @@ use sonettobuf::{
 };
 
 use crate::engine::{
-    entity::skill::card_skill_rank,
     manager::{
         BattleManagers,
         card::{
@@ -266,7 +265,7 @@ fn best_candidate(
                 normal_ap: normal_ap_cost,
                 ultimate,
                 damage_rate: catalog.damage_rate(skill_id),
-                rank: card_skill_rank(card),
+                rank: managers.catalog().card_skill_rank(card),
             })
         })
         .max_by_key(|candidate| {

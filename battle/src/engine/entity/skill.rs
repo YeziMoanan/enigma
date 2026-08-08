@@ -160,16 +160,14 @@ pub fn split_ids(value: &str) -> Vec<i32> {
 }
 
 pub fn skill_rank(skill_id: i32) -> i32 {
-    config::try_get()
-        .and_then(|db| db.skill.get(skill_id))
-        .map(|row| row.skill_rank)
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.skill_rank(skill_id))
         .unwrap_or_default()
 }
 
 pub fn card_skill_rank(card: &CardInfo) -> i32 {
-    card.skill_id
-        .and_then(|skill_id| config::try_get().and_then(|db| db.skill.get(skill_id)))
-        .map(|row| row.skill_rank)
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.card_skill_rank(card))
         .unwrap_or_else(|| card.card_effect.unwrap_or_default())
 }
 

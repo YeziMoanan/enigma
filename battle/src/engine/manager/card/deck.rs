@@ -74,7 +74,7 @@ impl CardDeck {
         self
     }
 
-    fn catalog(&self) -> Option<crate::catalog::BattleCatalog> {
+    pub(super) fn catalog(&self) -> Option<crate::catalog::BattleCatalog> {
         self.catalog_data
             .or_else(crate::catalog::BattleCatalog::try_global)
     }

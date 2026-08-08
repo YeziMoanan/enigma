@@ -456,7 +456,7 @@ fn power_card_upgrade_ops(
             })
             .filter_map(|(hand_index, card)| {
                 let skill_id = card.skill_id?;
-                let rank = crate::engine::entity::skill::skill_rank(skill_id);
+                let rank = context.managers.catalog().skill_rank(skill_id);
                 let cost = match rank {
                     1 => *rank_one_cost,
                     2 => *rank_two_cost,

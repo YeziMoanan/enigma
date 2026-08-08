@@ -360,6 +360,21 @@ impl BattleCatalog {
         self.card_enchant_ids(enchant_id, |row| &row.reject_types)
     }
 
+    pub(crate) fn skill_rank(self, skill_id: i32) -> i32 {
+        self.game_data
+            .skill
+            .get(skill_id)
+            .map(|row| row.skill_rank)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn card_skill_rank(self, card: &sonettobuf::CardInfo) -> i32 {
+        card.skill_id
+            .and_then(|skill_id| self.game_data.skill.get(skill_id))
+            .map(|row| row.skill_rank)
+            .unwrap_or_else(|| card.card_effect.unwrap_or_default())
+    }
+
     pub(crate) fn skill_is_ultimate_for_model(self, skill_id: i32, model_id: i32) -> bool {
         self.game_data
             .skill
@@ -1263,6 +1278,23 @@ mod tests {
         );
         assert_eq!(catalog.card_enchant_rejected_ids(10_006), vec![10_003]);
         assert!(catalog.card_enchant_rejected_ids(-1).is_empty());
+    }
+
+    #[test]
+    fn normalizes_card_skill_rank() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+        let card = |skill_id, card_effect| sonettobuf::CardInfo {
+            skill_id,
+            card_effect,
+            ..Default::default()
+        };
+
+        assert_eq!(catalog.skill_rank(31_345_111), 1);
+        assert_eq!(catalog.skill_rank(-1), 0);
+        assert_eq!(catalog.card_skill_rank(&card(Some(31_345_111), Some(9))), 1);
+        assert_eq!(catalog.card_skill_rank(&card(Some(-1), Some(9))), 9);
+        assert_eq!(catalog.card_skill_rank(&card(None, Some(9))), 9);
     }
 
     #[test]
