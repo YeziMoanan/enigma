@@ -562,7 +562,7 @@ fn opening_random_pool_never_contains_an_ultimate() {
     runtime.managers.ex_point.add(10, 10, 1, 0);
 
     assert_eq!(
-        super::start::available_player_cards(&runtime.fight)
+        super::start::available_player_cards(runtime.game_data(), &runtime.fight)
             .into_iter()
             .filter_map(|card| card.skill_id)
             .collect::<Vec<_>>(),

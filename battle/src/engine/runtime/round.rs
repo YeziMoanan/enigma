@@ -355,6 +355,7 @@ impl BattleRuntime {
                 fight_version,
             )?);
             let (next_ai, _) = crate::engine::manager::card::start_decks_from_fight(
+                game_data,
                 &self.fight,
                 &self.managers.ex_point,
                 &self.managers.eureka,
@@ -445,6 +446,7 @@ impl BattleRuntime {
         fight_steps.extend(project_result(round_start, fight_version)?);
         if !self.round_state.is_finish {
             let cards = crate::engine::manager::card::start_decks_from_fight(
+                game_data,
                 &self.fight,
                 &self.managers.ex_point,
                 &self.managers.eureka,

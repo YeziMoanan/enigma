@@ -134,7 +134,8 @@ fn replay_to_round(path: &Path) -> anyhow::Result<FightRound> {
             battle::tower::system_plan_rule_skills(config::configs::get(), &fight, plan_id)
         })
         .unwrap_or_default();
-    let opening_determinism = captured_opening_determinism(&fight, &captured_start_round);
+    let opening_determinism =
+        captured_opening_determinism(config::configs::get(), &fight, &captured_start_round);
     let mut runtime = BattleRuntime::new_with_attributes(
         battle::catalog::BattleCatalog::new(config::configs::get()),
         fight,

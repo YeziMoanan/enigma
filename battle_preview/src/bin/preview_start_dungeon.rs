@@ -134,7 +134,8 @@ fn generate_reply(
         })
         .unwrap_or_default();
     let (ex_attributes, sp_attributes) = preview_attributes(&fight, path)?;
-    let opening_determinism = captured_opening_determinism(&fight, &captured_round);
+    let opening_determinism =
+        captured_opening_determinism(config::configs::get(), &fight, &captured_round);
     let mut runtime = BattleRuntime::new_with_attributes(
         battle::catalog::BattleCatalog::new(config::configs::get()),
         fight,

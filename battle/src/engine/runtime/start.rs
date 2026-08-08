@@ -102,6 +102,7 @@ impl BattleRuntime {
     }
 
     pub(super) fn build_start_round_from_schedule(&mut self) -> Result<FightRound, String> {
+        let game_data = self.game_data();
         let battle_id = self.fight.battle_id.unwrap_or_default();
         let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
         let context = crate::engine::skill::target::TargetContext {
@@ -117,6 +118,7 @@ impl BattleRuntime {
             context,
         );
         let (ai_deck, player_deck) = crate::engine::manager::card::start_decks_from_fight(
+            game_data,
             &self.fight,
             &self.managers.ex_point,
             &self.managers.eureka,
@@ -134,13 +136,14 @@ impl BattleRuntime {
             .filter(|card| !card.temp_card.unwrap_or_default())
             .count();
         let (opening_deal, preserve_refill_floor) = if let Some(configured) =
-            crate::engine::manager::card::start::configured_opening_deal(&self.fight)?
+            crate::engine::manager::card::start::configured_opening_deal(game_data, &self.fight)?
         {
             (configured, true)
         } else {
-            let drawn = self
-                .determinism
-                .draw_cards(&available_player_cards(&self.fight), opening_hand_size);
+            let drawn = self.determinism.draw_cards(
+                &available_player_cards(game_data, &self.fight),
+                opening_hand_size,
+            );
             if drawn.len() == opening_hand_size {
                 (drawn, false)
             } else {
@@ -148,7 +151,7 @@ impl BattleRuntime {
             }
         };
         self.determinism.enqueue_card_draws(
-            crate::engine::manager::card::start::configured_refill_draws(&self.fight)?,
+            crate::engine::manager::card::start::configured_refill_draws(game_data, &self.fight)?,
         );
         let opening_pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
         let opening_team_cards = crate::engine::mechanic::card::CardMechanic.special_team_cards(
@@ -156,7 +159,7 @@ impl BattleRuntime {
             &self.managers,
             &opening_deal,
         );
-        let draw_pile = crate::engine::manager::card::start::draw_bag(&self.fight);
+        let draw_pile = crate::engine::manager::card::start::draw_bag(game_data, &self.fight);
         let deck_num = crate::engine::manager::card::start::deck_size(&self.fight);
         self.managers
             .execute_card(CardCommand::SetAiQueue(CardSetAiQueue {
@@ -258,6 +261,6 @@ impl BattleRuntime {
     }
 }
 
-pub(super) fn available_player_cards(fight: &Fight) -> Vec<CardInfo> {
-    crate::engine::manager::card::pool::player_candidate_pool_with(fight, |_| false)
+pub(super) fn available_player_cards(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
+    crate::engine::manager::card::pool::player_candidate_pool_with(game_data, fight, |_| false)
 }

@@ -2,19 +2,20 @@ use sonettobuf::{CardInfo, Fight, FightEntityInfo};
 
 use crate::engine::skill::target::TargetEntity;
 
-pub fn player_candidate_pool(fight: &Fight) -> Vec<CardInfo> {
-    player_candidate_pool_with(fight, |entity| {
+pub fn player_candidate_pool(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
+    player_candidate_pool_with(game_data, fight, |entity| {
         entity.ex_point.unwrap_or_default() >= 5 + entity.expoint_max_add.unwrap_or_default()
     })
 }
 
 pub fn player_candidate_pool_with(
+    game_data: &config::GameDB,
     fight: &Fight,
     mut can_use_ex_skill: impl FnMut(&FightEntityInfo) -> bool,
 ) -> Vec<CardInfo> {
     normal_player_candidate_pool_with(fight, &mut can_use_ex_skill)
         .into_iter()
-        .chain(device_draw_bag(fight))
+        .chain(device_draw_bag(game_data, fight))
         .collect()
 }
 
@@ -38,17 +39,14 @@ pub(crate) fn normal_player_candidate_pool_with(
         .collect()
 }
 
-pub(crate) fn device_draw_bag(fight: &Fight) -> Vec<CardInfo> {
-    let Some(configs) = config::try_get() else {
-        return Vec::new();
-    };
+pub(crate) fn device_draw_bag(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
     fight
         .attacker
         .iter()
         .flat_map(|team| &team.entitys)
         .filter_map(|entity| {
-            let character = configs.character.get(entity.model_id?)?;
-            let device = configs.fight_device.get(character.device_id)?;
+            let character = game_data.character.get(entity.model_id?)?;
+            let device = game_data.fight_device.get(character.device_id)?;
             Some(
                 [&device.power_skill, &device.special_power_skill]
                     .into_iter()
@@ -177,14 +175,14 @@ mod tests {
         };
 
         assert_eq!(
-            player_candidate_pool_with(&fight, |_| true)
+            player_candidate_pool_with(crate::test_support::game_data(), &fight, |_| true)
                 .into_iter()
                 .filter_map(|card| card.skill_id)
                 .collect::<Vec<_>>(),
             vec![103, 102]
         );
         assert_eq!(
-            player_candidate_pool_with(&fight, |_| false)
+            player_candidate_pool_with(crate::test_support::game_data(), &fight, |_| false)
                 .into_iter()
                 .filter_map(|card| card.skill_id)
                 .collect::<Vec<_>>(),
