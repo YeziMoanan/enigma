@@ -33,6 +33,13 @@ pub struct TokenInfo {
     pub expires_at: i64,
 }
 
+fn login_token_hash(token: &str) -> String {
+    Sha256::digest(token.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// Get user account by email
 pub async fn get_user_by_email(pool: &SqlitePool, email: &str) -> Result<Option<UserAccount>> {
     let email = normalize_email(email);
@@ -201,7 +208,7 @@ pub async fn create_user(
         ));
     }
     starter_data::load_all_starter_data_tx(&mut tx, user_id).await?;
-    mail_campaign::deliver_initial_campaign(&mut tx, user_id, now).await?;
+    mail_campaign::deliver_all_campaigns(&mut tx, user_id, now).await?;
     tx.commit().await?;
 
     Ok(UserAccount {
@@ -248,6 +255,41 @@ pub async fn update_user_login(
     token_info: &TokenInfo,
     now: i64,
 ) -> Result<()> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let previous = sqlx::query(
+        "SELECT token, token_expires_at
+         FROM users
+         WHERE id = ?1",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if let Some(previous) = previous {
+        let previous_token: Option<String> = previous.try_get("token")?;
+        let previous_expires_at: Option<i64> = previous.try_get("token_expires_at")?;
+        if let Some(previous_token) = previous_token
+            && !previous_token.is_empty()
+            && previous_token != token_info.token
+        {
+            sqlx::query(
+                "INSERT INTO user_login_token_history
+                    (user_id, token_hash, expires_at, created_at, source)
+                 VALUES (?1, ?2, ?3, ?4, 'token_rotation')
+                 ON CONFLICT(user_id, token_hash) DO UPDATE SET
+                    expires_at = excluded.expires_at,
+                    created_at = excluded.created_at,
+                    source = excluded.source",
+            )
+            .bind(user_id)
+            .bind(login_token_hash(&previous_token))
+            .bind(previous_expires_at)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
     sqlx::query(
         "UPDATE users SET
             token = ?1,
@@ -263,9 +305,58 @@ pub async fn update_user_login(
     .bind(now)
     .bind(now)
     .bind(user_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
+    tx.commit().await?;
+
+    Ok(())
+}
+
+pub async fn is_user_login_token_valid(
+    pool: &SqlitePool,
+    user_id: i64,
+    token: &str,
+    now: i64,
+) -> Result<bool> {
+    let current_token: Option<String> = sqlx::query_scalar("SELECT token FROM users WHERE id = ?1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .flatten();
+
+    if current_token.as_deref() == Some(token) {
+        return Ok(true);
+    }
+
+    let alias_exists: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM user_login_token_history
+            WHERE user_id = ?1
+              AND token_hash = ?2
+              AND (expires_at IS NULL OR expires_at > ?3)
+         )",
+    )
+    .bind(user_id)
+    .bind(login_token_hash(token))
+    .bind(now)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(alias_exists != 0)
+}
+
+pub async fn touch_user_login(pool: &SqlitePool, user_id: i64, now: i64) -> Result<()> {
+    sqlx::query(
+        "UPDATE users
+         SET last_login_at = ?1, updated_at = ?1
+         WHERE id = ?2",
+    )
+    .bind(now)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

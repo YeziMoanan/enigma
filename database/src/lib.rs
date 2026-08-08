@@ -1,6 +1,10 @@
-use sqlx::{Connection, Row, SqliteConnection, migrate, migrate::MigrateError};
+use sqlx::{
+    Connection, Row, SqliteConnection, migrate,
+    migrate::MigrateError,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+};
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, time::Duration};
 
 use tracing::{info, warn};
 
@@ -14,7 +18,16 @@ pub use sqlx::{Error, SqlitePool, query, query_as};
 pub async fn connect_to(settings: &DatabaseSettings) -> sqlx::Result<SqlitePool> {
     ensure_database_exists(&settings.db_name)?;
 
-    SqlitePool::connect(&settings.to_string()).await
+    let options = SqliteConnectOptions::new()
+        .filename(&settings.db_name)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(30))
+        .foreign_keys(true);
+    SqlitePoolOptions::new()
+        .max_connections(8)
+        .connect_with(options)
+        .await
 }
 
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), migrate::MigrateError> {
@@ -412,6 +425,90 @@ mod tests {
         run_migrations(&pool).await.unwrap();
         pool.close().await;
 
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn shared_database_connections_use_wal_and_wait_for_writer() {
+        let name = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("enigma-db-contention-{name}"));
+        let settings = DatabaseSettings {
+            db_name: dir.join("sonetto.db").to_string_lossy().to_string(),
+        };
+        let first = connect_to(&settings).await.unwrap();
+        let second = connect_to(&settings).await.unwrap();
+        sqlx::query("CREATE TABLE contention_test (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&first)
+            .await
+            .unwrap();
+
+        let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&first)
+            .await
+            .unwrap();
+        let busy_timeout: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
+            .fetch_one(&second)
+            .await
+            .unwrap();
+        let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&second)
+            .await
+            .unwrap();
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+        assert_eq!(busy_timeout, 30_000);
+        assert_eq!(foreign_keys, 1);
+
+        let mut transaction = first.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        sqlx::query("INSERT INTO contention_test (id, value) VALUES (1, 'first')")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        let blocked_writer = tokio::spawn(async move {
+            sqlx::query("INSERT INTO contention_test (id, value) VALUES (2, 'second')")
+                .execute(&second)
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        transaction.commit().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), blocked_writer)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM contention_test")
+            .fetch_one(&first)
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+        first.close().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_pool_supports_concurrent_database_access() {
+        let name = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("enigma-db-serialized-pool-{name}"));
+        let pool = connect_to(&DatabaseSettings {
+            db_name: dir.join("sonetto.db").to_string_lossy().to_string(),
+        })
+        .await
+        .unwrap();
+
+        let connection = pool.acquire().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), pool.acquire())
+            .await
+            .unwrap()
+            .unwrap();
+        drop(connection);
+
+        pool.close().await;
         std::fs::remove_dir_all(dir).unwrap();
     }
 

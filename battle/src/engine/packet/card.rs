@@ -61,6 +61,21 @@ impl CardPacket {
                 config_effect,
             } => Self::mark_temporary(indices, team_type, config_effect),
             CardChange::CardsCompose { cards, .. } => Self::cards_compose(cards),
+            CardChange::MoveCard {
+                from_index,
+                to_index,
+            } => Self::move_card(from_index, to_index),
+            CardChange::UpdateCardData {
+                index,
+                area_type,
+                card,
+            } => Self::update_card_data(index, area_type, card),
+            CardChange::InsertHandCard { index, card } => Self::insert_hand_card(index, card),
+            CardChange::UnnamedStrengthen {
+                target_uid,
+                track,
+                amount,
+            } => Self::unnamed_strengthen(target_uid, track, amount),
         }
     }
 
@@ -246,6 +261,44 @@ impl CardPacket {
         }
     }
 
+    pub fn move_card(from_index: usize, to_index: usize) -> ActEffect {
+        ActEffect {
+            effect_type: Some(EffectType::Movecard as i32),
+            effect_num: i32::try_from(from_index.checked_add(1).unwrap_or_default()).ok(),
+            effect_num1: i32::try_from(to_index.checked_add(1).unwrap_or_default()).ok(),
+            ..Default::default()
+        }
+    }
+
+    pub fn update_card_data(index: usize, area_type: i32, card: CardInfo) -> ActEffect {
+        ActEffect {
+            effect_type: Some(EffectType::Updatecarddata as i32),
+            effect_num: i32::try_from(index.checked_add(1).unwrap_or_default()).ok(),
+            effect_num1: Some(area_type),
+            card_info: Some(wire_card(card)),
+            ..Default::default()
+        }
+    }
+
+    pub fn insert_hand_card(index: usize, card: CardInfo) -> ActEffect {
+        ActEffect {
+            effect_type: Some(EffectType::Inserthandcard as i32),
+            effect_num: i32::try_from(index.checked_add(1).unwrap_or_default()).ok(),
+            card_info: Some(wire_card(card)),
+            ..Default::default()
+        }
+    }
+
+    pub fn unnamed_strengthen(target_uid: i64, track: i32, amount: i32) -> ActEffect {
+        ActEffect {
+            target_id: Some(target_uid),
+            effect_type: Some(EffectType::Unnamedstrengthen as i32),
+            effect_num: Some(track),
+            effect_num1: Some(amount),
+            ..Default::default()
+        }
+    }
+
     pub fn card_invalid(card_index: i32, team_type: i32, config_effect: i32) -> ActEffect {
         ActEffect {
             effect_type: Some(EffectType::Cardinvalid as i32),
@@ -411,6 +464,31 @@ mod tests {
             CardPacket::clear_card_energy(Vec::new(), 1).effect_num1,
             Some(0)
         );
+    }
+
+    #[test]
+    fn unnamed_card_packets_use_one_based_positions_and_exact_effect_types() {
+        let card = crate::engine::manager::card::unnamed::card(42, 31470131).unwrap();
+        let insert = CardPacket::insert_hand_card(0, card.clone());
+        let update = CardPacket::update_card_data(2, 0, card);
+        let moved = CardPacket::move_card(0, 3);
+        let strengthen = CardPacket::unnamed_strengthen(42, 2, 1);
+
+        assert_eq!(insert.effect_type, Some(EffectType::Inserthandcard as i32));
+        assert_eq!(insert.effect_num, Some(1));
+        assert_eq!(insert.card_info.unwrap().target_uid, Some(42));
+        assert_eq!(update.effect_type, Some(EffectType::Updatecarddata as i32));
+        assert_eq!(update.effect_num, Some(3));
+        assert_eq!(update.effect_num1, Some(0));
+        assert_eq!(moved.effect_type, Some(EffectType::Movecard as i32));
+        assert_eq!(moved.effect_num, Some(1));
+        assert_eq!(moved.effect_num1, Some(4));
+        assert_eq!(
+            strengthen.effect_type,
+            Some(EffectType::Unnamedstrengthen as i32)
+        );
+        assert_eq!(strengthen.target_id, Some(42));
+        assert_eq!(strengthen.effect_num, Some(2));
     }
 
     #[test]

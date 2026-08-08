@@ -665,6 +665,7 @@ pub(super) fn damage_ops(
                         | crate::engine::entity::attr::AttrId::UltimateMightMultiplier
                         | crate::engine::entity::attr::AttrId::IncantationSkillUltMightMultiplier
                         | crate::engine::entity::attr::AttrId::IncantationMightMultiplier
+                        | crate::engine::entity::attr::AttrId::UltimateIncantationMightMultiplier
                 )
                 })
                 .collect::<Vec<_>>();

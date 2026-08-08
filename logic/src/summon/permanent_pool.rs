@@ -43,16 +43,15 @@ pub fn eligible_six_stars(tables: &config::GameDB) -> PermanentPoolSnapshot {
             character.name_eng.clone()
         };
         let reason = exclusion_reason(tables, character);
+        included.push(PermanentHero {
+            id: character.id,
+            name: name.clone(),
+        });
         if let Some(reason) = reason {
             excluded.push(ExcludedHero {
                 id: character.id,
                 name,
                 reason,
-            });
-        } else {
-            included.push(PermanentHero {
-                id: character.id,
-                name,
             });
         }
     }
@@ -128,9 +127,9 @@ mod tests {
             .map(|hero| hero.id)
             .collect::<Vec<_>>();
 
-        assert!(included.contains(&3143));
-        for excluded in [3136, 3144, 3145, 3146, 3147] {
-            assert!(!included.contains(&excluded));
+        assert_eq!(included.len(), 70);
+        for included_id in [3120, 3140, 3144, 3145, 3146, 3147] {
+            assert!(included.contains(&included_id));
         }
         assert!(
             snapshot

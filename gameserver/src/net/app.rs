@@ -1,51 +1,67 @@
 use sqlx::SqlitePool;
-use tokio::sync::{Mutex, mpsc};
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use crate::net::outbound::CommandPacket;
 
 /// App-level shared state
 pub struct AppState {
-    next_down_tag: Mutex<u8>,
     pub db: &'static SqlitePool,
     pub tables: &'static config::GameDB,
-    sessions: dashmap::DashMap<i64, mpsc::Sender<CommandPacket>>,
+    sessions: dashmap::DashMap<i64, Arc<SessionHandle>>,
+}
+
+/// The sender and identity of one TCP connection.
+///
+/// Keeping the handle in the session registry lets disconnect cleanup verify
+/// that it is removing the same connection that was registered, rather than
+/// accidentally removing a newer login for the same player.
+pub struct SessionHandle {
+    pub sender: mpsc::Sender<CommandPacket>,
 }
 
 #[allow(dead_code)]
 impl AppState {
     pub fn new(db: SqlitePool, tables: &'static config::GameDB) -> Self {
         Self {
-            next_down_tag: Mutex::new(0),
             db: Box::leak(Box::new(db)),
             tables,
             sessions: dashmap::DashMap::new(),
         }
     }
 
-    pub async fn reserve_down_tag(&self) -> u8 {
-        let mut tag = self.next_down_tag.lock().await;
-        let current = *tag & 0x7F;
-        *tag = (*tag + 1) & 0x7F;
-        current
+    pub fn get_session_sender(&self, player_id: i64) -> Option<mpsc::Sender<CommandPacket>> {
+        self.sessions
+            .get(&player_id)
+            .map(|v| v.value().sender.clone())
     }
 
-    pub fn get_session_sender(&self, player_id: i64) -> Option<mpsc::Sender<CommandPacket>> {
+    pub fn get_session_handle(&self, player_id: i64) -> Option<Arc<SessionHandle>> {
         self.sessions.get(&player_id).map(|v| v.value().clone())
     }
 
-    pub fn register_session(&self, player_id: i64, outbound: mpsc::Sender<CommandPacket>) {
-        self.sessions.insert(player_id, outbound);
+    pub fn register_session(&self, player_id: i64, session: Arc<SessionHandle>) {
+        self.sessions.insert(player_id, session);
     }
 
-    pub fn unregister_session(&self, player_id: i64) {
-        self.sessions.remove(&player_id);
+    pub fn unregister_session(&self, player_id: i64, session: &Arc<SessionHandle>) -> bool {
+        let Some(entry) = self.sessions.get(&player_id) else {
+            return false;
+        };
+        if !Arc::ptr_eq(entry.value(), session) {
+            return false;
+        }
+        drop(entry);
+        self.sessions
+            .remove_if(&player_id, |_, current| Arc::ptr_eq(current, session))
+            .is_some()
     }
 
     pub async fn disconnect_session(&self, player_id: i64) -> bool {
-        let Some((_, sender)) = self.sessions.remove(&player_id) else {
+        let Some((_, session)) = self.sessions.remove(&player_id) else {
             return false;
         };
-        let _ = sender.send(CommandPacket::Disconnect).await;
+        let _ = session.sender.send(CommandPacket::Disconnect).await;
         true
     }
 

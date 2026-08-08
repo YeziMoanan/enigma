@@ -55,6 +55,21 @@ impl ImpromptuDefinition {
         ))
     }
 
+    pub fn from_features(features: &[ActiveBuffFeature], emitter_uid: i64) -> Option<Self> {
+        let mut definition = Self::from_config()?;
+        if let Some(skill_id) = features
+            .iter()
+            .filter(|feature| feature.owner_alive && feature.owner_uid == emitter_uid)
+            .filter(|feature| buff_act::is_kind(feature, BuffActKind::ChangeEmitterSkill))
+            .filter_map(|feature| feature.values.get(1).copied())
+            .filter(|skill_id| *skill_id > 0)
+            .last()
+        {
+            definition.skill_id = skill_id;
+        }
+        Some(definition)
+    }
+
     pub const fn skill_id(self) -> i32 {
         self.skill_id
     }
@@ -133,7 +148,7 @@ pub fn enable_rule_ops(
         })
         .filter_map(|feature| {
             let origin = buff_act::feature_command_origin(feature)?;
-            let definition = ImpromptuDefinition::from_config()?;
+            let definition = ImpromptuDefinition::from_features(features, emitter_uid)?;
             Some(ImpromptuEnable {
                 team: feature.team_type,
                 emitter_uid,
@@ -325,7 +340,7 @@ pub fn action_queue_committed_rule_ops(
         .into_iter()
         .collect::<Vec<_>>();
     if current.saturating_add(gained) > 0
-        && let Some(definition) = ImpromptuDefinition::from_config()
+        && let Some(definition) = ImpromptuDefinition::from_features(&features, emitter_uid)
         && let Some(origin) = buff_act::feature_command_origin(tag)
     {
         ops.push(RuleOp::Command(BattleCommand::Card(
@@ -382,18 +397,26 @@ pub fn build_plan(managers: &BattleManagers, team: i32, emitter_uid: i64) -> Opt
     if inspiration <= 0 {
         return None;
     }
-    let definition = ImpromptuDefinition::from_config()?;
+    let definition = ImpromptuDefinition::from_features(&features, emitter_uid)?;
+    let attack_count = crate::engine::skill::buff_act::emitter_num_change::attack_count_for(
+        &managers.buff,
+        &managers.hp,
+        emitter_uid,
+    );
     Some(ImpromptuPlan {
         source_uid: emitter_uid,
         skill_id: definition.skill_id(),
         inspiration,
-        attack_count: crate::engine::skill::buff_act::emitter_num_change::attack_count_for(
-            &managers.buff,
-            &managers.hp,
-            emitter_uid,
-        ),
+        attack_count,
         damage_rate_opcode: definition.damage_up_act_id(),
-        damage_rate: definition.damage_rate(inspiration),
+        damage_rate: definition.damage_rate(inspiration).saturating_add(
+            crate::engine::skill::buff_act::emitter_num_change::attack_limit_damage_rate_for(
+                &managers.buff,
+                &managers.hp,
+                emitter_uid,
+                attack_count,
+            ),
+        ),
     })
 }
 

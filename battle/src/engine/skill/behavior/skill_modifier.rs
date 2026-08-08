@@ -10,6 +10,13 @@ use crate::engine::{
 
 pub(super) struct Handler;
 
+pub(super) fn supports_change_targets(behavior: &ParsedBehavior) -> bool {
+    matches!(
+        behavior.args.as_slice(),
+        [buff_id, amount, value] if *buff_id > 0 && *amount >= 0 && *value >= 0
+    )
+}
+
 impl BehaviorHandler for Handler {
     fn emit_ops(context: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Option<Vec<RuleOp>> {
         if behavior.spec.kind == BehaviorKind::MustCrit {
@@ -47,39 +54,45 @@ impl BehaviorHandler for Handler {
             }
             return Some(ops);
         }
-        let [type_or_buff_id, amount, value] = behavior.args.as_slice() else {
-            return None;
+        let (type_or_buff_id, amount, value) = match behavior.spec.kind {
+            BehaviorKind::ConsumeBuffUpSkillDamageRate => {
+                let [type_or_buff_id, amount, value] = behavior.args.as_slice() else {
+                    return None;
+                };
+                (*type_or_buff_id, *amount, *value)
+            }
+            BehaviorKind::ConsumeBuffChangeTargets => {
+                let [type_or_buff_id, amount, value] = behavior.args.as_slice() else {
+                    return None;
+                };
+                (*type_or_buff_id, *amount, *value)
+            }
+            _ => return None,
         };
-        if !matches!(
-            behavior.spec.kind,
-            BehaviorKind::ConsumeBuffUpSkillDamageRate | BehaviorKind::ConsumeBuffChangeTargets
-        ) {
-            return None;
-        }
         let mut ops = Vec::new();
-        if *amount > 0 {
+        if amount > 0 {
             ops.push(RuleOp::Command(BattleCommand::Buff(BuffCommand::Consume(
                 BuffConsume {
                     origin: super::command_origin(behavior)?,
                     target_uid: context.target_uid,
-                    selector: BuffSelector::IdOrType(*type_or_buff_id),
-                    amount: *amount,
+                    selector: BuffSelector::IdOrType(type_or_buff_id),
+                    amount,
                     depleted: DepletedBuff::Remove,
                 },
             ))));
         }
         match behavior.spec.kind {
-            BehaviorKind::ConsumeBuffUpSkillDamageRate if *value != 0 => {
+            BehaviorKind::ConsumeBuffUpSkillDamageRate if value != 0 => {
                 context.modifiers.rates.push(SkillRateModifier::fixed(
                     0,
                     behavior.spec.key.opcode,
-                    *value,
+                    value,
                     true,
                 ));
             }
-            BehaviorKind::ConsumeBuffChangeTargets if *value > 0 => {
+            BehaviorKind::ConsumeBuffChangeTargets if value > 0 => {
                 ops.push(RuleOp::ModifyActiveSkillTargets {
-                    additional_count: *value,
+                    additional_count: value,
                 });
             }
             _ => {}

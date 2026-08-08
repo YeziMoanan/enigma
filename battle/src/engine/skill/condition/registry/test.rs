@@ -944,6 +944,32 @@ fn skill_target_count_is_a_filter_with_an_event_dependency() {
 }
 
 #[test]
+fn mei_leier_round_end_buff_gate_uses_entity_settlement() {
+    let definition = find_key(19303, "HasBuffId").unwrap();
+    assert_eq!(
+        definition.role,
+        ConditionRole::Trigger {
+            event: EventKind::RoundEndEntitySettlement,
+            phase: None,
+        }
+    );
+    assert!(definition.filters_behavior_targets);
+}
+
+#[test]
+fn immediate_skill_type_keeps_its_exact_action_phase() {
+    let definition = find_key(500203, "SkillType").unwrap();
+
+    assert_eq!(
+        definition.role,
+        ConditionRole::Trigger {
+            event: EventKind::SkillAction,
+            phase: Some(SkillPhase::Immediate),
+        }
+    );
+}
+
+#[test]
 fn child_buff_allocation_is_owned_by_the_exact_condition_route() {
     assert_eq!(
         find_key(662208, "ActiveUseSkillId").map(|definition| definition.consequence),

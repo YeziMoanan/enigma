@@ -116,6 +116,84 @@ fn move_and_dissolve_commit_through_the_card_owner() {
 }
 
 #[test]
+fn unnamed_card_is_locked_until_updated_and_casts_as_its_owner() {
+    let normal = |skill_id| CardInfo {
+        uid: Some(10),
+        skill_id: Some(skill_id),
+        ..Default::default()
+    };
+    let mut manager = CardManager::new(vec![normal(100), normal(200), normal(300)]);
+
+    let inserted = manager
+        .execute_command(CardCommand::InsertUnnamed(CardInsertUnnamed {
+            origin: ORIGIN,
+            owner_uid: 42,
+            skill_id: 31470131,
+            index: 1,
+        }))
+        .unwrap();
+    let card = &manager.hand()[1];
+    assert_eq!(card.uid, Some(0));
+    assert_eq!(card.target_uid, Some(42));
+    assert!(crate::engine::manager::card::unnamed::is_locked(card));
+    assert!(matches!(
+        inserted.operation,
+        Some(CardChange::InsertHandCard { index: 1, .. })
+    ));
+
+    assert_eq!(
+        manager.execute_command(CardCommand::Play(CardPlay {
+            origin: ORIGIN,
+            hand_index: 1,
+            target_uid: Some(-1),
+            chosen_skill_id: None,
+            choice: None,
+            recorded_skill: None,
+        })),
+        Err(CardCommandError::InvalidPlaySkill)
+    );
+
+    manager
+        .execute_command(CardCommand::UpdateUnnamed(CardUpdateUnnamed {
+            origin: ORIGIN,
+            index: 1,
+            lock: Some(false),
+            strengthen_track: Some(1),
+            strengthen_amount: 2,
+        }))
+        .unwrap();
+    let moved = manager
+        .execute_command(CardCommand::MoveServer {
+            origin: ORIGIN,
+            from_index: 1,
+            to_index: 3,
+        })
+        .unwrap();
+    assert!(matches!(
+        moved.operation,
+        Some(CardChange::MoveCard {
+            from_index: 1,
+            to_index: 3,
+        })
+    ));
+
+    let played = manager
+        .execute_command(CardCommand::Play(CardPlay {
+            origin: ORIGIN,
+            hand_index: 3,
+            target_uid: Some(-1),
+            chosen_skill_id: None,
+            choice: None,
+            recorded_skill: None,
+        }))
+        .unwrap()
+        .played
+        .unwrap();
+    assert_eq!(played.caster_uid, 42);
+    assert_eq!(played.skill_id, 31470131);
+}
+
+#[test]
 fn temporary_card_and_energy_changes_share_one_command_path() {
     let mut manager = CardManager::new(vec![CardInfo {
         uid: Some(10),

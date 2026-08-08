@@ -267,6 +267,9 @@ impl SkillEffectCatalog {
                             crate::engine::mechanic::impromptu::ImpromptuDefinition::from_config()
                                 .map(|definition| definition.skill_id()),
                         ),
+                        Some(BuffActKind::ChangeEmitterSkill) => {
+                            skills.extend(values.get(1).copied().filter(|skill_id| *skill_id > 0))
+                        }
                         Some(BuffActKind::BeatBackDependOnAttackMe) => {
                             skills.extend(values.iter().skip(1).take(2).copied())
                         }

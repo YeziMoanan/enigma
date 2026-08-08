@@ -1,6 +1,188 @@
-use sonettobuf::{BuffInfo, CardInfo, Fight, FightEntityInfo, FightTeam, HeroAttribute, PowerInfo};
+use sonettobuf::{
+    BuffActInfo, BuffInfo, CardInfo, Fight, FightEntityInfo, FightTeam, HeroAttribute, PowerInfo,
+};
 
 use super::*;
+
+fn mei_leier_context_fight(charge: i32) -> Fight {
+    Fight {
+        version: Some(7),
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                model_id: Some(3146),
+                team_type: Some(1),
+                current_hp: Some(100),
+                buffs: vec![BuffInfo {
+                    uid: Some(31460143),
+                    buff_id: Some(31460143),
+                    from_uid: Some(10),
+                    act_info: vec![BuffActInfo {
+                        act_id: Some(1139),
+                        param: vec![charge],
+                        str_param: Some(String::new()),
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+fn mei_leier_ops(fight: &Fight, behavior: &ParsedBehavior) -> Vec<RuleOp> {
+    let managers = BattleManagers::seeded(fight);
+    let pool = crate::engine::skill::target::TargetPool::from_fight(fight);
+    let mut determinism = crate::engine::runtime::determinism::RoundDeterminism::default();
+    let mut modifiers = crate::engine::skill::action::SkillModifiers::default();
+    let mut target = crate::engine::skill::target::TargetContext::default();
+    rule_ops(
+        BehaviorOpContext {
+            source_uid: 10,
+            source_team: 1,
+            target_uid: 10,
+            active_skill_id: 31460173,
+            transfer_count: 1,
+            event: None,
+            managers: &managers,
+            pool: &pool,
+            determinism: &mut determinism,
+            modifiers: &mut modifiers,
+            target: &mut target,
+        },
+        behavior,
+    )
+    .unwrap()
+}
+
+#[test]
+fn consume_buff_reset_device_consumes_layers_and_restarts_source_device() {
+    crate::test_support::init_config();
+    let behavior = ParsedBehavior::new(60308, "ConsumeBuffResetDevice", vec![31450142, 4]);
+    assert!(supports_consume_buff_reset_device(&behavior));
+    assert!(!supports_consume_buff_reset_device(&ParsedBehavior::new(
+        60308,
+        "ConsumeBuffResetDevice",
+        vec![31450142],
+    )));
+
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                model_id: Some(3145),
+                team_type: Some(1),
+                current_hp: Some(1),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let managers = BattleManagers::seeded(&fight);
+    let pool = crate::engine::skill::target::TargetPool::from_fight(&fight);
+    let mut determinism = crate::engine::runtime::determinism::RoundDeterminism::default();
+    let mut modifiers = crate::engine::skill::action::SkillModifiers::default();
+    let mut target = crate::engine::skill::target::TargetContext::default();
+    let ops = rule_ops(
+        BehaviorOpContext {
+            source_uid: 10,
+            source_team: 1,
+            target_uid: 10,
+            active_skill_id: 31450141,
+            transfer_count: 1,
+            event: None,
+            managers: &managers,
+            pool: &pool,
+            determinism: &mut determinism,
+            modifiers: &mut modifiers,
+            target: &mut target,
+        },
+        &behavior,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        ops.as_slice(),
+        [
+            RuleOp::Command(BattleCommand::Buff(BuffCommand::Consume(consume))),
+            RuleOp::Command(BattleCommand::Conduit(
+                ConduitCommand::RestartDevice { source_uid }
+            )),
+        ] if consume.target_uid == 10
+            && consume.selector == BuffSelector::IdOrType(31450142)
+            && consume.amount == 4
+            && *source_uid == 10
+    ));
+}
+
+#[test]
+fn mei_leier_charge_updates_the_hidden_buff_state_in_raw_units() {
+    crate::test_support::init_config();
+    let behavior = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(60298, "AddMeiLeiErCharge"),
+        vec![100_000],
+        vec!["100000".into()],
+    );
+    let ops = mei_leier_ops(&mei_leier_context_fight(0), &behavior);
+
+    assert!(matches!(
+        ops.as_slice(),
+        [RuleOp::Command(BattleCommand::Buff(BuffCommand::SetState(state)))]
+            if state.act_info.as_ref().and_then(|infos| infos.first())
+                .and_then(|info| info.param.first()) == Some(&100_000)
+    ));
+}
+
+#[test]
+fn mei_leier_charge_clamps_to_the_configured_limit() {
+    crate::test_support::init_config();
+    let behavior = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(60298, "AddMeiLeiErCharge"),
+        vec![100_000],
+        vec!["100000".into()],
+    );
+    let ops = mei_leier_ops(&mei_leier_context_fight(125_000), &behavior);
+
+    assert!(matches!(
+        ops.as_slice(),
+        [RuleOp::Command(BattleCommand::Buff(BuffCommand::SetState(state)))]
+            if state.act_info.as_ref().and_then(|infos| infos.first())
+                .and_then(|info| info.param.first()) == Some(&150_000)
+    ));
+}
+
+#[test]
+fn mei_leier_consume_grants_every_configured_reward_group() {
+    crate::test_support::init_config();
+    let behavior = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(60305, "ConsumeBuffMeiLeiEr"),
+        vec![31460006, 1, 12_500, 0],
+        vec![
+            "31460006".into(),
+            "1".into(),
+            "12500".into(),
+            "0".into(),
+            "31460004,4:31460111,1".into(),
+        ],
+    );
+    let ops = mei_leier_ops(&mei_leier_context_fight(100_000), &behavior);
+
+    assert!(matches!(
+        ops.as_slice(),
+        [
+            RuleOp::Command(BattleCommand::Buff(BuffCommand::Consume(_))),
+            RuleOp::Command(BattleCommand::Buff(BuffCommand::SetState(state))),
+            RuleOp::Command(BattleCommand::Buff(BuffCommand::Grant(first))),
+            RuleOp::Command(BattleCommand::Buff(BuffCommand::Grant(second))),
+        ] if state.act_info.as_ref().and_then(|infos| infos.first())
+                .and_then(|info| info.param.first()) == Some(&112_500)
+            && (first.buff_id, first.amount) == (31460004, Some(4))
+            && (second.buff_id, second.amount) == (31460111, Some(1))
+    ));
+}
 
 #[test]
 fn barcarola_resources_require_one_nonzero_configured_delta() {

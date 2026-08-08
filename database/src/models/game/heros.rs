@@ -233,7 +233,19 @@ impl HeroData {
         ex_attr: sonettobuf::HeroExAttribute,
         sp_attr: sonettobuf::HeroSpAttribute,
     ) -> sonettobuf::HeroInfo {
-        let h = self;
+        let mut h = self;
+        let passive_skill_level =
+            visible_passive_skill_levels(h.record.hero_id, h.record.rank, &h.passive_skill_levels);
+        let visible_skin = visible_hero_skin(h.record.hero_id, h.record.skin);
+        if visible_skin != h.record.skin
+            && !h.skin_list.iter().any(|skin| skin.skin == visible_skin)
+        {
+            h.skin_list.push(HeroSkin {
+                hero_uid: h.record.uid,
+                skin: visible_skin,
+                expire_sec: 0,
+            });
+        }
         sonettobuf::HeroInfo {
             uid: h.record.uid,
             user_id: h.record.user_id,
@@ -243,10 +255,10 @@ impl HeroData {
             exp: Some(h.record.exp),
             rank: Some(h.record.rank),
             breakthrough: Some(h.record.breakthrough),
-            skin: Some(h.record.skin),
+            skin: Some(visible_skin),
             faith: Some(h.record.faith),
             active_skill_level: Some(h.record.active_skill_level),
-            passive_skill_level: h.passive_skill_levels,
+            passive_skill_level,
             ex_skill_level: Some(h.record.ex_skill_level),
             voice: h.voices,
             voice_heard: h.voices_heard,
@@ -283,6 +295,36 @@ impl HeroData {
             extra_str: Some(h.record.extra_str),
         }
     }
+}
+
+fn visible_passive_skill_levels(hero_id: i32, rank: i32, stored: &[i32]) -> Vec<i32> {
+    if !stored.is_empty() {
+        return stored.to_vec();
+    }
+    config::configs::get()
+        .skill_passive_level
+        .iter()
+        .filter(|row| row.hero_id == hero_id && row.skill_level <= rank)
+        .map(|row| row.skill_level)
+        .collect()
+}
+
+pub fn visible_hero_skin(hero_id: i32, stored_skin: i32) -> i32 {
+    let game = config::configs::get();
+    let Some(character) = game.character.get(hero_id) else {
+        return stored_skin;
+    };
+    if character.is_online == "1"
+        || character.mvskin_id == 0
+        || stored_skin != character.skin_id
+        || !game
+            .skin
+            .get(character.mvskin_id)
+            .is_some_and(|skin| skin.character_id == hero_id)
+    {
+        return stored_skin;
+    }
+    character.mvskin_id
 }
 
 impl UserHeroModel {
@@ -330,7 +372,7 @@ impl UserHeroModel {
     }
 
     pub async fn create_hero(&self, hero_id: i32) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let uid = HeroModel::<HeroData>::create_hero(self, &mut tx, hero_id).await?;
         tx.commit().await?;
         Ok(uid)
@@ -698,7 +740,7 @@ impl UserHeroModel {
     }
 
     pub async fn apply_insight_item(&self, upgrade: InsightUpgrade) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let consumed = sqlx::query(
             "UPDATE insight_items
              SET quantity = quantity - 1
@@ -1171,10 +1213,13 @@ impl HeroModel<HeroData> for UserHeroModel {
             .map(|row| row.rank)
             .ok_or_else(|| anyhow!("hero {hero_id} has no character_rank config"))?;
 
-        let default_skin = game_data
-            .default_character_skin(hero_id)
-            .map(|row| row.id)
-            .unwrap_or(hero_skin);
+        let default_skin = visible_hero_skin(
+            hero_id,
+            game_data
+                .default_character_skin(hero_id)
+                .map(|row| row.id)
+                .unwrap_or(hero_skin),
+        );
 
         let (destiny_rank, destiny_level, destiny_stone, red_dot_type) = (0, 0, 0, 0);
 
@@ -2332,5 +2377,34 @@ impl HeroModel<HeroData> for UserHeroModel {
             name: Some(template_data.0),
             style: Some(template_data.1),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    fn init_config() {
+        let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+        let _ = config::init(&data_dir);
+    }
+
+    #[test]
+    fn passive_skill_levels_fall_back_to_the_hero_insight_rank() {
+        init_config();
+
+        assert_eq!(super::visible_passive_skill_levels(3110, 3, &[]), [1, 2, 3]);
+        assert_eq!(super::visible_passive_skill_levels(3110, 1, &[]), [1]);
+        assert_eq!(
+            super::visible_passive_skill_levels(3110, 3, &[9, 8]),
+            [9, 8]
+        );
+    }
+
+    #[test]
+    fn offline_rhiannon_uses_the_available_battle_skin() {
+        init_config();
+
+        assert_eq!(super::visible_hero_skin(3146, 314601), 314602);
+        assert_eq!(super::visible_hero_skin(3146, 314602), 314602);
+        assert_eq!(super::visible_hero_skin(3144, 314401), 314401);
     }
 }

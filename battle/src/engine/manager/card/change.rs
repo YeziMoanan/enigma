@@ -39,4 +39,22 @@ pub enum CardChange {
         cards: Vec<CardInfo>,
         team_type: i32,
     },
+    MoveCard {
+        from_index: usize,
+        to_index: usize,
+    },
+    UpdateCardData {
+        index: usize,
+        area_type: i32,
+        card: CardInfo,
+    },
+    InsertHandCard {
+        index: usize,
+        card: CardInfo,
+    },
+    UnnamedStrengthen {
+        target_uid: i64,
+        track: i32,
+        amount: i32,
+    },
 }

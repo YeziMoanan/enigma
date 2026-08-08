@@ -134,6 +134,7 @@ pub enum ParsedConditionKind {
     PerExPoint {
         threshold: i32,
     },
+    PerAura,
     ExPointDecrease {
         threshold: i32,
     },
@@ -171,6 +172,11 @@ pub enum ParsedConditionKind {
     },
     PerConduitCurrentCost {
         threshold: i32,
+    },
+    ConduitCounter {
+        counter_id: i32,
+        divisor: i32,
+        max_count: i32,
     },
     ConduitExPoint {
         compare_code: i32,
@@ -494,8 +500,14 @@ pub(super) fn hurt_restrained(_: i32, _: &str, _: &[String]) -> Option<ParsedCon
     Some(ParsedConditionKind::HurtRestrained)
 }
 
-pub(super) fn hurt_not_restrained(_: i32, _: &str, _: &[String]) -> Option<ParsedConditionKind> {
-    Some(ParsedConditionKind::HurtNotRestrained)
+pub(super) fn hurt_not_restrained(
+    _: i32,
+    _: &str,
+    raw_args: &[String],
+) -> Option<ParsedConditionKind> {
+    raw_args
+        .is_empty()
+        .then_some(ParsedConditionKind::HurtNotRestrained)
 }
 
 fn negate_kind(kind: ParsedConditionKind) -> ParsedConditionKind {

@@ -54,6 +54,10 @@ pub(super) fn supports_direct_no_action_skill(behavior: &ParsedBehavior) -> bool
     matches!(behavior.args.as_slice(), [skill_id] | [skill_id, _] if *skill_id > 0)
 }
 
+pub(super) fn supports_direct_skill_not_extra(behavior: &ParsedBehavior) -> bool {
+    matches!(behavior.args.as_slice(), [skill_id] | [skill_id, 0 | 1] if *skill_id > 0)
+}
+
 pub(super) fn supports_direct_skill_card(behavior: &ParsedBehavior) -> bool {
     matches!(behavior.args.as_slice(), [skill_id, 0] if *skill_id > 0)
 }
@@ -264,6 +268,18 @@ impl BehaviorHandler for Handler {
             }
             BehaviorKind::DirectUseSkillNoAct => direct_no_action_skill(context, behavior),
             BehaviorKind::DirectUseSkillNoAct2 => direct_no_action_skill(context, behavior),
+            BehaviorKind::DirectUseSkillNotExtra => {
+                let skill_id = behavior.arg(0)?;
+                let mut invocation: crate::engine::skill::action::SkillInvocation =
+                    crate::engine::skill::action::SkillRequest {
+                        source_uid: context.source_uid,
+                        skill_id,
+                    }
+                    .into();
+                invocation.target =
+                    crate::engine::skill::action::SkillTarget::Explicit(context.target_uid);
+                Some(vec![RuleOp::Skill(invocation)])
+            }
             BehaviorKind::DirectUseBigSkill => direct_big_skill_rule_ops(context, behavior),
             BehaviorKind::DirectUseGroupAndStarSkill => {
                 let [group, star, ..] = behavior.args.as_slice() else {

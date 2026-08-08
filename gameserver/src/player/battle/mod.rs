@@ -364,7 +364,7 @@ impl ActiveBattle {
 
         let checkpoint = self.checkpoint_json()?;
         let entry_cost = serde_json::to_string(costs)?;
-        let mut tx = pool.begin().await?;
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
         let consumed = reward::RewardManager::new(player_id)
             .consume(&mut tx, costs)
             .await?;

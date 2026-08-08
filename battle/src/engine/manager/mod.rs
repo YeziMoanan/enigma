@@ -118,6 +118,11 @@ pub(crate) fn persistent_attribute_delta(
             .filter(|feature| feature.owner_uid == uid)
             .map(|feature| buff_act::dynamic_attribute_delta(feature, attr_id, buffs, hp, true))
             .sum::<i32>()
+        + active_features
+            .iter()
+            .filter(|feature| feature.owner_uid == uid)
+            .map(|feature| buff_act::each_change_attr_one_way::rate_delta(feature, attr_id))
+            .sum::<i32>()
         + buff_act::raspberry::attribute_delta(buffs, uid, attr_id)
 }
 
@@ -163,7 +168,18 @@ impl BattleManagers {
                     self.attribute.get(uid, attr_id)
                         + self.persistent_attribute_delta(uid, attr_id),
                 );
-                (base + base * delta / 1000).clamp(0, i64::from(i32::MAX)) as i32
+                let flat = self
+                    .buff
+                    .active_features(&self.hp)
+                    .iter()
+                    .filter(|feature| feature.owner_uid == uid)
+                    .map(|feature| {
+                        crate::engine::skill::buff_act::each_change_attr_one_way::flat_delta(
+                            feature, attr_id,
+                        )
+                    })
+                    .sum::<i32>();
+                (base + base * delta / 1000 + i64::from(flat)).clamp(0, i64::from(i32::MAX)) as i32
             }
             _ => self.attribute.get(uid, attr_id) + self.persistent_attribute_delta(uid, attr_id),
         }

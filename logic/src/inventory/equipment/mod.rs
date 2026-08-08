@@ -146,7 +146,7 @@ pub(super) async fn strengthen(
             .collect(),
         ..Default::default()
     };
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     reward::consume(&mut tx, player_id, &costs).await?;
     if !database::db::game::equipment::apply_strengthen_in_transaction(
         &mut tx,
@@ -308,7 +308,7 @@ pub(super) async fn break_equip(
             .currencies
             .push((EQUIPMENT_CURRENCY_ID, next.score_cost));
     }
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     match reward::consume(&mut tx, player_id, &all_costs).await {
         Ok(_) => {}
         Err(AppError::InsufficientItems | AppError::InsufficientCurrency) => {
@@ -425,7 +425,7 @@ pub(super) async fn refine(
     }
     level = level.min(max_level);
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     if !equipment::refine_equipment(
         &mut tx,
         player_id,

@@ -494,6 +494,18 @@ pub(super) fn direct_damage(
                 ),
             ),
             (
+                "one_way",
+                active_features
+                    .iter()
+                    .filter(|feature| feature.owner_uid == entity.uid)
+                    .map(|feature| {
+                        crate::engine::skill::buff_act::each_change_attr_one_way::rate_delta(
+                            feature, attr_id,
+                        )
+                    })
+                    .sum::<i32>(),
+            ),
+            (
                 "hero_id",
                 active_features
                     .iter()
@@ -654,6 +666,17 @@ pub(super) fn direct_damage(
             )
         })
         .sum::<i32>();
+    let flat_attack = flat_attack
+        + source_active_features
+            .iter()
+            .filter(|feature| feature.owner_uid == source.uid)
+            .map(|feature| {
+                crate::engine::skill::buff_act::each_change_attr_one_way::flat_delta(
+                    feature,
+                    AttrId::Attack,
+                )
+            })
+            .sum::<i32>();
     let base_attack = attributes.base(source.uid, AttrId::Attack);
     let attack_rate = 1000
         + attributes.get(source.uid, AttrId::Attack)
@@ -732,6 +755,10 @@ pub(super) fn direct_damage(
         + attribute_delta(source, AttrId::UltimateMight)
         + attack_attr(AttrId::UltimateMight)
         + attack_local_attribute(AttrId::UltimateMight);
+    let incantation_might = attributes.get(source.uid, AttrId::IncantationMight)
+        + attribute_delta(source, AttrId::IncantationMight)
+        + attack_attr(AttrId::IncantationMight)
+        + attack_local_attribute(AttrId::IncantationMight);
     let conduit_might = if is_conduit {
         attributes.get(source.uid, AttrId::ConduitMight)
             + attribute_delta(source, AttrId::ConduitMight)
@@ -742,18 +769,31 @@ pub(super) fn direct_damage(
     };
     let might = conduit_might
         + if is_ultimate {
-            1000 + ultimate_might
+            let ultimate_multiplier = 1000
+                + attributes.get(source.uid, AttrId::UltimateMightMultiplier)
+                + attribute_delta(source, AttrId::UltimateMightMultiplier)
+                + attack_attr(AttrId::UltimateMightMultiplier)
+                + attack_local_attribute(AttrId::UltimateMightMultiplier);
+            let incantation_cross_multiplier = attributes
+                .get(source.uid, AttrId::UltimateIncantationMightMultiplier)
+                + attribute_delta(source, AttrId::UltimateIncantationMightMultiplier)
+                + attack_attr(AttrId::UltimateIncantationMightMultiplier)
+                + attack_local_attribute(AttrId::UltimateIncantationMightMultiplier);
+            1000 + ultimate_might * ultimate_multiplier / 1000
+                + incantation_might * incantation_cross_multiplier / 1000
         } else {
-            let incantation_might = attributes.get(source.uid, AttrId::IncantationMight)
-                + attribute_delta(source, AttrId::IncantationMight)
-                + attack_attr(AttrId::IncantationMight)
-                + attack_local_attribute(AttrId::IncantationMight);
+            let incantation_multiplier = 1000
+                + attributes.get(source.uid, AttrId::IncantationMightMultiplier)
+                + attribute_delta(source, AttrId::IncantationMightMultiplier)
+                + attack_attr(AttrId::IncantationMightMultiplier)
+                + attack_local_attribute(AttrId::IncantationMightMultiplier);
             let cross_multiplier = attributes
                 .get(source.uid, AttrId::IncantationSkillUltMightMultiplier)
                 + attribute_delta(source, AttrId::IncantationSkillUltMightMultiplier)
                 + attack_attr(AttrId::IncantationSkillUltMightMultiplier)
                 + attack_local_attribute(AttrId::IncantationSkillUltMightMultiplier);
-            1000 + incantation_might + ultimate_might * cross_multiplier / 1000
+            1000 + incantation_might * incantation_multiplier / 1000
+                + ultimate_might * cross_multiplier / 1000
         };
     let action_attr =
         match crate::engine::skill::condition::extra::skill_kind_from_is_extra(extra_skill_kind) {

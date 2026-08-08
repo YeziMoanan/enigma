@@ -101,7 +101,7 @@ impl HeroManager {
         let hero_group = snapshot_group(snapshot_sub_id, fight_group);
 
         if snapshot_id == HeroGroupSnapshotType::Common.id() {
-            let mut tx = db.begin().await?;
+            let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
             hero_group_snapshots::save_common_group_snapshot_in_transaction(
                 &mut tx,
                 self.player_id,

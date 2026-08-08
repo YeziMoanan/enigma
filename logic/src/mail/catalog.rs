@@ -55,18 +55,12 @@ pub fn build_initial_catalog(db: &config::GameDB) -> Vec<CatalogEntry> {
     }
     for row in db.power_item.all() {
         if row.id > 0 && !row.name.trim().is_empty() && !row.icon.trim().is_empty() {
-            entries.push(entry(
-                10,
-                row.id,
-                &row.name,
-                MailCategory::Consumable,
-                9_999,
-            ));
+            entries.push(entry(10, row.id, &row.name, MailCategory::Consumable, 1));
         }
     }
     for row in db.insight_item.all() {
         if row.id > 0 && !row.name.trim().is_empty() && !row.icon.trim().is_empty() {
-            entries.push(entry(24, row.id, &row.name, MailCategory::Material, 9_999));
+            entries.push(entry(24, row.id, &row.name, MailCategory::Material, 1));
         }
     }
     for row in db.equip.all() {
@@ -191,6 +185,32 @@ mod tests {
         let mut ids = HashSet::new();
         for entry in catalog {
             assert!(ids.insert((entry.material_type, entry.id)));
+        }
+    }
+
+    #[test]
+    fn non_stackable_catalog_entries_always_grant_one() {
+        let db = config();
+        for entry in build_initial_catalog(db) {
+            let non_stackable = match entry.material_type {
+                1 => db
+                    .item
+                    .get(entry.id)
+                    .is_some_and(|item| item.is_stackable != 1),
+                4 | 5 | 7 | 10 | 24 => true,
+                9 => db
+                    .equip
+                    .get(entry.id)
+                    .is_some_and(|equip| equip.is_exp_equip != 1),
+                _ => false,
+            };
+            if non_stackable {
+                assert_eq!(
+                    entry.quantity, 1,
+                    "non-stackable material {}#{} must grant exactly one",
+                    entry.material_type, entry.id
+                );
+            }
         }
     }
 }

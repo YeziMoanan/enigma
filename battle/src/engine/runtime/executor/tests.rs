@@ -7,11 +7,39 @@ use crate::engine::{
         buff::{BuffCommand, BuffGrant, BuffRemove, BuffRemoveSelector, CommandOrigin},
         eureka::{EUREKA_RESOURCE_ID, EurekaChange, EurekaCommand},
         ex_point::{ExPointChange, ExPointCommand},
+        gauge::{GaugeCommand, GaugeKey, GaugeKind, GaugeOperation, GaugeOwner},
         hp::{DamageEffectKind, HpCommand, HpDamage, HpKill, HurtDamageFromType, HurtInfoData},
         shield::{ShieldCarrierUid, ShieldCommand, ShieldScope},
     },
     skill::rule::{DefinitionKey, RuleDomain},
 };
+
+#[test]
+fn stale_gauge_command_is_ignored_after_the_gauge_is_removed() {
+    let mut managers = BattleManagers::default();
+    let mut events = EventBus::default();
+    let command = GaugeCommand::new(
+        CommandOrigin {
+            domain: RuleDomain::Behavior,
+            key: DefinitionKey::new(60210, "stale gauge command"),
+        },
+        GaugeKey {
+            kind: GaugeKind::Bloodtithe,
+            owner: GaugeOwner::Team(1),
+        },
+        GaugeOperation::ChangeValue { delta: 1 },
+    );
+
+    let outcome = execute_rule_op(
+        &mut managers,
+        &mut events,
+        RuleOp::Command(BattleCommand::Gauge(command)),
+    )
+    .expect("a queued command for a removed gauge should be a no-op");
+
+    assert!(matches!(outcome, RuleOutcome::StateChanged));
+    assert!(events.is_empty());
+}
 
 #[test]
 fn exact_rule_command_reaches_the_buff_transaction() {

@@ -305,3 +305,34 @@ fn bullet_crit_conversion_counts_configured_buff_group_types() {
 
     assert_eq!(modifiers.excess_crit_conversion_rate, 850);
 }
+
+#[test]
+fn bullet_crit_conversion_is_a_noop_during_regular_passive_emission() {
+    let behavior = ParsedBehavior::new(60086, "BulletCritRateAlter", vec![650, 100, 5]);
+    let managers = BattleManagers::default();
+    let pool = TargetPool::default();
+    let mut determinism = RoundDeterminism::default();
+    let mut modifiers = crate::engine::skill::action::SkillModifiers::default();
+    let mut target = TargetContext::default();
+
+    assert!(matches!(
+        crate::engine::skill::behavior::rule_ops(
+            BehaviorOpContext {
+                source_uid: 10,
+                source_team: 1,
+                target_uid: 10,
+                active_skill_id: 31020162,
+                transfer_count: 1,
+                event: None,
+                managers: &managers,
+                pool: &pool,
+                determinism: &mut determinism,
+                modifiers: &mut modifiers,
+                target: &mut target,
+            },
+            &behavior,
+        ),
+        Some(ops) if ops.is_empty()
+    ));
+    assert_eq!(modifiers.excess_crit_conversion_rate, 0);
+}

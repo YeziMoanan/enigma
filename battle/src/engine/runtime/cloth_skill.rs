@@ -16,6 +16,7 @@ pub enum ClothSkillType {
     SelectCrystal = 6,
     Rouge2 = 7,
     BattleSelection = 8,
+    MeiLeiErExtraRound = 9,
     TwinsSelect = 10,
 }
 
@@ -33,6 +34,7 @@ impl TryFrom<i32> for ClothSkillType {
             6 => Ok(Self::SelectCrystal),
             7 => Ok(Self::Rouge2),
             8 => Ok(Self::BattleSelection),
+            9 => Ok(Self::MeiLeiErExtraRound),
             10 => Ok(Self::TwinsSelect),
             _ => Err(()),
         }
@@ -254,6 +256,89 @@ impl BattleRuntime {
                     )
                     .ok()?
             }
+            ClothSkillType::MeiLeiErExtraRound => {
+                if request.skill_id.unwrap_or_default() != 0
+                    || request.to_id.unwrap_or_default() != 0
+                {
+                    return None;
+                }
+                let owner_uid = request.from_id?;
+                let feature = self
+                    .managers
+                    .buff
+                    .active_features(&self.managers.hp)
+                    .into_iter()
+                    .find(|feature| {
+                        feature.owner_uid == owner_uid
+                            && crate::engine::skill::buff_act::is_kind(
+                                feature,
+                                crate::engine::skill::buff_act::registry::BuffActKind::MeiLeiErCharge,
+                            )
+                    })?;
+                let act_id = feature.act_id()?;
+                let trigger = *feature.values.get(1)?;
+                let skill_id = *feature.values.get(3)?;
+                let origin = crate::engine::skill::buff_act::feature_command_origin(&feature)?;
+                let mut buff = self.managers.buff.snapshot(owner_uid, feature.buff_uid)?;
+                let info = buff
+                    .act_info
+                    .iter_mut()
+                    .find(|info| info.act_id == Some(act_id))?;
+                let current = info.param.first().copied().unwrap_or_default();
+                if current < trigger {
+                    return None;
+                }
+                info.param = vec![current - trigger];
+                info.str_param = Some(String::new());
+                let state = self
+                    .managers
+                    .execute_buff(crate::engine::manager::buff::BuffCommand::SetState(
+                        crate::engine::manager::buff::BuffSetState {
+                            origin,
+                            target_uid: owner_uid,
+                            buff_uid: feature.buff_uid,
+                            ex_info: None,
+                            params: None,
+                            act_info: Some(buff.act_info),
+                        },
+                    ))
+                    .ok()?;
+                let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight)
+                    .runtime_view(&self.managers);
+                let result = drain::run_skill(
+                    &mut self.managers,
+                    &pool,
+                    &self.catalog,
+                    &mut self.determinism,
+                    crate::engine::skill::target::TargetContext {
+                        battle_id: self.fight.battle_id.unwrap_or_default(),
+                        current_round: self.round_state.cur_round,
+                        ..Default::default()
+                    },
+                    crate::engine::skill::action::SkillRequest {
+                        source_uid: owner_uid,
+                        skill_id,
+                    }
+                    .into(),
+                    crate::engine::skill::action::SkillModifiers::default(),
+                )
+                .inspect_err(|error| tracing::warn!(?error, "Mei Lei Er extra round failed"))
+                .ok()?;
+                let mut steps =
+                    project_changes([change::BattleChange::Buff(Box::new(state))], fight_version)
+                        .inspect_err(
+                            |error| tracing::warn!(%error, "Mei Lei Er charge projection failed"),
+                        )
+                        .ok()?;
+                steps.extend(
+                    project_result(result, fight_version)
+                        .inspect_err(
+                            |error| tracing::warn!(%error, "Mei Lei Er skill projection failed"),
+                        )
+                        .ok()?,
+                );
+                steps
+            }
             ClothSkillType::EzioBigSkill => {
                 let owner_uid = request.from_id?;
                 let target_uid = request.to_id?;
@@ -374,7 +459,10 @@ mod tests {
             ClothSkillType::try_from(8),
             Ok(ClothSkillType::BattleSelection)
         );
-        assert!(ClothSkillType::try_from(9).is_err());
+        assert_eq!(
+            ClothSkillType::try_from(9),
+            Ok(ClothSkillType::MeiLeiErExtraRound)
+        );
         assert_eq!(
             ClothSkillType::try_from(10),
             Ok(ClothSkillType::TwinsSelect)

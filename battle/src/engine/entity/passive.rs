@@ -45,7 +45,7 @@ pub struct Passive;
 impl Passive {
     pub fn get(
         hero_data: &HeroData,
-        equip_id: Option<i32>,
+        psychube: Option<(i32, i32)>,
         destiny: Option<&HashMap<i32, i32>>,
     ) -> Vec<PassiveSkill> {
         let r = &hero_data.record;
@@ -58,8 +58,8 @@ impl Passive {
             r.destiny_rank,
             r.destiny_stone,
         );
-        if let Some(equip_id) = equip_id {
-            passives.extend(Self::psychube(equip_id, None));
+        if let Some((equip_id, refine_level)) = psychube {
+            passives.extend(Self::psychube(equip_id, Some(refine_level)));
         }
         passives
     }
@@ -305,5 +305,15 @@ mod tests {
                 && passive.source.kind == PassiveSourceKind::Psychube
                 && passive.source.rank == 4
         }));
+    }
+
+    #[test]
+    fn owned_psychube_uses_its_persisted_amplification_level() {
+        init_config();
+        let passives = Passive::psychube(1542, Some(5));
+
+        assert_eq!(passives.len(), 1);
+        assert_eq!(passives[0].skill_id, 434215);
+        assert_eq!(passives[0].source.rank, 5);
     }
 }

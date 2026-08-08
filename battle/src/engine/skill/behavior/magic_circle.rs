@@ -2,7 +2,7 @@ use crate::engine::{
     entity::attr::AttrId,
     manager::{
         BattleManagers,
-        buff::{BuffCommand, BuffGrantChild},
+        buff::{BuffCommand, BuffGrantChild, BuffRemove, BuffRemoveSelector},
         field::{FieldCommand, FieldDefinition, FieldOperation, FieldThreshold},
     },
     runtime::determinism::RoundDeterminism,
@@ -31,22 +31,40 @@ pub fn deploy_rule_ops(
     let circle_id = behavior.arg(0)?;
     let row = config::try_get()?.magic_circle.get(circle_id)?;
     let origin = super::command_origin(behavior)?;
-    let field = RuleOp::Command(BattleCommand::Field(FieldCommand {
-        origin,
-        team,
-        operation: FieldOperation::DeployIfAbsent {
+    let current = managers.field.get(team);
+    if current.is_some_and(|field| field.definition.field_id == circle_id) {
+        return Some(Vec::new());
+    }
+    let initial_level = behavior.arg(1).unwrap_or_else(|| {
+        (row.circle_type == 2)
+            .then_some(circle_id % 10)
+            .unwrap_or_default()
+    });
+    let operation = if current.is_some() {
+        FieldOperation::Replace {
             definition: FieldDefinition {
                 field_id: circle_id,
                 duration: row.round,
             },
             create_uid: source_uid,
-            initial_level: behavior.arg(1).unwrap_or_default(),
+            level: initial_level,
+        }
+    } else {
+        FieldOperation::DeployIfAbsent {
+            definition: FieldDefinition {
+                field_id: circle_id,
+                duration: row.round,
+            },
+            create_uid: source_uid,
+            initial_level,
             thresholds: field_thresholds(circle_id, team, managers),
-        },
+        }
+    };
+    let field = RuleOp::Command(BattleCommand::Field(FieldCommand {
+        origin,
+        team,
+        operation,
     }));
-    if managers.field.get(team).is_some() {
-        return Some(vec![field]);
-    }
     let (ally_buffs, enemy_buffs) = crate::engine::mechanic::magic_circle::linked_buffs(circle_id);
     let grants = pool
         .allies(source_uid)
@@ -57,8 +75,33 @@ pub fn deploy_rule_ops(
                 .iter()
                 .map(move |buff_id| (entity.uid, *buff_id))
         }));
-    let mut ops = grants
-        .map(|(target_uid, buff_id)| {
+    let mut ops = current
+        .into_iter()
+        .flat_map(|field| {
+            let (old_ally_buffs, old_enemy_buffs) =
+                crate::engine::mechanic::magic_circle::linked_buffs(field.definition.field_id);
+            pool.allies(source_uid)
+                .iter()
+                .flat_map(|entity| {
+                    old_ally_buffs
+                        .iter()
+                        .map(move |buff_id| (entity.uid, *buff_id))
+                })
+                .chain(pool.enemies(source_uid, true).iter().flat_map(|entity| {
+                    old_enemy_buffs
+                        .iter()
+                        .map(move |buff_id| (entity.uid, *buff_id))
+                }))
+                .map(|(target_uid, buff_id)| {
+                    RuleOp::Command(BattleCommand::Buff(BuffCommand::Remove(BuffRemove {
+                        origin,
+                        target_uid,
+                        selector: BuffRemoveSelector::ExactId(buff_id),
+                    })))
+                })
+                .collect::<Vec<_>>()
+        })
+        .chain(grants.map(|(target_uid, buff_id)| {
             RuleOp::Command(BattleCommand::Buff(BuffCommand::GrantChild(
                 BuffGrantChild {
                     origin,
@@ -70,10 +113,34 @@ pub fn deploy_rule_ops(
                     act_info: None,
                 },
             )))
-        })
+        }))
         .collect::<Vec<_>>();
     ops.push(field);
     Some(ops)
+}
+
+fn update_wang_qi_rule_ops(
+    behavior: &ParsedBehavior,
+    source_uid: i64,
+    team: i32,
+    managers: &BattleManagers,
+    pool: &TargetPool,
+) -> Option<Vec<RuleOp>> {
+    let delta = behavior.arg(0)?;
+    let current = managers.field.get(team)?;
+    let family = current.definition.field_id / 10;
+    let current_level = current.definition.field_id % 10;
+    let next_level = current_level.saturating_add(delta).clamp(1, 4);
+    let next_id = family.saturating_mul(10).saturating_add(next_level);
+    if next_id == current.definition.field_id {
+        return Some(Vec::new());
+    }
+    let replacement = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(50019, "AddMagicCircle"),
+        vec![next_id, next_level],
+        Vec::new(),
+    );
+    deploy_rule_ops(&replacement, source_uid, team, managers, pool)
 }
 
 pub(crate) fn field_thresholds(
@@ -115,20 +182,55 @@ pub(crate) fn field_thresholds(
 
 pub(super) struct Handler;
 
+fn runtime_rule_ops(
+    behavior: &ParsedBehavior,
+    source_uid: i64,
+    source_team: i32,
+    managers: &BattleManagers,
+    pool: &TargetPool,
+) -> Option<Vec<RuleOp>> {
+    match behavior.spec.kind {
+        BehaviorKind::AddMagicCircle => {
+            deploy_rule_ops(behavior, source_uid, source_team, managers, pool)
+        }
+        BehaviorKind::UpdateWangQiMagicCircle => {
+            update_wang_qi_rule_ops(behavior, source_uid, source_team, managers, pool)
+        }
+        BehaviorKind::MagicCircleAttr if Handler::supports(behavior) => Some(Vec::new()),
+        _ => None,
+    }
+}
+
 impl BehaviorHandler for Handler {
     const VALIDATES_ARGUMENTS: bool = true;
 
     fn supports(behavior: &ParsedBehavior) -> bool {
-        let [circle_id, rest @ ..] = behavior.args.as_slice() else {
-            return false;
-        };
-        rest.len() <= 1
-            && rest.first().is_none_or(|level| *level >= 0)
-            && config::try_get().is_some_and(|db| db.magic_circle.get(*circle_id).is_some())
+        match behavior.spec.kind {
+            BehaviorKind::AddMagicCircle => {
+                let [circle_id, rest @ ..] = behavior.args.as_slice() else {
+                    return false;
+                };
+                rest.len() <= 1
+                    && rest.first().is_none_or(|level| *level >= 0)
+                    && config::try_get().is_some_and(|db| db.magic_circle.get(*circle_id).is_some())
+            }
+            BehaviorKind::UpdateWangQiMagicCircle => {
+                matches!(behavior.args.as_slice(), [delta] if *delta > 0)
+            }
+            BehaviorKind::MagicCircleAttr => {
+                !behavior.args.is_empty()
+                    && behavior.args.len().is_multiple_of(3)
+                    && behavior
+                        .args
+                        .chunks_exact(3)
+                        .all(|args| matches!(args[0], 1 | 2) && AttrId::from_raw(args[1]).is_some())
+            }
+            _ => false,
+        }
     }
 
     fn emit_ops(context: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Option<Vec<RuleOp>> {
-        deploy_rule_ops(
+        runtime_rule_ops(
             behavior,
             context.source_uid,
             context.source_team,
@@ -159,11 +261,23 @@ pub fn self_skills(circle_id: i32) -> Vec<i32> {
     config::try_get()
         .and_then(|db| db.magic_circle.get(circle_id))
         .map(|row| {
-            row.self_skills
+            let mut skills = row
+                .self_skills
                 .split(['|', '#'])
-                .filter_map(|id| id.trim().parse().ok())
+                .filter_map(|id| id.trim().parse::<i32>().ok())
                 .filter(|id| *id > 0)
-                .collect()
+                .collect::<Vec<_>>();
+            skills.extend(
+                row.complex_effect
+                    .split('|')
+                    .filter_map(|entry| entry.split_once(':').map(|(_, value)| value))
+                    .filter_map(|value| value.split(',').nth(1))
+                    .filter_map(|id| id.trim().parse::<i32>().ok())
+                    .filter(|id| *id > 0),
+            );
+            skills.sort_unstable();
+            skills.dedup();
+            skills
         })
         .unwrap_or_default()
 }
@@ -331,5 +445,29 @@ mod tests {
             )))
         )));
         assert!(matches!(ops[2], RuleOp::Command(BattleCommand::Field(_))));
+    }
+
+    #[test]
+    fn magic_circle_attributes_are_valid_passive_effects_without_runtime_commands() {
+        crate::test_support::init_config();
+        let behavior = ParsedBehavior::new(60076, "MagicCircleAttr", vec![2, 214, 60]);
+        let fight = sonettobuf::Fight {
+            attacker: Some(sonettobuf::FightTeam {
+                entitys: vec![sonettobuf::FightEntityInfo {
+                    uid: Some(10),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pool = TargetPool::from_fight(&fight);
+
+        assert!(Handler::supports(&behavior));
+        assert_eq!(behavior.spec.kind, BehaviorKind::MagicCircleAttr);
+        assert_eq!(
+            runtime_rule_ops(&behavior, 10, 1, &BattleManagers::default(), &pool),
+            Some(Vec::new())
+        );
     }
 }

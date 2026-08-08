@@ -359,7 +359,7 @@ pub async fn set_hero_group_equip(
     index: i32,
     equip_uids: Vec<i64>,
 ) -> Result<()> {
-    let mut transaction = pool.begin().await?;
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
     let db_group_id: Option<i64> =
         sqlx::query_scalar("SELECT id FROM hero_groups_common WHERE user_id = ? AND group_id = ?")
             .bind(user_id)

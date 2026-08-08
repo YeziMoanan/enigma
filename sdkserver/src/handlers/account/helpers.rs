@@ -6,7 +6,7 @@ use crate::models::response::{
 use anyhow::Result;
 use common::time::ServerTime;
 use database::db::user::access;
-use rand::Rng;
+use database::db::user::account;
 use sqlx::Row;
 use sqlx::prelude::FromRow;
 
@@ -52,8 +52,7 @@ pub async fn get_user_with_token_validation(
         .await
         .map_err(anyhow::Error::new)?;
 
-    let stored_token: String = row.try_get("token")?;
-    if stored_token != token {
+    if !account::is_user_login_token_valid(&state.db, user_id, token, ServerTime::now_ms()).await? {
         return Err(anyhow::anyhow!("Invalid token"));
     }
 
@@ -112,20 +111,10 @@ pub async fn get_user_by_id(state: &AppState, user_id: i64) -> Result<UserData> 
     })
 }
 
-/// Generate a random token
-pub fn generate_token() -> String {
-    let mut rng = rand::rng();
-    let mut bytes = [0u8; 16];
-    rng.fill(&mut bytes);
-    bytes
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>()
-        + "200"
-}
-
 /// Generate a random session ID
 pub fn generate_session_id() -> String {
+    use rand::Rng;
+
     let mut rng = rand::rng();
     let mut bytes = [0u8; 16];
     rng.fill(&mut bytes);

@@ -111,7 +111,17 @@ pub fn linked_buffs(circle_id: i32) -> (Vec<i32>, Vec<i32>) {
     let Some(row) = config::try_get().and_then(|db| db.magic_circle.get(circle_id)) else {
         return (Vec::new(), Vec::new());
     };
-    (parse_ids(&row.self_buff), parse_ids(&row.enemy_buff))
+    let mut ally = parse_ids(&row.self_buff);
+    ally.extend(
+        row.complex_effect
+            .split('|')
+            .filter_map(|entry| entry.split_once(':').map(|(_, value)| value))
+            .filter_map(|value| value.split(',').nth(2))
+            .flat_map(parse_ids),
+    );
+    ally.sort_unstable();
+    ally.dedup();
+    (ally, parse_ids(&row.enemy_buff))
 }
 
 fn parse_ids(raw: &str) -> Vec<i32> {

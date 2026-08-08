@@ -17,6 +17,10 @@ pub fn router(options: MuipOptions) -> Router {
             post(account_api::preview_account),
         )
         .route(
+            "/api/reverse1999/accounts/search",
+            get(account_api::search_accounts),
+        )
+        .route(
             "/api/reverse1999/allowlist/import-preview",
             post(account_api::preview_import),
         )
@@ -31,6 +35,10 @@ pub fn router(options: MuipOptions) -> Router {
         .route(
             "/api/reverse1999/allowlist/replace",
             post(account_api::apply_replace),
+        )
+        .route(
+            "/api/reverse1999/blacklist",
+            get(account_api::list_blacklist),
         )
         .route(
             "/api/reverse1999/accounts/{account}/ban",
@@ -142,8 +150,10 @@ mod tests {
         assert_eq!(status("GET", "/healthz").await, 200);
         for (method, uri) in [
             ("POST", "/api/reverse1999/accounts/preview"),
+            ("GET", "/api/reverse1999/accounts/search?q=player"),
             ("POST", "/api/reverse1999/allowlist/import-preview"),
             ("POST", "/api/reverse1999/allowlist/import"),
+            ("GET", "/api/reverse1999/blacklist"),
             ("POST", "/api/reverse1999/accounts/player01/ban"),
             ("GET", "/api/reverse1999/audit/request-1"),
         ] {

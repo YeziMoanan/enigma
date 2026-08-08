@@ -1,6 +1,7 @@
 use crate::engine::{
     entity::attr::AttrId,
     manager::{
+        buff::{BuffCommand, BuffConsume, BuffGrant, BuffSelector, BuffSetState, DepletedBuff},
         card::{CardCommand, CardConsumeForEffect},
         conduit::{ConduitCommand, ConduitPowerChange, ConduitPowerChangeKind},
         eureka::{EUREKA_RESOURCE_ID, EurekaChange, EurekaCommand, EurekaProgress},
@@ -39,6 +40,45 @@ pub fn supports_average_life(behavior: &ParsedBehavior) -> bool {
     matches!(behavior.args.as_slice(), [0])
 }
 
+pub fn supports_mei_leier_charge(behavior: &ParsedBehavior) -> bool {
+    behavior.raw_args.len().max(behavior.args.len()) == 1
+        && behavior.arg(0).is_some_and(|value| value >= 0)
+}
+
+pub fn supports_consume_buff_mei_leier(behavior: &ParsedBehavior) -> bool {
+    if behavior.raw_args.len().max(behavior.args.len()) != 5
+        || !matches!(
+            (behavior.arg(0), behavior.arg(1), behavior.arg(2), behavior.arg(3)),
+            (Some(buff_id), Some(amount), Some(charge), Some(mode))
+                if buff_id > 0 && amount > 0 && charge >= 0 && matches!(mode, 0 | 1)
+        )
+    {
+        return false;
+    }
+    mei_leier_rewards(behavior).is_some_and(|rewards| {
+        !rewards.is_empty() && rewards.iter().all(|(id, amount)| *id > 0 && *amount > 0)
+    })
+}
+
+pub fn supports_consume_buff_reset_device(behavior: &ParsedBehavior) -> bool {
+    matches!(
+        behavior.args.as_slice(),
+        [buff_id, amount] if *buff_id > 0 && *amount > 0
+    )
+}
+
+fn mei_leier_rewards(behavior: &ParsedBehavior) -> Option<Vec<(i32, i32)>> {
+    let raw = behavior.raw_args.get(4)?;
+    raw.split(':')
+        .map(|entry| {
+            let mut values = entry.split(',').map(str::trim);
+            let buff_id = values.next()?.parse().ok()?;
+            let amount = values.next()?.parse().ok()?;
+            values.next().is_none().then_some((buff_id, amount))
+        })
+        .collect()
+}
+
 impl BehaviorHandler for Handler {
     fn emit_ops(context: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Option<Vec<RuleOp>> {
         rule_ops(context, behavior)
@@ -61,6 +101,58 @@ impl BehaviorHandler for Handler {
 
 pub fn rule_ops(context: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Option<Vec<RuleOp>> {
     let origin = super::command_origin(behavior)?;
+    let mei_leier_charge = |delta: i32| {
+        let feature = context
+            .managers
+            .buff
+            .active_features(&context.managers.hp)
+            .into_iter()
+            .find(|feature| {
+                feature.owner_uid == context.target_uid
+                    && buff_act::is_kind(feature, buff_act::registry::BuffActKind::MeiLeiErCharge)
+            })?;
+        let act_id = feature.act_id()?;
+        let limit = *feature.values.get(2)?;
+        let mut buff = context
+            .managers
+            .buff
+            .snapshot(context.target_uid, feature.buff_uid)?;
+        let current = buff
+            .act_info
+            .iter()
+            .find(|info| info.act_id == Some(act_id))
+            .and_then(|info| info.param.first())
+            .copied()
+            .unwrap_or_default();
+        let after = current.saturating_add(delta).clamp(0, limit);
+        if after == current {
+            return Some(Vec::new());
+        }
+        if let Some(info) = buff
+            .act_info
+            .iter_mut()
+            .find(|info| info.act_id == Some(act_id))
+        {
+            info.param = vec![after];
+            info.str_param = Some(String::new());
+        } else {
+            buff.act_info.push(sonettobuf::BuffActInfo {
+                act_id: Some(act_id),
+                param: vec![after],
+                str_param: Some(String::new()),
+            });
+        }
+        Some(vec![RuleOp::Command(BattleCommand::Buff(
+            BuffCommand::SetState(BuffSetState {
+                origin,
+                target_uid: context.target_uid,
+                buff_uid: feature.buff_uid,
+                ex_info: None,
+                params: None,
+                act_info: Some(buff.act_info),
+            }),
+        ))])
+    };
     let ex_point_config_effect = match behavior.spec.kind {
         BehaviorKind::AddConduitExPoint => 0,
         _ => behavior.config_effect,
@@ -89,6 +181,55 @@ pub fn rule_ops(context: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Op
     };
 
     match behavior.spec.kind {
+        BehaviorKind::AddMeiLeiErCharge => {
+            let raw_amount = behavior.arg(0)?;
+            mei_leier_charge(raw_amount.max(0))
+        }
+        BehaviorKind::ConsumeBuffMeiLeiEr => {
+            let buff_id = behavior.arg(0)?;
+            let amount = behavior.arg(1)?;
+            let raw_amount = behavior.arg(2)?;
+            let rewards = mei_leier_rewards(behavior)?;
+            let mut ops = vec![RuleOp::Command(BattleCommand::Buff(BuffCommand::Consume(
+                BuffConsume {
+                    origin,
+                    target_uid: context.target_uid,
+                    selector: BuffSelector::IdOrType(buff_id),
+                    amount,
+                    depleted: DepletedBuff::Remove,
+                },
+            )))];
+            ops.extend(mei_leier_charge(raw_amount.max(0))?);
+            ops.extend(rewards.into_iter().map(|(reward_buff_id, reward_amount)| {
+                RuleOp::Command(BattleCommand::Buff(BuffCommand::Grant(BuffGrant {
+                    origin,
+                    source_uid: context.source_uid,
+                    target_uid: context.target_uid,
+                    buff_id: reward_buff_id,
+                    amount: Some(reward_amount),
+                    occurrences: 1,
+                    child_uid_reservations: 0,
+                })))
+            }));
+            Some(ops)
+        }
+        BehaviorKind::ConsumeBuffResetDevice => {
+            let [buff_id, amount] = behavior.args.as_slice() else {
+                return None;
+            };
+            Some(vec![
+                RuleOp::Command(BattleCommand::Buff(BuffCommand::Consume(BuffConsume {
+                    origin,
+                    target_uid: context.target_uid,
+                    selector: BuffSelector::IdOrType(*buff_id),
+                    amount: *amount,
+                    depleted: DepletedBuff::Remove,
+                }))),
+                RuleOp::Command(BattleCommand::Conduit(ConduitCommand::RestartDevice {
+                    source_uid: context.source_uid,
+                })),
+            ])
+        }
         BehaviorKind::AddExPoint
         | BehaviorKind::AddAdrenalineExPoint
         | BehaviorKind::AddSynchronization
@@ -328,6 +469,20 @@ pub fn rule_ops(context: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Op
                 },
             ))]
         }),
+        BehaviorKind::AddConduitCounter => {
+            let [counter_id, delta] = behavior.args.as_slice() else {
+                return None;
+            };
+            Some(vec![RuleOp::Command(BattleCommand::Conduit(
+                ConduitCommand::ChangeCounter {
+                    origin,
+                    source_uid: context.source_uid,
+                    team: context.source_team,
+                    counter_id: *counter_id,
+                    delta: delta.saturating_mul(context.transfer_count),
+                },
+            ))])
+        }
         BehaviorKind::RaspberryAddCount => {
             let [attr_id, rate, _mode] = behavior.args.as_slice() else {
                 return None;
@@ -389,6 +544,10 @@ pub(super) fn supports_ex_point_gain(behavior: &ParsedBehavior) -> bool {
 
 pub(super) fn supports_conduit_skill_group(behavior: &ParsedBehavior) -> bool {
     matches!(behavior.args.as_slice(), [group] if *group > 0)
+}
+
+pub(super) fn supports_conduit_counter(behavior: &ParsedBehavior) -> bool {
+    matches!(behavior.args.as_slice(), [counter_id, _] if *counter_id > 0)
 }
 
 pub(super) fn supports_power_change(behavior: &ParsedBehavior) -> bool {

@@ -29,14 +29,15 @@ pub fn allocate(
 
     let mut output = cards.to_vec();
     let before = card_energy(&output);
+    let max_card_energy = configured_max_card_energy(buffs, hp);
     let capacity = eligible
         .iter()
         .map(|(index, _)| {
-            MAX_CARD_ENERGY
+            max_card_energy
                 - output[*index]
                     .energy
                     .unwrap_or_default()
-                    .clamp(0, MAX_CARD_ENERGY)
+                    .clamp(0, max_card_energy)
         })
         .sum::<i32>();
     let mut remaining = available.min(capacity);
@@ -45,7 +46,7 @@ pub fn allocate(
         while remaining > 0 {
             let candidates = eligible
                 .iter()
-                .filter(|(index, _)| output[*index].energy != Some(MAX_CARD_ENERGY))
+                .filter(|(index, _)| output[*index].energy != Some(max_card_energy))
                 .map(|(index, card)| {
                     let bonus = features
                         .iter()
@@ -63,12 +64,12 @@ pub fn allocate(
             let Some(index) = weighted_index(&candidates, determinism) else {
                 break;
             };
-            remaining -= add_energy(&mut output, index, 1);
+            remaining -= add_energy(&mut output, index, 1, max_card_energy);
         }
     } else {
         let mut index = 0;
         while remaining > 0 && !eligible.is_empty() {
-            remaining -= add_energy(&mut output, eligible[index].0, 1);
+            remaining -= add_energy(&mut output, eligible[index].0, 1, max_card_energy);
             index = (index + 1) % eligible.len();
         }
     }
@@ -110,14 +111,30 @@ fn weighted_index(
     None
 }
 
-fn add_energy(cards: &mut [CardInfo], index: usize, amount: i32) -> i32 {
+fn add_energy(cards: &mut [CardInfo], index: usize, amount: i32, max: i32) -> i32 {
     let Some(card) = cards.get_mut(index) else {
         return 0;
     };
     let current = card.energy.unwrap_or_default();
-    let added = amount.min(MAX_CARD_ENERGY - current).max(0);
+    let added = amount.min(max - current).max(0);
     card.energy = Some(current + added);
     added
+}
+
+fn configured_max_card_energy(buffs: &BuffManager, hp: &HpManager) -> i32 {
+    buffs
+        .active_features(hp)
+        .iter()
+        .filter(|feature| {
+            crate::engine::skill::buff_act::is_kind(
+                feature,
+                crate::engine::skill::buff_act::registry::BuffActKind::ChangeEmitterCardEnergyLimit,
+            )
+        })
+        .filter_map(|feature| feature.values.get(1).copied())
+        .filter(|limit| *limit > 0)
+        .min()
+        .unwrap_or(MAX_CARD_ENERGY)
 }
 
 fn card_energy(cards: &[CardInfo]) -> i32 {

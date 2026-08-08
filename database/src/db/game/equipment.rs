@@ -152,7 +152,7 @@ pub async fn consume_item_and_max_equipment(
     max_break: i32,
 ) -> Result<bool> {
     let now = common::time::ServerTime::now_ms();
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let consumed = sqlx::query(
         "UPDATE items
          SET quantity = quantity - 1, last_use_time = ?, last_update_time = ?
@@ -549,7 +549,7 @@ pub async fn decompose_equipment(
     }
 
     let now = common::time::ServerTime::now_ms();
-    let mut transaction = pool.begin().await?;
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
     for uid in equip_uids {
         let deleted = sqlx::query(
             "DELETE FROM equipment \

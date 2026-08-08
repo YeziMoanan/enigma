@@ -3,6 +3,20 @@ use std::collections::HashSet;
 use super::*;
 
 #[test]
+fn mei_leier_charge_is_a_zero_initialized_state_consumer() {
+    let definition = find(1139, "MeiLeiErCharge").unwrap();
+    assert_eq!(definition.kind, BuffActKind::MeiLeiErCharge);
+    assert_eq!(
+        destination(1139, "MeiLeiErCharge", &[100_000, 150_000, 31460183]),
+        Some(BuffActDestination::StateConsumer)
+    );
+    assert_eq!(
+        definition.wire.unwrap().initial_state,
+        Some(super::super::wire::InitialStateRule::Zero)
+    );
+}
+
+#[test]
 fn registry_requires_exact_id_and_type() {
     assert_eq!(
         find(1075, "CardLimitAdd").unwrap().kind,
@@ -268,7 +282,7 @@ fn hp_loss_floor_is_an_exact_static_consumer() {
     assert!(definition.state.consumer);
     assert!(has_destination(1008, "BanLostLife", &[150]));
     assert!(!has_destination(1008, "BanLostLife", &[]));
-    assert!(!has_destination(1008, "BanLostLife", &[160]));
+    assert!(has_destination(1008, "BanLostLife", &[160]));
     assert!(!has_destination(1008, "BanLostLife", &[500]));
     assert!(find(1008, "DamageNotMoreThan").is_none());
 }
@@ -280,7 +294,7 @@ fn missing_hp_healing_is_an_exact_static_consumer() {
     assert_eq!(definition.kind, BuffActKind::CureUpByLostHp);
     assert!(definition.state.consumer);
     assert!(has_destination(1011, "CureUpByLostHp", &[200, 75, 8, 100]));
-    assert!(!has_destination(1011, "CureUpByLostHp", &[100, 50, 8, 100]));
+    assert!(has_destination(1011, "CureUpByLostHp", &[100, 50, 8, 100]));
     assert!(!has_destination(1011, "CureUpByLostHp", &[]));
     assert!(find(1011, "BanLostLife").is_none());
 }

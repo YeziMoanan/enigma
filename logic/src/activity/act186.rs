@@ -39,7 +39,7 @@ pub async fn act186_info(
     let milestone_progress =
         database::db::game::currencies::get_currency(db, player_id, milestone_currency_id)
             .await?
-            .map(|currency| currency.quantity)
+            .map(|currency| currency.protocol_quantity())
             .unwrap_or_default();
 
     let mut task_infos = tables

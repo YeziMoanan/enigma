@@ -204,6 +204,10 @@ pub mod arguments {
         behavior.args.len() == 2
     }
 
+    pub fn exactly_one(behavior: &ParsedBehavior) -> bool {
+        behavior.args.len() == 1
+    }
+
     pub fn exactly_three(behavior: &ParsedBehavior) -> bool {
         behavior.args.len() == 3
     }
@@ -487,7 +491,14 @@ behavior_definitions! {
     [60291] "AddDevicePower" => super::resource::Handler, AddConduitPower, Immediate, destination, super::resource::supports_conduit_power;
     [60292] "AddDeviceExPoint" => super::resource::Handler, AddConduitExPoint, Immediate, setup_parent_destination, super::resource::supports_ex_point_gain;
     [60293] "SetDeviceSkillIndex" => super::resource::Handler, SetConduitSkillGroup, Immediate, destination, super::resource::supports_conduit_skill_group;
+    [60294] "StopDeviceSkill" => super::resource::Handler, StopConduitSkill, Immediate, destination, arguments::none;
     [100034] "StopDeviceSkill" => super::resource::Handler, StopConduitSkill, Immediate, destination, arguments::none;
+    [60297] "AddDeviceCounter" => super::resource::Handler, AddConduitCounter, Immediate, destination, super::resource::supports_conduit_counter;
+    [60298] "AddMeiLeiErCharge" => super::resource::Handler, AddMeiLeiErCharge, Immediate, destination, super::resource::supports_mei_leier_charge;
+    [60305] "ConsumeBuffMeiLeiEr" => super::resource::Handler, ConsumeBuffMeiLeiEr, Immediate, destination, super::resource::supports_consume_buff_mei_leier;
+    [60308] "ConsumeBuffResetDevice" => super::resource::Handler, ConsumeBuffResetDevice, Immediate, destination, super::resource::supports_consume_buff_reset_device;
+    [60307] "FoundationCounterClear" => super::general::CompatibilityHandler, FoundationCounterClear, Immediate, destination, arguments::at_least_one;
+    [60309] "FakeHpToHeal" => super::general::CompatibilityHandler, FakeHpToHeal, Immediate, destination, arguments::at_least_one;
     [60231] "RaspberryAddCount" => super::resource::Handler, RaspberryAddCount, Immediate, destination, super::resource::supports_raspberry_add_count;
     [60233] "RaspberryBigSkill" => super::resource::Handler, RaspberryBigSkill, Immediate, destination, super::resource::supports_raspberry_big_skill;
     [60189] "AddEnergyToCard" => super::card::Handler, AddEnergyToCard, Immediate, destination, super::card::supports_basic_card_energy;
@@ -511,7 +522,7 @@ behavior_definitions! {
     [50039] "DirectUseSkillCard" => super::use_skill::Handler, DirectUseSkillCard, Immediate, plain, super::use_skill::supports_direct_skill_card;
     [50012] "DirectUseSkillNoAct" => super::use_skill::Handler, DirectUseSkillNoAct, Immediate, once_destination, super::use_skill::supports_direct_no_action_skill;
     [50038] "DirectUseSkillNoAct2" => super::use_skill::Handler, DirectUseSkillNoAct2, Immediate, destination;
-    [60223] "DirectUseSkillNotExtra" => super::use_skill::Handler, DirectUseSkillNotExtra, Immediate, plain;
+    [60223] "DirectUseSkillNotExtra" => super::use_skill::Handler, DirectUseSkillNotExtra, Immediate, destination, super::use_skill::supports_direct_skill_not_extra;
     [60225] "RandomUseSkill" => super::use_skill::Handler, RandomUseSkill, Immediate, destination, super::use_skill::supports_random_skill;
     [60175] "DirectUseBigSkill" => super::use_skill::Handler, DirectUseBigSkill, Immediate, parent_destination;
     [50010] "DirectUseGroupAndStarSkill" => super::use_skill::Handler, DirectUseGroupAndStarSkill, Immediate, destination;
@@ -561,6 +572,7 @@ behavior_definitions! {
     [60210] "ConsumeBloodAddBuff" => super::gauge::Handler, ConsumeBloodAddBuff, Immediate, destination, @route(ConditionRouteOverride::Setup { key: DefinitionKey::new(57104, "NoBuffId"), stage: SetupStage::RoundStart, priority: 3 }), super::gauge::supports_consume_blood_add_buff;
     [60211] "ConsumeBloodAddBuff2" => super::gauge::Handler, ConsumeBloodAddBuff2, Immediate, destination, @route(ConditionRouteOverride::Setup { key: DefinitionKey::new(57104, "NoBuffId"), stage: SetupStage::RoundStart, priority: 3 }), super::gauge::supports_consume_blood_add_buff;
     [50019] "AddMagicCircle" => super::magic_circle::Handler, AddMagicCircle, Immediate, destination;
+    [60270] "UpdateWangQiMagicCircle" => super::magic_circle::Handler, UpdateWangQiMagicCircle, Immediate, destination;
     [60076] "MagicCircleAttr" => super::magic_circle::Handler, MagicCircleAttr, Immediate, plain;
     [60195] "ElectricTransform" => super::electric::Handler, ElectricTransform, Immediate, destination, super::electric::supports;
     [100000] "EzioProps" => super::synchronization::Handler, EzioProps, Immediate, destination;
@@ -585,14 +597,18 @@ behavior_definitions! {
     [100005] "Assassinate" => super::general::AssassinateHandler, Assassinate, Immediate, destination, arguments::none;
     [60037] "NotifyUpgradeHero" => super::general::Handler, NotifyUpgradeHero, Immediate, destination;
     [60198] "ClientEffect" => super::general::Handler, ClientEffect, Immediate, destination, arguments::at_least_one;
+    [60304] "UnnamedClientEffect" => super::general::Handler, ClientEffect, Immediate, destination, arguments::at_least_one;
     [60268] "ChangeScene" => super::scene::Handler, ChangeScene, Immediate, destination;
     [60058] "CareerRatioFix" => super::career::Handler, CareerRatioFix, Immediate, modifier;
     [100036] "SkillChangeAttackCareer" => super::career::Handler, ChangeAttackCareer, Immediate, modifier;
+    [60299] "SetCareerRestraint" => super::career::Handler, SetCareerRestraint, Immediate, modifier, arguments::none;
     [40003] "AddAct" => super::action_point::Handler, AddAct, Immediate, round_modifier_only;
+    [50006] "AddActHero" => super::action_point::Handler, AddActHero, Immediate, round_modifier_only;
+    [60271] "SetExtraType" => super::general::Handler, SetExtraType, Immediate, destination, arguments::exactly_one;
     [40007] "AddActAndCardLimit" => super::card_limit::Handler, AddActAndCardLimit, AfterDamage, round_modifier_with_output;
     [60221] "IgnoreSkillConfigDamageRate" => super::general::DamageRateMarkerHandler, IgnoreSkillConfigDamageRate, Immediate, destination, arguments::none;
     [100017] "IgnoreSkillConfigDamageRate" => super::general::DamageRateMarkerHandler, IgnoreSkillConfigDamageRate, Immediate, destination, arguments::none;
-    [60036] "ConsumeBuffChangeTargets" => super::skill_modifier::Handler, ConsumeBuffChangeTargets, Immediate, destination;
+    [60036] "ConsumeBuffChangeTargets" => super::skill_modifier::Handler, ConsumeBuffChangeTargets, Immediate, destination, super::skill_modifier::supports_change_targets;
     [60034] "ConsumeBuffUpSkillDamageRate" => super::skill_modifier::Handler, ConsumeBuffUpSkillDamageRate, Immediate, destination;
     [60035] "ConsumeBuffAttrFix" => super::skill_modifier::Handler, ConsumeBuffAttrFix, Immediate, destination;
     [100019] "ConsumeBuffFixMixedRate" => super::skill_modifier::Handler, ConsumeBuffFixMixedRate, Immediate, destination, super::skill_modifier::supports_mixed_rate;
@@ -655,6 +671,8 @@ behavior_definitions! {
     [60247] "AddCardRankNext" => crate::engine::mechanic::heat_scale::Handler, AddCardRankNext, Immediate, queue_preparation, arguments::exactly_two;
     [60281] "AddCardRankByEffectTag" => super::card::Handler, AddCardRankByEffectTag, Immediate, queue_preparation, super::card::supports_rank_by_effect_tag;
     [60283] "BufferflyRecordSkill" => super::card::Handler, BufferflyRecordSkill, Immediate, destination, arguments::none;
+    [60296] "UnnamedMoveCard" => super::card::Handler, UnnamedMoveCard, Immediate, destination, super::card::supports_unnamed_move;
+    [60295] "UnnamedStrengthen" => super::card::Handler, UnnamedStrengthen, Immediate, modifier, super::card::supports_unnamed_strengthen;
     [60287] "ToughnessRecover" => super::toughness::Handler, ToughnessRecover, Immediate, destination;
     [60254] "AddHeatScaleFromBuff" => crate::engine::mechanic::heat_scale::Handler, AddHeatScaleFromBuff, Immediate, destination, arguments::none;
 }

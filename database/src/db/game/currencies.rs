@@ -260,7 +260,7 @@ async fn settle_power_recovery_in_transaction(
     user_id: i64,
     now: i64,
 ) -> sqlx::Result<()> {
-    let Some((quantity, last_recover_time, level)) = sqlx::query_as::<_, (i32, Option<i64>, i32)>(
+    let Some((quantity, last_recover_time, level)) = sqlx::query_as::<_, (i64, Option<i64>, i32)>(
         "SELECT currencies.quantity, currencies.last_recover_time, users.level
          FROM currencies
          JOIN users ON users.id = currencies.user_id
@@ -283,7 +283,7 @@ async fn settle_power_recovery_in_transaction(
         .player_level(level)
         .ok_or_else(|| sqlx::Error::Protocol(format!("missing player level {level}")))?
         .max_auto_recover_power;
-    if quantity >= recover_limit {
+    if quantity >= i64::from(recover_limit) {
         return Ok(());
     }
 
@@ -309,7 +309,7 @@ async fn settle_power_recovery_in_transaction(
     }
 
     let recovered = ticks.saturating_mul(i64::from(currency.recover_num));
-    let quantity = i64::from(quantity)
+    let quantity = quantity
         .saturating_add(recovered)
         .min(i64::from(recover_limit)) as i32;
     let last_recover_time = last_recover_time.saturating_add(ticks.saturating_mul(interval));
@@ -376,14 +376,14 @@ pub async fn remove_currency(
     currency_id: i32,
     amount: i32,
 ) -> sqlx::Result<bool> {
-    let current: Option<i32> =
+    let current: Option<i64> =
         sqlx::query_scalar("SELECT quantity FROM currencies WHERE user_id = ? AND currency_id = ?")
             .bind(user_id)
             .bind(currency_id)
             .fetch_optional(pool)
             .await?;
 
-    if current.unwrap_or(0) < amount {
+    if current.unwrap_or(0) < i64::from(amount) {
         return Ok(false);
     }
 

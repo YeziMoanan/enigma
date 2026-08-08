@@ -339,6 +339,7 @@ impl BuffDefinition {
                 let definition = feature.wire?;
                 let act_id = feature.values.first().copied()?;
                 let (params, str_param, marker_team) = match definition.initial_state? {
+                    InitialStateRule::Zero => (vec![0], String::new(), team_type),
                     InitialStateRule::CrystalSelection => (
                         vec![
                             feature.values.get(1).copied().unwrap_or_default(),
@@ -750,7 +751,9 @@ fn mutates_max_hp(feature: &super::feature::ResolvedBuffFeature) -> bool {
     use crate::engine::{entity::attr::AttrId, skill::buff_act::registry::BuffActKind};
 
     match feature.kind {
-        Some(BuffActKind::Attr | BuffActKind::EachChangeAttr) => {
+        Some(
+            BuffActKind::Attr | BuffActKind::EachChangeAttr | BuffActKind::EachChangeAttrOneWay,
+        ) => {
             feature
                 .values
                 .get(1)

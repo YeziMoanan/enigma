@@ -12,18 +12,20 @@ pub mod pool;
 pub mod start;
 pub mod temp;
 pub mod types;
+pub mod unnamed;
 
 pub use change::CardChange;
 pub use command::{
     CARD_ENERGY_CLEAR_ORIGIN, CARD_PLAY_ORIGIN, CardActionQueue, CardAddCrystal, CardAddGenerated,
     CardAddPrecast, CardAddTemporary, CardAddUniversal, CardChangeKind, CardChangeToTemporary,
     CardChanges, CardCommand, CardCommandError, CardConsumeForEffect, CardDraw, CardEnchantHand,
-    CardEnergyAllocation, CardEnergyChange, CardHandLimitChange, CardInvalidatePlayed,
-    CardMarkTemporary, CardOpeningDraw, CardOwnerRemoval, CardPlay, CardQueueUse, CardRankChange,
-    CardRankFailure, CardRankResult, CardRecordCastChannel, CardRedealKeepRanks, CardRefillOne,
-    CardRefreshAiQueue, CardRemoveAiOwner, CardReplaceOwnerSkills, CardSetAiQueue,
-    CardSetTeamCards, CardSetUltimateAvailability, CardSetup, CardUseUniversal, HandCardRankUp,
-    QueuedCardRankChange, QueuedCardRankUp, QueuedUseCard,
+    CardEnergyAllocation, CardEnergyChange, CardHandLimitChange, CardInsertUnnamed,
+    CardInvalidatePlayed, CardMarkTemporary, CardOpeningDraw, CardOwnerRemoval, CardPlay,
+    CardQueueUse, CardRankChange, CardRankFailure, CardRankResult, CardRecordCastChannel,
+    CardRedealKeepRanks, CardRefillOne, CardRefreshAiQueue, CardRemoveAiOwner,
+    CardReplaceOwnerSkills, CardSetAiQueue, CardSetTeamCards, CardSetUltimateAvailability,
+    CardSetup, CardUpdateUnnamed, CardUseUniversal, HandCardRankUp, QueuedCardRankChange,
+    QueuedCardRankUp, QueuedUseCard,
 };
 pub use deck::CardDeck;
 use deck::CardInstanceId;
@@ -664,6 +666,14 @@ impl CardManager {
         self.deck.move_card(from_index, to_index)
     }
 
+    pub fn insert_hand_card(&mut self, index: usize, card: CardInfo) -> Option<CardInfo> {
+        self.deck.insert_card(index, card)
+    }
+
+    pub fn update_hand_card(&mut self, index: usize, card: CardInfo) -> bool {
+        self.deck.replace_card(index, card)
+    }
+
     pub fn play_card(
         &mut self,
         card_index: usize,
@@ -914,8 +924,7 @@ impl CardManager {
             .as_ref()
             .and_then(|choice| choice.played.uid)
             .filter(|uid| *uid != 0)
-            .or(source.uid)
-            .unwrap_or_default();
+            .unwrap_or_else(|| unnamed::caster_uid(&source));
         let skill_id = if has_choice {
             resolved_skill_id
         } else {

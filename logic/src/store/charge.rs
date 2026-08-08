@@ -30,7 +30,7 @@ pub(super) async fn new_order(
         .get(goods_id)
         .ok_or(AppError::InvalidRequest)?;
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let attachment = if let Some(attachment) =
         sign_in::purchase_month_card_attachment_in_transaction(&mut tx, player_id, goods_id, now)
             .await?

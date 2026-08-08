@@ -416,6 +416,26 @@ mod tests {
         assert_eq!(pool.six_normal, expected);
     }
 
+    #[tokio::test]
+    async fn newly_added_permanent_heroes_can_be_created() {
+        let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+        let _ = config::init(&data_dir);
+        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        database::run_migrations(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, created_at, updated_at)
+             VALUES (71, 'permanent-pool-all', 0, 0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let heroes = database::models::game::heros::UserHeroModel::new(71, db);
+
+        for hero_id in [3120, 3140, 3144, 3145, 3146, 3147] {
+            heroes.create_hero(hero_id).await.unwrap();
+        }
+    }
+
     #[test]
     fn normal_pool_keeps_configured_probability_and_pity() {
         let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));

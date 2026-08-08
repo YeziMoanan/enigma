@@ -175,6 +175,19 @@ impl BehaviorHandler for Handler {
                 ))]
             });
         }
+        if behavior.spec.kind == BehaviorKind::UnnamedMoveCard {
+            return Some(
+                crate::engine::skill::buff_act::unnamed_card::move_and_strengthen_ops(
+                    context.managers,
+                    super::command_origin(behavior)?,
+                    behavior.arg(0)?,
+                ),
+            );
+        }
+        if behavior.spec.kind == BehaviorKind::UnnamedStrengthen {
+            apply_unnamed_strengthen(context, behavior)?;
+            return Some(Vec::new());
+        }
         rule_op(behavior).map(|op| vec![op])
     }
 
@@ -548,9 +561,135 @@ pub(super) fn supports_rank_by_effect_tag(behavior: &ParsedBehavior) -> bool {
     behavior.arg_list(0).is_some() && behavior.arg(1).is_some()
 }
 
+pub(super) fn supports_unnamed_move(behavior: &ParsedBehavior) -> bool {
+    matches!(behavior.args.as_slice(), [distance] if *distance > 0)
+}
+
+pub(super) fn supports_unnamed_strengthen(behavior: &ParsedBehavior) -> bool {
+    behavior
+        .arg(0)
+        .is_some_and(|track| (1..=4).contains(&track))
+        && behavior.raw_args.len() == 2
+        && parse_unnamed_effects(&behavior.raw_args[1]).is_some()
+}
+
+fn apply_unnamed_strengthen(
+    context: BehaviorOpContext<'_>,
+    behavior: &ParsedBehavior,
+) -> Option<()> {
+    let track = behavior.arg(0)?;
+    let played = context.managers.card.played().iter().rev().find(|played| {
+        played.caster_uid == context.source_uid
+            && played.skill_id == context.active_skill_id
+            && crate::engine::manager::card::unnamed::is_unnamed(&played.card)
+    })?;
+    let layers = crate::engine::manager::card::unnamed::UnnamedCardData::from_card(&played.card)?
+        .strengthen
+        .get(&track.to_string())
+        .copied()
+        .unwrap_or_default()
+        .max(0);
+    if layers == 0 {
+        return Some(());
+    }
+    let effects = parse_unnamed_effects(behavior.raw_args.get(1)?)?;
+    match track {
+        1 => {
+            context
+                .modifiers
+                .rates
+                .push(crate::engine::skill::action::SkillRateModifier::fixed(
+                    0,
+                    behavior.spec.key.opcode,
+                    effects.rate(1)?.saturating_mul(layers),
+                    true,
+                ));
+            if context.target.runtime_target_uid != 0 {
+                context.modifiers.rates.push(
+                    crate::engine::skill::action::SkillRateModifier::fixed(
+                        context.target.runtime_target_uid,
+                        behavior.spec.key.opcode,
+                        effects.rate(2)?.saturating_mul(layers),
+                        true,
+                    ),
+                );
+            }
+        }
+        2 => {
+            context.target.additional_skill_target_count = context
+                .target
+                .additional_skill_target_count
+                .saturating_add(effects.rate(3)?.saturating_mul(layers));
+            context
+                .modifiers
+                .rates
+                .push(crate::engine::skill::action::SkillRateModifier::fixed(
+                    0,
+                    behavior.spec.key.opcode,
+                    effects.rate(1)?.saturating_mul(layers),
+                    true,
+                ));
+        }
+        3 | 4 => {
+            for (attr_id, value) in effects.attributes {
+                context.modifiers.attack_attributes.push((
+                    crate::engine::entity::attr::AttrId::from_raw(attr_id)?,
+                    value.saturating_mul(layers),
+                ));
+            }
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+#[derive(Debug, Default)]
+struct UnnamedEffects {
+    rates: std::collections::HashMap<i32, i32>,
+    attributes: Vec<(i32, i32)>,
+}
+
+impl UnnamedEffects {
+    fn rate(&self, kind: i32) -> Option<i32> {
+        self.rates.get(&kind).copied()
+    }
+}
+
+fn parse_unnamed_effects(raw: &str) -> Option<UnnamedEffects> {
+    let mut output = UnnamedEffects::default();
+    for entry in raw.split('&') {
+        let (kind, value) = entry.split_once(':')?;
+        let kind = kind.parse::<i32>().ok()?;
+        if kind == 4 {
+            output.attributes.extend(
+                value
+                    .split('|')
+                    .map(|part| {
+                        let (attr, amount) = part.split_once('_')?;
+                        Some((attr.parse().ok()?, amount.parse().ok()?))
+                    })
+                    .collect::<Option<Vec<_>>>()?,
+            );
+        } else {
+            output.rates.insert(kind, value.parse().ok()?);
+        }
+    }
+    (!output.rates.is_empty() || !output.attributes.is_empty()).then_some(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unnamed_strengthen_parser_keeps_rate_and_attribute_groups() {
+        let rates = parse_unnamed_effects("2:4400&1:1100").unwrap();
+        assert_eq!(rates.rate(2), Some(4400));
+        assert_eq!(rates.rate(1), Some(1100));
+
+        let attributes = parse_unnamed_effects("4:201_80|211_120").unwrap();
+        assert_eq!(attributes.attributes, vec![(201, 80), (211, 120)]);
+    }
 
     #[test]
     fn queued_skill_card_uses_committed_rank_threshold_and_next_queue_index() {

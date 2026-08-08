@@ -512,7 +512,13 @@ pub(crate) fn execute_rule_op(
             Ok(RuleOutcome::Eureka(changes))
         }
         RuleOp::Command(BattleCommand::Gauge(command)) => {
-            let change = managers.execute_gauge(command)?;
+            let change = match managers.execute_gauge(command) {
+                Ok(change) => change,
+                Err(GaugeCommandError::MissingGauge(_)) => {
+                    return Ok(RuleOutcome::StateChanged);
+                }
+                Err(error) => return Err(error.into()),
+            };
             for event in change.events() {
                 events.push(event);
             }

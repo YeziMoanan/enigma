@@ -39,6 +39,11 @@ pub enum FieldOperation {
         initial_level: i32,
         thresholds: Vec<FieldThreshold>,
     },
+    Replace {
+        definition: FieldDefinition,
+        create_uid: i64,
+        level: i32,
+    },
     ChangeProgress {
         delta: i32,
     },
@@ -205,7 +210,7 @@ impl FieldManager {
                 initial_level,
                 mut thresholds,
             } => {
-                if definition.field_id <= 0 || create_uid == 0 || definition.duration < 0 {
+                if definition.field_id <= 0 || create_uid == 0 || definition.duration < -1 {
                     return Err(FieldCommandError::InvalidCommand);
                 }
                 validate_thresholds(&thresholds)?;
@@ -222,6 +227,29 @@ impl FieldManager {
                     terminal_progress: terminal_progress(&thresholds),
                 });
                 (FieldChangeKind::Deployed, 0, 0)
+            }
+            FieldOperation::Replace {
+                definition,
+                create_uid,
+                level,
+            } => {
+                if definition.field_id <= 0 || create_uid == 0 || definition.duration < -1 {
+                    return Err(FieldCommandError::InvalidCommand);
+                }
+                self.states.insert(
+                    command.team,
+                    FieldState {
+                        origin: command.origin,
+                        definition,
+                        team: command.team,
+                        create_uid,
+                        level: level.max(0),
+                        progress: 0,
+                        next_upgrade_progress: 0,
+                        terminal_progress: 0,
+                    },
+                );
+                (FieldChangeKind::Level, 0, 0)
             }
             FieldOperation::ChangeProgress { delta } => {
                 if delta == 0 {
@@ -312,7 +340,7 @@ fn validate_thresholds(thresholds: &[FieldThreshold]) -> Result<(), FieldCommand
         threshold.level <= 0
             || threshold.progress < 0
             || threshold.definition.field_id <= 0
-            || threshold.definition.duration < 0
+            || threshold.definition.duration < -1
     }) {
         return Err(FieldCommandError::InvalidCommand);
     }

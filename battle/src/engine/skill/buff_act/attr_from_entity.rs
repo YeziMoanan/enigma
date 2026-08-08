@@ -138,4 +138,36 @@ mod tests {
         );
         assert_eq!(active_delta(&managers, 1, AttrId::PoisonDmgBonus), 369);
     }
+
+    #[test]
+    fn everecho_no_layer_feature_derives_damage_bonus_from_attack_once() {
+        crate::test_support::init_config();
+        let managers = BattleManagers::seeded(&Fight {
+            attacker: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(1),
+                    current_hp: Some(1_000),
+                    attr: Some(HeroAttribute {
+                        attack: Some(2_000),
+                        ..Default::default()
+                    }),
+                    buffs: vec![BuffInfo {
+                        uid: Some(2),
+                        buff_id: Some(31450111),
+                        layer: Some(3),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            configured_delta(31450111, 1, &managers),
+            Some((AttrId::DmgBonus, 120))
+        );
+        assert_eq!(active_delta(&managers, 1, AttrId::DmgBonus), 120);
+    }
 }

@@ -129,6 +129,22 @@ impl CardDeck {
         true
     }
 
+    pub(super) fn insert_card(&mut self, index: usize, card: CardInfo) -> Option<CardInfo> {
+        if index > self.hand.len() {
+            return None;
+        }
+        self.insert_hand(index, card.clone());
+        Some(card)
+    }
+
+    pub(super) fn replace_card(&mut self, index: usize, card: CardInfo) -> bool {
+        let Some(slot) = self.hand.get_mut(index) else {
+            return false;
+        };
+        *slot = card;
+        true
+    }
+
     pub fn replace_owner_skills(
         &mut self,
         owner_uid: i64,

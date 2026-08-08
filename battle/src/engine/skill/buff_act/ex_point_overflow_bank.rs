@@ -19,9 +19,10 @@ pub fn rule_ops(
     let BattleEvent::ExPointOverflow(change) = event else {
         return Some(Vec::new());
     };
-    if !super::subscriber_is_kind(
-        subscriber,
-        super::registry::BuffActKind::ExPointOverflowBank,
+    if !matches!(
+        subscriber.key.definition,
+        crate::engine::skill::rule::DefinitionKey { opcode: 806, .. }
+            | crate::engine::skill::rule::DefinitionKey { opcode: 1149, .. }
     ) || change.overflow <= 0
         || !change
             .kind

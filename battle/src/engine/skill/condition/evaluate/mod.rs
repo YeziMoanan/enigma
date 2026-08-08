@@ -270,6 +270,34 @@ fn condition_repeat_count(
                 })
                 .unwrap_or_default(),
         ),
+        ParsedConditionKind::PerAura => Some(
+            managers
+                .map(|managers| {
+                    managers
+                        .eureka
+                        .get(
+                            source_uid,
+                            crate::engine::manager::eureka::EUREKA_RESOURCE_ID,
+                        )
+                        .current
+                        .max(0)
+                })
+                .unwrap_or_default(),
+        ),
+        ParsedConditionKind::ConduitCounter {
+            counter_id,
+            divisor,
+            max_count,
+        } => Some(
+            managers
+                .and_then(|managers| {
+                    pool.team_type(source_uid).map(|team| {
+                        (managers.conduit.counter(team, *counter_id) / (*divisor).max(1))
+                            .clamp(0, *max_count)
+                    })
+                })
+                .unwrap_or_default(),
+        ),
         ParsedConditionKind::PowerConsumed {
             power_id,
             max_count,
@@ -678,6 +706,16 @@ fn condition_kind_matches(
                 .iter()
                 .any(|uid| managers.ex_point.get(*uid) >= *threshold)
         }),
+        ParsedConditionKind::PerAura => managers.is_some_and(|managers| {
+            managers
+                .eureka
+                .get(
+                    source_uid,
+                    crate::engine::manager::eureka::EUREKA_RESOURCE_ID,
+                )
+                .current
+                > 0
+        }),
         ParsedConditionKind::Random { threshold } => context
             .condition_random_roll
             .is_some_and(|roll| roll < *threshold),
@@ -733,6 +771,12 @@ fn condition_kind_matches(
                 .iter()
                 .any(|uid| managers.conduit.selected_group(*uid) == Some(*group))
         }),
+        ParsedConditionKind::ConduitCounter { counter_id, .. } => {
+            managers.is_some_and(|managers| {
+                pool.team_type(source_uid)
+                    .is_some_and(|team| managers.conduit.counter(team, *counter_id) > 0)
+            })
+        }
         ParsedConditionKind::PowerIncrChange { .. }
         | ParsedConditionKind::PerConduitCurrentCost { .. }
         | ParsedConditionKind::CurrentEntityPowerDecrease

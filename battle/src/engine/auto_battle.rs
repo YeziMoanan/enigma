@@ -178,7 +178,12 @@ fn apply_prefix(
                 {
                     return false;
                 }
-                let ap_cost = i32::from(!card.temp_card.unwrap_or_default());
+                let uses_action_point = crate::engine::skill::buff_act::skill_no_use_action_point::skill_uses_action_point(
+                    &managers.buff.active_features(&managers.hp),
+                    source_uid,
+                    catalog.is_big_skill(skill_id),
+                );
+                let ap_cost = i32::from(!card.temp_card.unwrap_or_default() && uses_action_point);
                 (
                     CardCommand::Play(CardPlay {
                         origin: CARD_PLAY_ORIGIN,
@@ -226,10 +231,6 @@ fn best_candidate(
         .enumerate()
         .filter_map(|(card_index, card)| {
             let (source_uid, skill_id) = card_identity(card, None)?;
-            let normal_ap_cost = i32::from(!card.temp_card.unwrap_or_default());
-            if normal_ap_cost > normal_ap {
-                return None;
-            }
             let issues = catalog.issues(skill_id);
             if catalog.get(skill_id).is_none() || !issues.is_empty() {
                 if reported_unsupported.insert(skill_id) {
@@ -243,6 +244,17 @@ fn best_candidate(
             let source = pool.entity(source_uid)?;
             let ultimate =
                 crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(skill_id, source);
+            let uses_action_point =
+                crate::engine::skill::buff_act::skill_no_use_action_point::skill_uses_action_point(
+                    &managers.buff.active_features(&managers.hp),
+                    source_uid,
+                    ultimate,
+                );
+            let normal_ap_cost =
+                i32::from(!card.temp_card.unwrap_or_default() && uses_action_point);
+            if normal_ap_cost > normal_ap {
+                return None;
+            }
             if ultimate
                 && !crate::engine::mechanic::card::CardMechanic.ultimate_ready(managers, source)
             {

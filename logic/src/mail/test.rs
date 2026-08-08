@@ -111,6 +111,50 @@ async fn claimed_mail_remains_in_mailbox() {
 }
 
 #[tokio::test]
+async fn deleting_claimed_campaign_mail_preserves_delivery_ledger() {
+    init_test_data();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at)
+             VALUES (5, 'delete-campaign-mail', 0, 0);
+         INSERT INTO user_mails
+             (incr_id, user_id, mail_id, attachment, state, create_time, expire_time)
+             VALUES (7, 5, 0, '2#11#1', 1, 0, 0);
+         INSERT INTO user_mail_campaign_deliveries
+             (campaign_id, user_id, sequence, mail_incr_id, manifest_sha256, delivered_at)
+             VALUES ('initial-full-v1', 5, 1, 7, 'test-sha', 0);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let deleted = super::MailManager::new(5)
+        .delete_claimed_unlocked(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(deleted.incr_ids, vec![7]);
+    let mail_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_mails WHERE incr_id = 7")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let ledger_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_mail_campaign_deliveries
+         WHERE campaign_id = 'initial-full-v1' AND user_id = 5 AND sequence = 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(mail_count, 0);
+    assert_eq!(ledger_count, 1);
+}
+
+#[tokio::test]
 async fn invalid_attachment_rolls_back_all_mail_state_and_rewards() {
     init_test_data();
     let pool = SqlitePoolOptions::new()

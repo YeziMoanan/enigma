@@ -14,7 +14,7 @@ impl BehaviorHandler for Handler {
     fn supports(behavior: &ParsedBehavior) -> bool {
         matches!(
             (behavior.spec.kind, behavior.args.as_slice()),
-            (BehaviorKind::AddAct, [amount]) if *amount != 0
+            (BehaviorKind::AddAct | BehaviorKind::AddActHero, [amount]) if *amount != 0
         )
     }
 

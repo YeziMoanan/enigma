@@ -21,7 +21,10 @@ use tracing::{info, warn};
 
 use crate::{
     logic::reward,
-    net::{app::AppState, outbound::CommandPacket},
+    net::{
+        app::AppState,
+        outbound::{CommandPacket, DownTag},
+    },
 };
 
 pub async fn run_gm_listener(addr: String, state: &'static AppState) -> std::io::Result<()> {
@@ -973,16 +976,16 @@ async fn send_push<M: Message>(
     cmd_id: CmdId,
     message: M,
 ) -> Result<()> {
-    let Some(sender) = state.get_session_sender(player_id) else {
+    let Some(session) = state.get_session_handle(player_id) else {
         return Ok(());
     };
 
-    let down_tag = state.reserve_down_tag().await;
-    sender
+    session
+        .sender
         .send(CommandPacket::Push {
             cmd_id,
             body: message.encode_to_vec(),
-            down_tag,
+            down_tag: DownTag::Next,
         })
         .await
         .map_err(|err| anyhow::anyhow!("failed to send MUIP push: {err}"))
@@ -1505,9 +1508,12 @@ mod tests {
         MaterialKind, build_hero_upgrade_catalog, disconnect_player, dungeon_catalog,
         entries_for_kind, is_premium_hero_skin,
     };
-    use crate::net::{app::AppState, outbound::CommandPacket};
+    use crate::net::{
+        app::{AppState, SessionHandle},
+        outbound::CommandPacket,
+    };
     use database::models::game::heros::UserHeroModel;
-    use std::collections::HashSet;
+    use std::{collections::HashSet, sync::Arc};
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -1522,7 +1528,7 @@ mod tests {
         database::run_migrations(&pool).await.unwrap();
         let state = AppState::new(pool, config::configs::get());
         let (sender, mut receiver) = mpsc::channel(1);
-        state.register_session(31, sender);
+        state.register_session(31, Arc::new(SessionHandle { sender }));
 
         let response = disconnect_player(&state, 31).await;
 
@@ -1532,6 +1538,32 @@ mod tests {
             receiver.recv().await,
             Some(CommandPacket::Disconnect)
         ));
+    }
+
+    #[tokio::test]
+    async fn stale_connection_cleanup_does_not_remove_new_session() {
+        let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+        let _ = config::init(&data_dir);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        database::run_migrations(&pool).await.unwrap();
+        let state = AppState::new(pool, config::configs::get());
+
+        let (old_sender, _old_receiver) = mpsc::channel(1);
+        let old_session = Arc::new(SessionHandle { sender: old_sender });
+        let (new_sender, _new_receiver) = mpsc::channel(1);
+        let new_session = Arc::new(SessionHandle { sender: new_sender });
+
+        state.register_session(31, old_session.clone());
+        state.register_session(31, new_session.clone());
+
+        assert!(!state.unregister_session(31, &old_session));
+        assert!(state.get_session_sender(31).is_some());
+        assert!(state.unregister_session(31, &new_session));
+        assert!(state.get_session_sender(31).is_none());
     }
 
     #[test]

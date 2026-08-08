@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -22,6 +22,7 @@ use crate::{GmRequest, GmResponse};
 
 const MAX_IMPORT_ACCOUNTS: usize = 10_000;
 const MAX_REASON_CHARS: usize = 200;
+const MAX_ACCOUNT_SEARCH_RESULTS: i64 = 50;
 
 #[derive(Clone)]
 pub(crate) struct ApiState {
@@ -100,6 +101,11 @@ pub(crate) struct AccountInput {
     account: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct AccountSearchInput {
+    q: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AccountPreview {
@@ -124,6 +130,19 @@ pub(crate) struct ImportPreview {
     duplicates: usize,
     existing: usize,
     conflicts: usize,
+    filtered_accounts: Vec<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BlacklistEntry {
+    account: String,
+    user_id: Option<i64>,
+    role_name: String,
+    source: String,
+    reason: String,
+    created_at: i64,
+    created_by: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,6 +155,12 @@ pub(crate) struct BanInput {
 pub(crate) struct OperationResponse {
     request_id: String,
     state: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    accounts: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    filtered: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    filtered_accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,6 +170,12 @@ struct LedgerResult {
     state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     user_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    accounts: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    filtered: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    filtered_accounts: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -175,11 +206,20 @@ pub(crate) async fn preview_account(
     Json(input): Json<AccountInput>,
 ) -> Result<Json<AccountPreview>, ApiError> {
     let account = normalize(&input.account)?;
-    let user = sqlx::query("SELECT id, username FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1")
-        .bind(&account)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(ApiError::database)?;
+    let user = sqlx::query(
+        "SELECT u.id, u.username
+         FROM users u
+         LEFT JOIN account_allowlist a ON a.activated_user_id = u.id
+         WHERE a.account_key = ? OR LOWER(TRIM(u.email)) = ?
+         ORDER BY CASE WHEN a.account_key = ? THEN 0 ELSE 1 END
+         LIMIT 1",
+    )
+    .bind(&account)
+    .bind(&account)
+    .bind(&account)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(ApiError::database)?;
     let user_id = user.as_ref().map(|row| row.get::<i64, _>("id"));
     let role_name = user
         .as_ref()
@@ -214,6 +254,84 @@ pub(crate) async fn preview_account(
     }))
 }
 
+pub(crate) async fn search_accounts(
+    State(state): State<ApiState>,
+    Query(input): Query<AccountSearchInput>,
+) -> Result<Json<Vec<AccountPreview>>, ApiError> {
+    let query = input.q.trim();
+    if query.is_empty() || query.chars().count() > 64 {
+        return Err(ApiError::invalid("invalid account search query"));
+    }
+    let normalized = query.to_lowercase();
+    let pattern = format!("%{}%", escape_like(&normalized));
+    let rows = sqlx::query(
+        "WITH candidates AS (
+            SELECT COALESCE(a.account_key, LOWER(TRIM(u.email))) AS account,
+                   u.id AS user_id, u.username AS role_name
+            FROM users u
+            LEFT JOIN account_allowlist a ON a.activated_user_id = u.id
+            WHERE a.account_key IS NOT NULL OR TRIM(COALESCE(u.email, '')) <> ''
+            UNION
+            SELECT a.account_key, u.id, COALESCE(u.username, '')
+            FROM account_allowlist a
+            LEFT JOIN users u ON u.id = a.activated_user_id
+                OR (a.activated_user_id IS NULL AND LOWER(TRIM(u.email)) = a.account_key)
+            UNION
+            SELECT b.account_key, u.id, COALESCE(u.username, '')
+            FROM account_blacklist b
+            LEFT JOIN users u ON u.id = b.user_id OR LOWER(TRIM(u.email)) = b.account_key
+         )
+         SELECT DISTINCT c.account, c.user_id, c.role_name,
+            EXISTS(SELECT 1 FROM account_allowlist a
+                   WHERE a.account_key = c.account
+                      OR (c.user_id IS NOT NULL AND a.activated_user_id = c.user_id)) AS allowlisted,
+            EXISTS(SELECT 1 FROM account_blacklist b
+                   WHERE b.account_key = c.account
+                      OR (c.user_id IS NOT NULL AND b.user_id = c.user_id)) AS blacklisted
+         FROM candidates c
+         WHERE LOWER(c.account) LIKE ? ESCAPE '\\'
+            OR LOWER(c.role_name) LIKE ? ESCAPE '\\'
+            OR CAST(c.user_id AS TEXT) = ?
+         ORDER BY
+            CASE WHEN LOWER(c.account) = ? OR LOWER(c.role_name) = ? OR CAST(c.user_id AS TEXT) = ?
+                 THEN 0 ELSE 1 END,
+            c.user_id IS NULL,
+            c.user_id,
+            c.account
+         LIMIT ?",
+    )
+    .bind(&pattern)
+    .bind(&pattern)
+    .bind(query)
+    .bind(&normalized)
+    .bind(&normalized)
+    .bind(query)
+    .bind(MAX_ACCOUNT_SEARCH_RESULTS)
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::database)?;
+    let online_players = send_gm(&state.gm_addr, GmRequest::ListPlayers)
+        .await
+        .map(|response| response.players.into_iter().collect::<HashSet<_>>())
+        .unwrap_or_default();
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|row| {
+                let user_id = row.get::<Option<i64>, _>("user_id");
+                AccountPreview {
+                    account: row.get("account"),
+                    user_id,
+                    role_name: row.get("role_name"),
+                    allowlisted: row.get::<i64, _>("allowlisted") != 0,
+                    blacklisted: row.get::<i64, _>("blacklisted") != 0,
+                    online: user_id.is_some_and(|id| online_players.contains(&id.to_string())),
+                }
+            })
+            .collect(),
+    ))
+}
+
 pub(crate) async fn preview_import(
     State(state): State<ApiState>,
     Json(input): Json<ImportInput>,
@@ -229,6 +347,34 @@ pub(crate) async fn preview_replace(
 ) -> Result<Json<ImportPreview>, ApiError> {
     Ok(Json(
         preview_batch(&state.db, normalize_batch(input.accounts)?).await?,
+    ))
+}
+
+pub(crate) async fn list_blacklist(
+    State(state): State<ApiState>,
+) -> Result<Json<Vec<BlacklistEntry>>, ApiError> {
+    let rows = sqlx::query(
+        "SELECT b.account_key, b.user_id, COALESCE(u.username, '') AS role_name,
+            b.source, b.reason, b.created_at, b.created_by
+         FROM account_blacklist b
+         LEFT JOIN users u ON u.id = b.user_id
+         ORDER BY b.created_at DESC, b.account_key ASC",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::database)?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|row| BlacklistEntry {
+                account: row.get("account_key"),
+                user_id: row.get("user_id"),
+                role_name: row.get("role_name"),
+                source: row.get("source"),
+                reason: row.get("reason"),
+                created_at: row.get("created_at"),
+                created_by: row.get("created_by"),
+            })
+            .collect(),
     ))
 }
 
@@ -324,6 +470,9 @@ pub(crate) async fn ban(
         request_id: request_id.clone(),
         state: "prepared".to_string(),
         user_id,
+        accounts: 0,
+        filtered: 0,
+        filtered_accounts: Vec::new(),
     };
     insert_request(&mut tx, &request_id, "ban", &payload_hash, &result).await?;
     tx.commit().await.map_err(ApiError::database)?;
@@ -360,6 +509,9 @@ pub(crate) async fn unban(
         request_id: request_id.clone(),
         state: "applied".to_string(),
         user_id: None,
+        accounts: 0,
+        filtered: 0,
+        filtered_accounts: Vec::new(),
     };
     insert_request(&mut tx, &request_id, "unban", &payload_hash, &result).await?;
     mark_request(&mut tx, &request_id, "applied", &result).await?;
@@ -396,18 +548,6 @@ async fn apply_batch(
     if batch.accounts.is_empty() || batch.invalid > 0 {
         return Err(ApiError::invalid("allowlist contains invalid accounts"));
     }
-    let preview = preview_batch(
-        &state.db,
-        NormalizedBatch {
-            accounts: batch.accounts.clone(),
-            invalid: batch.invalid,
-            duplicates: batch.duplicates,
-        },
-    )
-    .await?;
-    if preview.conflicts > 0 {
-        return Err(ApiError::conflict("allowlist conflicts with blacklist"));
-    }
     let keys = batch
         .accounts
         .iter()
@@ -433,25 +573,19 @@ async fn apply_batch(
         tx.rollback().await.map_err(ApiError::database)?;
         return Ok(operation_response(&result));
     }
-    ensure_no_blacklist_conflicts(
-        &mut tx,
-        &batch
-            .accounts
-            .iter()
-            .map(|(key, _)| key.clone())
-            .collect::<Vec<_>>(),
-    )
-    .await?;
+    let (accounts, filtered_accounts) = partition_blacklisted(&mut tx, batch.accounts).await?;
     let prepared = LedgerResult {
         request_id: request_id.clone(),
         state: "prepared".to_string(),
         user_id: None,
+        accounts: accounts.len(),
+        filtered: filtered_accounts.len(),
+        filtered_accounts: filtered_accounts.clone(),
     };
     insert_request(&mut tx, &request_id, operation, &payload_hash, &prepared).await?;
 
     if replace {
-        let keep = batch
-            .accounts
+        let keep = accounts
             .iter()
             .map(|(key, _)| key.as_str())
             .collect::<HashSet<_>>();
@@ -470,7 +604,8 @@ async fn apply_batch(
         }
     }
     let now = now_ms();
-    for (key, display) in batch.accounts {
+    let applied_accounts = accounts.len();
+    for (key, display) in accounts {
         sqlx::query(
             "INSERT OR IGNORE INTO account_allowlist
                 (account_key, display_account, batch_id, imported_at, imported_by)
@@ -488,6 +623,9 @@ async fn apply_batch(
         request_id: request_id.clone(),
         state: "applied".to_string(),
         user_id: None,
+        accounts: applied_accounts,
+        filtered: filtered_accounts.len(),
+        filtered_accounts,
     };
     mark_request(&mut tx, &request_id, "applied", &applied).await?;
     tx.commit().await.map_err(ApiError::database)?;
@@ -527,11 +665,25 @@ fn operation_response(result: &LedgerResult) -> OperationResponse {
     OperationResponse {
         request_id: result.request_id.clone(),
         state: result.state.clone(),
+        accounts: result.accounts,
+        filtered: result.filtered,
+        filtered_accounts: result.filtered_accounts.clone(),
     }
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 fn normalize(value: &str) -> Result<String, ApiError> {
     access::normalize_account(value).map_err(|_| ApiError::invalid("invalid account format"))
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn normalize_batch(accounts: Vec<String>) -> Result<NormalizedBatch, ApiError> {
@@ -577,41 +729,48 @@ async fn preview_batch(db: &SqlitePool, batch: NormalizedBatch) -> Result<Import
         .map_err(ApiError::database)?
         .into_iter()
         .collect::<HashSet<_>>();
+    let filtered_accounts = batch
+        .accounts
+        .iter()
+        .filter(|(key, _)| blacklist.contains(key))
+        .map(|(_, display)| display.clone())
+        .collect::<Vec<_>>();
     Ok(ImportPreview {
-        valid: batch.accounts.len(),
+        valid: batch.accounts.len() - filtered_accounts.len(),
         invalid: batch.invalid,
         duplicates: batch.duplicates,
         existing: batch
             .accounts
             .iter()
-            .filter(|(key, _)| existing.contains(key))
+            .filter(|(key, _)| existing.contains(key) && !blacklist.contains(key))
             .count(),
-        conflicts: batch
-            .accounts
-            .iter()
-            .filter(|(key, _)| blacklist.contains(key))
-            .count(),
+        conflicts: filtered_accounts.len(),
+        filtered_accounts,
     })
 }
 
-async fn ensure_no_blacklist_conflicts(
+async fn partition_blacklisted(
     tx: &mut Transaction<'_, Sqlite>,
-    accounts: &[String],
-) -> Result<(), ApiError> {
-    for account in accounts {
+    accounts: Vec<(String, String)>,
+) -> Result<(Vec<(String, String)>, Vec<String>), ApiError> {
+    let mut allowed = Vec::with_capacity(accounts.len());
+    let mut filtered = Vec::new();
+    for (key, display) in accounts {
         let blocked = sqlx::query_scalar::<_, i64>(
             "SELECT 1 FROM account_blacklist WHERE account_key = ? LIMIT 1",
         )
-        .bind(account)
+        .bind(&key)
         .fetch_optional(&mut **tx)
         .await
         .map_err(ApiError::database)?
         .is_some();
         if blocked {
-            return Err(ApiError::conflict("allowlist conflicts with blacklist"));
+            filtered.push(display);
+        } else {
+            allowed.push((key, display));
         }
     }
-    Ok(())
+    Ok((allowed, filtered))
 }
 
 fn idempotency_key(headers: &HeaderMap) -> Result<String, ApiError> {
@@ -686,6 +845,9 @@ fn ledger_result(row: &RequestRow, request_id: &str) -> LedgerResult {
         request_id: request_id.to_string(),
         state: row.status.clone(),
         user_id: None,
+        accounts: 0,
+        filtered: 0,
+        filtered_accounts: Vec::new(),
     })
 }
 
@@ -831,13 +993,161 @@ mod tests {
         assert_eq!(
             preview,
             ImportPreview {
-                valid: 3,
+                valid: 2,
                 invalid: 1,
                 duplicates: 1,
                 existing: 1,
                 conflicts: 1,
+                filtered_accounts: vec!["blocked".to_string()],
             }
         );
+    }
+
+    #[tokio::test]
+    async fn blacklist_list_includes_source_reason_and_newest_first() {
+        let state = state().await;
+        sqlx::query(
+            "INSERT INTO users (id, username, email, created_at, updated_at)
+             VALUES (9, 'Matilda', 'newer', 1, 1)",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+        for (account, source, reason, created_at) in [
+            ("older", "unauthorized_registration", "not allowlisted", 1),
+            ("newer", "manual_ban", "policy", 2),
+        ] {
+            sqlx::query(
+                "INSERT INTO account_blacklist
+                    (account_key, source, reason, created_at, created_by)
+                 VALUES (?, ?, ?, ?, 'test')",
+            )
+            .bind(account)
+            .bind(source)
+            .bind(reason)
+            .bind(created_at)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        }
+        sqlx::query("UPDATE account_blacklist SET user_id = 9 WHERE account_key = 'newer'")
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let Json(entries) = list_blacklist(State(state)).await.unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].account, "newer");
+        assert_eq!(entries[0].source, "manual_ban");
+        assert_eq!(entries[0].reason, "policy");
+        assert_eq!(entries[0].role_name, "Matilda");
+        assert_eq!(entries[1].account, "older");
+        assert_eq!(entries[1].role_name, "");
+    }
+
+    #[tokio::test]
+    async fn account_search_matches_role_name_account_and_user_id() {
+        let state = state().await;
+        sqlx::query(
+            "INSERT INTO users (id, username, email, created_at, updated_at)
+             VALUES (17, 'Sotheby', 'player17@example.com', 1, 1)",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO account_allowlist
+                (account_key, display_account, batch_id, imported_at, imported_by)
+             VALUES ('player17@example.com', 'player17@example.com', 'test', 1, 'test')",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        for query in ["soth", "PLAYER17", "17"] {
+            let Json(results) = search_accounts(
+                State(state.clone()),
+                Query(AccountSearchInput {
+                    q: query.to_string(),
+                }),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(results.len(), 1, "query {query}");
+            assert_eq!(results[0].account, "player17@example.com");
+            assert_eq!(results[0].user_id, Some(17));
+            assert_eq!(results[0].role_name, "Sotheby");
+            assert!(results[0].allowlisted);
+            assert!(!results[0].blacklisted);
+        }
+    }
+
+    #[tokio::test]
+    async fn account_preview_and_search_use_activated_user_binding() {
+        let state = state().await;
+        sqlx::query(
+            "INSERT INTO users (id, username, email, created_at, updated_at)
+             VALUES (23, 'Regulus', 'legacy-account', 1, 1);
+             INSERT INTO account_allowlist
+                (account_key, display_account, batch_id, imported_at, imported_by, activated_user_id)
+             VALUES ('login-account', 'login-account', 'test', 1, 'test', 23);",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let Json(preview) = preview_account(
+            State(state.clone()),
+            Json(AccountInput {
+                account: "login-account".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(preview.user_id, Some(23));
+        assert_eq!(preview.role_name, "Regulus");
+        assert!(preview.allowlisted);
+
+        let Json(results) = search_accounts(
+            State(state),
+            Query(AccountSearchInput {
+                q: "regu".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].account, "login-account");
+        assert_eq!(results[0].user_id, Some(23));
+        assert_eq!(results[0].role_name, "Regulus");
+        assert!(results[0].allowlisted);
+    }
+
+    #[tokio::test]
+    async fn account_preview_keeps_unactivated_allowlist_entry_unregistered() {
+        let state = state().await;
+        sqlx::query(
+            "INSERT INTO account_allowlist
+                (account_key, display_account, batch_id, imported_at, imported_by)
+             VALUES ('not-registered', 'not-registered', 'test', 1, 'test')",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let Json(preview) = preview_account(
+            State(state),
+            Json(AccountInput {
+                account: "not-registered".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(preview.user_id, None);
+        assert_eq!(preview.role_name, "");
+        assert!(preview.allowlisted);
     }
 
     #[tokio::test]
@@ -880,7 +1190,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transactional_import_check_rejects_blacklist_conflicts() {
+    async fn allowlist_import_filters_blacklist_and_applies_remaining_accounts() {
         let state = state().await;
         sqlx::query(
             "INSERT INTO account_blacklist
@@ -890,11 +1200,38 @@ mod tests {
         .execute(&state.db)
         .await
         .unwrap();
-        let mut tx = state.db.begin_with("BEGIN IMMEDIATE").await.unwrap();
-        let error = ensure_no_blacklist_conflicts(&mut tx, &["blocked".to_string()])
-            .await
-            .unwrap_err();
-        assert_eq!(error.status, StatusCode::CONFLICT);
-        tx.rollback().await.unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("idempotency-key", "import-filter-1".parse().unwrap());
+
+        let response = apply_batch(
+            &state,
+            &headers,
+            vec!["allowed".to_string(), "blocked".to_string()],
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.state, "applied");
+        assert_eq!(response.accounts, 1);
+        assert_eq!(response.filtered, 1);
+        assert_eq!(response.filtered_accounts, vec!["blocked".to_string()]);
+        let allowlisted = sqlx::query_scalar::<_, String>(
+            "SELECT account_key FROM account_allowlist ORDER BY account_key",
+        )
+        .fetch_all(&state.db)
+        .await
+        .unwrap();
+        assert_eq!(allowlisted, vec!["allowed".to_string()]);
+
+        let replay = apply_batch(
+            &state,
+            &headers,
+            vec!["allowed".to_string(), "blocked".to_string()],
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(replay, response);
     }
 }

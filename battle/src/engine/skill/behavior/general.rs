@@ -34,6 +34,15 @@ pub(super) struct Handler;
 
 impl BehaviorHandler for Handler {
     fn emit_ops(context: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Option<Vec<RuleOp>> {
+        if behavior.spec.kind == BehaviorKind::SetExtraType {
+            let extra_type = behavior.arg(0)?;
+            if behavior.args.len() != 1 {
+                return None;
+            }
+            crate::engine::skill::condition::extra::skill_kind_from_is_extra(extra_type)?;
+            context.target.extra_skill_kind = extra_type;
+            return Some(Vec::new());
+        }
         if behavior.spec.kind == BehaviorKind::NotifyUpgradeHero {
             let upgrade_id = behavior.arg(0)?;
             let entity = context.managers.entity_snapshot(context.target_uid)?;
@@ -65,6 +74,28 @@ impl BehaviorHandler for DamageRateMarkerHandler {
         (behavior.args.is_empty()
             && behavior.spec.kind == BehaviorKind::IgnoreSkillConfigDamageRate)
             .then(Vec::new)
+    }
+}
+
+pub(super) struct CompatibilityHandler;
+
+impl BehaviorHandler for CompatibilityHandler {
+    const VALIDATES_ARGUMENTS: bool = true;
+
+    fn supports(behavior: &ParsedBehavior) -> bool {
+        match behavior.spec.kind {
+            BehaviorKind::FoundationCounterClear => {
+                matches!(behavior.args.as_slice(), [rate] if *rate > 0)
+            }
+            BehaviorKind::FakeHpToHeal => {
+                matches!(behavior.args.as_slice(), [rate, mode] if *rate > 0 && matches!(*mode, 0 | 1))
+            }
+            _ => false,
+        }
+    }
+
+    fn emit_ops(_: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Option<Vec<RuleOp>> {
+        Self::supports(behavior).then(Vec::new)
     }
 }
 

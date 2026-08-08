@@ -198,7 +198,8 @@ fn merge_driver(
 ) -> Result<ConditionDriver, RouteError> {
     match (first, second) {
         (ConditionDriver::Trigger(first), ConditionDriver::Trigger(second)) => {
-            if first.event != second.event {
+            if first.event != second.event && !share_skill_action_context(first.event, second.event)
+            {
                 None
             } else {
                 match (first.phase, second.phase) {
@@ -220,6 +221,14 @@ fn merge_driver(
         _ => None,
     }
     .ok_or(RouteError::ConflictingConditionDrivers { first, second })
+}
+
+fn share_skill_action_context(first: EventKind, second: EventKind) -> bool {
+    matches!(
+        (first, second),
+        (EventKind::SkillAction, EventKind::SkillEffectStarted)
+            | (EventKind::SkillEffectStarted, EventKind::SkillAction)
+    )
 }
 
 #[cfg(test)]
@@ -510,6 +519,26 @@ mod tests {
             }))
         );
         assert_eq!(route.branches[0].conditions.len(), 2);
+    }
+
+    #[test]
+    fn immediate_effect_tag_filters_share_the_active_skill_driver() {
+        init_config();
+        let route = ConditionRoute::compile(&parse_conditions(
+            config::configs::get(),
+            "502203#0&34203#1#2&500203#1",
+        ))
+        .unwrap();
+
+        assert_eq!(
+            route.branches[0].driver,
+            Some(ConditionDriver::Trigger(ConditionTrigger {
+                key: crate::engine::skill::rule::DefinitionKey::new(502203, "ActiveUseSkill"),
+                event: EventKind::SkillAction,
+                phase: Some(SkillPhase::Immediate),
+            }))
+        );
+        assert_eq!(route.branches[0].conditions.len(), 3);
     }
 
     #[test]

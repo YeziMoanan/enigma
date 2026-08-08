@@ -39,6 +39,23 @@ pub struct CardAddGenerated {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CardInsertUnnamed {
+    pub origin: CommandOrigin,
+    pub owner_uid: i64,
+    pub skill_id: i32,
+    pub index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CardUpdateUnnamed {
+    pub origin: CommandOrigin,
+    pub index: usize,
+    pub lock: Option<bool>,
+    pub strengthen_track: Option<i32>,
+    pub strengthen_amount: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CardAddUniversal {
     pub origin: CommandOrigin,
     pub count: i32,
@@ -140,7 +157,7 @@ impl CardPlay {
             || self.chosen_skill_id.or(source.skill_id),
             |choice| choice.played.skill_id,
         )?;
-        (skill_id > 0).then_some((source.uid.unwrap_or_default(), skill_id))
+        (skill_id > 0).then_some((super::unnamed::caster_uid(source), skill_id))
     }
 }
 
@@ -320,6 +337,13 @@ pub enum CardCommand {
         card_index: usize,
     },
     AddGenerated(CardAddGenerated),
+    InsertUnnamed(CardInsertUnnamed),
+    UpdateUnnamed(CardUpdateUnnamed),
+    MoveServer {
+        origin: CommandOrigin,
+        from_index: usize,
+        to_index: usize,
+    },
     AddUniversal(CardAddUniversal),
     RedealKeepRanks {
         origin: CommandOrigin,
@@ -404,6 +428,9 @@ pub enum CardChangeKind {
     Moved,
     Dissolved,
     GeneratedAdded,
+    UnnamedInserted,
+    UnnamedUpdated,
+    ServerMoved,
     UniversalAdded,
     RedealtKeepRanks,
     TemporaryAdded,
@@ -629,6 +656,85 @@ pub(super) fn execute(
                 Vec::new(),
             )
         }
+        CardCommand::InsertUnnamed(insert) => {
+            if manager.hand().iter().any(super::unnamed::is_unnamed) {
+                return Err(CardCommandError::InvalidCommand);
+            }
+            let card = super::unnamed::card(insert.owner_uid, insert.skill_id)
+                .ok_or(CardCommandError::InvalidCommand)?;
+            let card = manager
+                .insert_hand_card(insert.index, card)
+                .ok_or(CardCommandError::InvalidCommand)?;
+            operation = Some(CardChange::InsertHandCard {
+                index: insert.index,
+                card: card.clone(),
+            });
+            (
+                Some(insert.origin),
+                CardChangeKind::UnnamedInserted,
+                Some(card),
+                None,
+                Vec::new(),
+                Vec::new(),
+            )
+        }
+        CardCommand::UpdateUnnamed(update) => {
+            let mut card = manager
+                .hand()
+                .get(update.index)
+                .cloned()
+                .ok_or(CardCommandError::InvalidCommand)?;
+            let mut data = super::unnamed::UnnamedCardData::from_card(&card)
+                .ok_or(CardCommandError::InvalidCommand)?;
+            let mut changed = false;
+            if let Some(lock) = update.lock {
+                changed |= data.lock != lock;
+                data.lock = lock;
+            }
+            if let Some(track) = update.strengthen_track {
+                changed |= data.strengthen(track, update.strengthen_amount);
+            }
+            if !changed
+                || !data.write_to(&mut card)
+                || !manager.update_hand_card(update.index, card.clone())
+            {
+                return Err(CardCommandError::InvalidCommand);
+            }
+            operation = Some(CardChange::UpdateCardData {
+                index: update.index,
+                area_type: 0,
+                card: card.clone(),
+            });
+            (
+                Some(update.origin),
+                CardChangeKind::UnnamedUpdated,
+                Some(card),
+                None,
+                Vec::new(),
+                Vec::new(),
+            )
+        }
+        CardCommand::MoveServer {
+            origin,
+            from_index,
+            to_index,
+        } => {
+            if !manager.move_card(from_index, to_index) {
+                return Err(CardCommandError::InvalidCommand);
+            }
+            operation = Some(CardChange::MoveCard {
+                from_index,
+                to_index,
+            });
+            (
+                Some(origin),
+                CardChangeKind::ServerMoved,
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+            )
+        }
         CardCommand::AddUniversal(add) => {
             let Some(skill) = super::UniversalCardSkill::from_rank(add.rank) else {
                 return Err(CardCommandError::InvalidCommand);
@@ -825,6 +931,13 @@ pub(super) fn execute(
             if play
                 .planned_skill(manager.visible_card(play.hand_index))
                 .is_none()
+            {
+                return Err(CardCommandError::InvalidPlaySkill);
+            }
+            if play.choice.is_none()
+                && manager
+                    .visible_card(play.hand_index)
+                    .is_some_and(super::unnamed::is_locked)
             {
                 return Err(CardCommandError::InvalidPlaySkill);
             }

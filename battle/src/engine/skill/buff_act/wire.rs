@@ -35,6 +35,7 @@ pub struct WireEffect {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InitialStateRule {
+    Zero,
     CrystalSelection,
     ConduitCardSelection,
     ButterflyAllowedSkillKinds,

@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use database::{db::game::equipment::Equipment, models::game::heros::HeroData};
+use database::{
+    db::game::equipment::Equipment,
+    models::game::heros::{HeroData, visible_hero_skin},
+};
 use sonettobuf::{EnhanceInfoBox, EquipRecord, FightEntityInfo, HeroAttribute, PowerInfo};
 
 use super::{
@@ -41,7 +44,9 @@ impl EntityBuilder {
         let (sg1, sg2) = Skill::get(&self.hero_data, self.is_sub, destiny.as_ref());
         let passives = Passive::get(
             &self.hero_data,
-            self.equip.as_ref().map(|e| e.equip_id),
+            self.equip
+                .as_ref()
+                .map(|equip| (equip.equip_id, equip.refine_lv)),
             destiny.as_ref(),
         );
         // Source attribution (Insight/Rank/Destiny/Psychube/Extra) is tracked
@@ -63,7 +68,7 @@ impl EntityBuilder {
         FightEntityInfo {
             uid: Some(r.uid),
             model_id: Some(r.hero_id),
-            skin: Some(r.skin),
+            skin: Some(visible_hero_skin(r.hero_id, r.skin)),
             position: Some(self.position),
             entity_type: Some(1),
             user_id: Some(r.user_id),

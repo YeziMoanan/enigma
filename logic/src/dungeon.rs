@@ -98,7 +98,7 @@ impl DungeonManager {
         }
 
         let tables = config::configs::get();
-        let mut tx = db.begin().await?;
+        let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
         let points = dungeons::reward_point_in_transaction(
             &mut tx,
             self.player_id,

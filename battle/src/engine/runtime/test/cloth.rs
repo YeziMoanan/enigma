@@ -235,3 +235,97 @@ fn conduit_selection_adds_the_configured_precast_and_commits_the_choice() {
             .is_none()
     );
 }
+
+#[test]
+fn mei_leier_extra_round_consumes_charge_and_executes_the_configured_skill() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        version: Some(7),
+        battle_id: Some(1001),
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                model_id: Some(3146),
+                team_type: Some(1),
+                current_hp: Some(10_000),
+                buffs: vec![sonettobuf::BuffInfo {
+                    uid: Some(20),
+                    buff_id: Some(31460143),
+                    from_uid: Some(10),
+                    count: Some(1),
+                    act_info: vec![sonettobuf::BuffActInfo {
+                        act_id: Some(1139),
+                        param: vec![100_000],
+                        str_param: Some(String::new()),
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(-1),
+                model_id: Some(1010101),
+                team_type: Some(2),
+                career: Some(1),
+                weak_careers: vec![3],
+                current_hp: Some(10_000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut runtime = BattleRuntime::new(fight);
+    runtime.catalog = SkillEffectCatalog::from_roots(config::configs::get(), [31460183], []);
+    let feature = runtime
+        .managers
+        .buff
+        .active_features(&runtime.managers.hp)
+        .into_iter()
+        .find(|feature| feature.act_id() == Some(1139))
+        .expect("charge feature should be active");
+    assert_eq!(feature.values, vec![1139, 100_000, 150_000, 31460183]);
+    assert_eq!(
+        runtime
+            .managers
+            .buff
+            .snapshot(10, 20)
+            .and_then(|buff| buff
+                .act_info
+                .into_iter()
+                .find(|info| info.act_id == Some(1139)))
+            .and_then(|info| info.param.first().copied()),
+        Some(100_000)
+    );
+    assert!(
+        runtime.catalog.get(31460183).is_some(),
+        "issues={:?}",
+        runtime.catalog.issues(31460183)
+    );
+    let reply = runtime
+        .use_cloth_skill(UseClothSkillRequest {
+            skill_id: Some(0),
+            from_id: Some(10),
+            to_id: Some(0),
+            r#type: Some(ClothSkillType::MeiLeiErExtraRound as i32),
+        })
+        .expect("charged Mei Lei Er extra round should execute")
+        .round
+        .unwrap();
+
+    let charge = runtime
+        .managers
+        .buff
+        .snapshot(10, 20)
+        .and_then(|buff| {
+            buff.act_info
+                .into_iter()
+                .find(|info| info.act_id == Some(1139))
+        })
+        .and_then(|info| info.param.first().copied());
+    assert_eq!(charge, Some(0));
+    assert!(!reply.fight_step.is_empty());
+}

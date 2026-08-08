@@ -83,6 +83,28 @@ pub fn split_final_damage_delta_for(
     }
 }
 
+pub fn attack_limit_damage_rate_for(
+    buffs: &BuffManager,
+    hp: &HpManager,
+    emitter_uid: i64,
+    attack_count: i32,
+) -> i32 {
+    buffs
+        .active_features(hp)
+        .iter()
+        .filter(|feature| feature.owner_uid == emitter_uid)
+        .filter(|feature| is_kind(feature, BuffActKind::EmitterAttackNumLimitFixDamage))
+        .filter_map(|feature| {
+            let [_, required_count, rate, limit, ..] = feature.values.as_slice() else {
+                return None;
+            };
+            (attack_count >= *required_count && attack_count <= *limit)
+                .then_some(*rate * feature.amount.max(1))
+        })
+        .max()
+        .unwrap_or_default()
+}
+
 fn attack_count_delta(feature: &ActiveBuffFeature) -> i32 {
     if !is_kind(feature, BuffActKind::EmitterNumChange) {
         return 0;

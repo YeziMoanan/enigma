@@ -212,7 +212,7 @@ pub async fn replace_hero_group_sort(
     common_snapshot: bool,
 ) -> Result<bool> {
     let now = common::time::ServerTime::now_ms();
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     if common_snapshot {
         sqlx::query(
             "INSERT OR IGNORE INTO hero_group_snapshots
@@ -387,7 +387,7 @@ pub async fn save_hero_group_snapshot(
     groups: Vec<HeroGroupInfo>,
     sort_sub_ids: Vec<i32>,
 ) -> Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     save_hero_group_snapshot_in_transaction(&mut tx, user_id, snapshot_id, &groups, &sort_sub_ids)
         .await?;
     tx.commit().await?;

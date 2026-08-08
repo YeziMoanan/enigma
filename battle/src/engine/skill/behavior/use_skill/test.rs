@@ -506,6 +506,44 @@ fn direct_use_skill_no_act_accepts_only_observed_arities() {
 }
 
 #[test]
+fn direct_use_skill_not_extra_keeps_the_nested_execution_mode() {
+    let managers = crate::engine::manager::BattleManagers::default();
+    let pool = TargetPool::default();
+    let mut determinism = RoundDeterminism::default();
+    let mut modifiers = crate::engine::skill::action::SkillModifiers::default();
+    let mut target = crate::engine::skill::target::TargetContext::default();
+    let behavior = ParsedBehavior::new(60223, "DirectUseSkillNotExtra", vec![31470162]);
+
+    assert!(supports_direct_skill_not_extra(&behavior));
+    let ops = super::super::rule_ops(
+        BehaviorOpContext {
+            source_uid: 10,
+            source_team: 1,
+            target_uid: 20,
+            active_skill_id: 31470161,
+            transfer_count: 1,
+            event: None,
+            managers: &managers,
+            pool: &pool,
+            determinism: &mut determinism,
+            modifiers: &mut modifiers,
+            target: &mut target,
+        },
+        &behavior,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        ops.as_slice(),
+        [RuleOp::Skill(invocation)]
+            if invocation.plan.source_uid == 10
+                && invocation.plan.skill_id == 31470162
+                && invocation.target == crate::engine::skill::action::SkillTarget::Explicit(20)
+                && invocation.mode == crate::engine::skill::action::SkillExecutionMode::Nested
+    ));
+}
+
+#[test]
 fn consume_power_skill_repeats_cost_and_extra_action_for_each_affordable_cast() {
     let fight = Fight {
         attacker: Some(FightTeam {

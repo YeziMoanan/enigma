@@ -207,6 +207,95 @@ fn scoped_catalog_follows_configured_hero_upgrade_outcomes() {
 }
 
 #[test]
+fn reported_team_and_device_character_rules_compile_end_to_end() {
+    init_config();
+    let db = config::configs::get();
+    let hero_ids = [3081, 3088, 3120, 3125, 3126, 3127, 3134, 3139, 3141, 3144];
+    let belongs_to_reported_hero = |id: i32| hero_ids.contains(&(id / 10_000));
+    let skill_roots = db
+        .skill_effect
+        .all()
+        .iter()
+        .filter(|row| belongs_to_reported_hero(row.id))
+        .map(|row| row.id)
+        .collect::<Vec<_>>();
+    let buff_roots = db
+        .skill_buff
+        .all()
+        .iter()
+        .filter(|row| belongs_to_reported_hero(row.id))
+        .map(|row| row.id)
+        .collect::<Vec<_>>();
+
+    let catalog = SkillEffectCatalog::from_roots(db, skill_roots, buff_roots);
+    let mut failures = Vec::new();
+    for (&effect_id, effect) in &catalog.effects {
+        for issue in catalog.issues(effect_id) {
+            failures.push(format!("effect {effect_id}: {issue:?}"));
+        }
+        for (index, slot) in effect.slots.iter().enumerate() {
+            if crate::engine::skill::behavior::registry::find(&slot.behavior).is_none() {
+                failures.push(format!(
+                    "effect {effect_id} slot {}: unregistered behavior {:?}",
+                    index + 1,
+                    slot.behavior.spec.key
+                ));
+            } else if !crate::engine::skill::behavior::is_supported(&slot.behavior) {
+                failures.push(format!(
+                    "effect {effect_id} slot {}: unsupported behavior {:?} args {:?}",
+                    index + 1,
+                    slot.behavior.spec.key,
+                    slot.behavior.args
+                ));
+            } else if !crate::engine::skill::behavior::has_destination(&slot.behavior) {
+                failures.push(format!(
+                    "effect {effect_id} slot {}: behavior has no runtime destination {:?}",
+                    index + 1,
+                    slot.behavior.spec.key
+                ));
+            }
+            if let Err(error) = &slot.compiled_route {
+                failures.push(format!(
+                    "effect {effect_id} slot {}: condition route {error:?}",
+                    index + 1
+                ));
+            }
+        }
+    }
+    for buff_id in &catalog.reachable_buffs {
+        let Some(buff) = db.skill_buff.get(*buff_id) else {
+            failures.push(format!("buff {buff_id}: missing definition"));
+            continue;
+        };
+        for raw in buff.features.split('|').filter(|raw| !raw.is_empty()) {
+            let values = raw
+                .split('#')
+                .flat_map(|field| field.split(','))
+                .filter_map(|value| value.parse::<i32>().ok())
+                .collect::<Vec<_>>();
+            let Some((&act_id, args)) = values.split_first() else {
+                failures.push(format!("buff {buff_id}: invalid feature {raw:?}"));
+                continue;
+            };
+            let Some(act) = db.buff_act.get(act_id) else {
+                failures.push(format!("buff {buff_id}: missing buff act {act_id}"));
+                continue;
+            };
+            if crate::engine::skill::buff_act::registry::destination(act_id, &act.r#type, args)
+                .is_none()
+            {
+                failures.push(format!(
+                    "buff {buff_id}: unsupported buff act {} {} args {:?}",
+                    act.id, act.r#type, args
+                ));
+            }
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
 fn parses_hash_cells_as_opcode_and_args() {
     assert_eq!(parse_i32_list("60002#1#2"), vec![60002, 1, 2]);
     assert_eq!(parse_i32_list(""), Vec::<i32>::new());
@@ -450,6 +539,58 @@ fn active_skill_filters_share_the_exact_skill_action_driver() {
         subscription.event == crate::engine::event::kind::EventKind::SkillAction
             && subscription.definition.opcode == 16210
     }));
+}
+
+#[test]
+fn liang_yue_psychube_compiles_at_every_amplification_level() {
+    init_config();
+    let catalog = SkillEffectCatalog::from_game_db(config::configs::get());
+
+    for skill_id in 434211..=434215 {
+        let subscriptions = catalog.compiled_subscriptions(skill_id).unwrap();
+        assert!(subscriptions.iter().any(|subscription| {
+            subscription.event == crate::engine::event::kind::EventKind::SkillAction
+                && subscription.phase == Some(crate::engine::skill::action::SkillPhase::Immediate)
+                && subscription.definition
+                    == crate::engine::skill::rule::DefinitionKey::new(502203, "ActiveUseSkill")
+        }));
+    }
+}
+
+#[test]
+fn newly_added_permanent_heroes_report_all_uncompiled_skill_rules() {
+    init_config();
+    let game = config::configs::get();
+    let catalog = SkillEffectCatalog::from_game_db(game);
+    let hero_ids = [3120, 3140, 3144, 3145, 3146, 3147];
+    let mut failures = Vec::new();
+
+    for skill in game
+        .skill
+        .iter()
+        .filter(|skill| hero_ids.contains(&skill.hero_id))
+    {
+        for issue in catalog.issues(skill.skill_effect) {
+            failures.push(format!(
+                "hero={} skill={} effect={} issue={issue:?}",
+                skill.hero_id, skill.id, skill.skill_effect
+            ));
+        }
+        if let Err(error) = catalog.compiled_subscriptions(skill.skill_effect) {
+            failures.push(format!(
+                "hero={} skill={} effect={} route={error:?}",
+                skill.hero_id, skill.id, skill.skill_effect
+            ));
+        }
+    }
+
+    failures.sort();
+    failures.dedup();
+    assert!(
+        failures.is_empty(),
+        "new permanent hero skill gaps:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]

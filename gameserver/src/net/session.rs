@@ -1,10 +1,14 @@
 use crate::net::context::ConnectionContext;
-use crate::net::{app::AppState, outbound::CommandPacket, router};
+use crate::net::{
+    app::AppState,
+    outbound::{CommandPacket, DownTag},
+    router,
+};
 use crate::util::common::send_raw_server_message;
 use byteorder::{BE, ByteOrder};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpStream, tcp::OwnedWriteHalf},
+    io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::TcpStream,
     sync::mpsc,
 };
 
@@ -50,7 +54,7 @@ pub async fn handle_client(socket: TcpStream, state: &'static AppState) -> anyho
         if let Err(e) = ctx.save_player().await {
             tracing::error!("Failed to save player state for {}: {}", player_id, e);
         }
-        ctx.state.unregister_session(player_id);
+        ctx.state.unregister_session(player_id, &ctx.session);
         Some(player_id)
     } else {
         None
@@ -65,10 +69,13 @@ pub async fn handle_client(socket: TcpStream, state: &'static AppState) -> anyho
     result
 }
 
-async fn write_loop(
-    mut writer: OwnedWriteHalf,
-    mut rx: mpsc::Receiver<CommandPacket>,
-) -> anyhow::Result<()> {
+async fn write_loop<W>(mut writer: W, mut rx: mpsc::Receiver<CommandPacket>) -> anyhow::Result<()>
+where
+    W: AsyncWrite + Unpin + Send,
+{
+    // Sequence numbers belong to one TCP connection and are assigned only
+    // after the outbound queue has serialized packet order.
+    let mut next_down_tag = 0u8;
     while let Some(packet) = rx.recv().await {
         match packet {
             CommandPacket::Disconnect => break,
@@ -77,6 +84,7 @@ async fn write_loop(
                 body,
                 down_tag,
             } => {
+                let down_tag = resolve_down_tag(down_tag, &mut next_down_tag);
                 send_raw_server_message(&mut writer, cmd_id, body, 0, 255, down_tag).await?;
             }
             CommandPacket::Reply {
@@ -86,6 +94,7 @@ async fn write_loop(
                 up_tag,
                 down_tag,
             } => {
+                let down_tag = resolve_down_tag(down_tag, &mut next_down_tag);
                 send_raw_server_message(&mut writer, cmd_id, body, result_code, up_tag, down_tag)
                     .await?;
             }
@@ -94,4 +103,79 @@ async fn write_loop(
 
     writer.shutdown().await?;
     Ok(())
+}
+
+fn resolve_down_tag(tag: DownTag, next: &mut u8) -> u8 {
+    match tag {
+        DownTag::Fixed(value) => value,
+        DownTag::Next => {
+            let current = *next & 0x7F;
+            *next = (*next + 1) & 0x7F;
+            current
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_down_tag, write_loop};
+    use crate::net::outbound::{CommandPacket, DownTag};
+    use byteorder::{BE, ByteOrder};
+    use sonettobuf::CmdId;
+    use tokio::io::{AsyncReadExt, duplex, split};
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn down_tags_are_connection_local_and_wrap_at_protocol_limit() {
+        let mut first = 0;
+        let mut second = 0;
+        assert_eq!(resolve_down_tag(DownTag::Next, &mut first), 0);
+        assert_eq!(resolve_down_tag(DownTag::Next, &mut second), 0);
+        assert_eq!(resolve_down_tag(DownTag::Next, &mut first), 1);
+        assert_eq!(resolve_down_tag(DownTag::Fixed(255), &mut first), 255);
+
+        first = 127;
+        assert_eq!(resolve_down_tag(DownTag::Next, &mut first), 127);
+        assert_eq!(resolve_down_tag(DownTag::Next, &mut first), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn one_hundred_connection_writers_keep_independent_sequences() {
+        let mut tasks = Vec::with_capacity(100);
+
+        for _ in 0..100 {
+            tasks.push(tokio::spawn(async move {
+                let (server, mut client) = duplex(4096);
+                let (_, writer) = split(server);
+                let (tx, rx) = mpsc::channel(16);
+                let writer_task = tokio::spawn(write_loop(writer, rx));
+
+                for _ in 0..4 {
+                    tx.send(CommandPacket::Push {
+                        cmd_id: CmdId::GetServerTimeCmd,
+                        body: vec![0],
+                        down_tag: DownTag::Next,
+                    })
+                    .await
+                    .unwrap();
+                }
+                drop(tx);
+
+                for expected in 0..4u8 {
+                    let mut length = [0u8; 4];
+                    client.read_exact(&mut length).await.unwrap();
+                    let body_len = BE::read_u32(&length) as usize;
+                    let mut body = vec![0u8; body_len];
+                    client.read_exact(&mut body).await.unwrap();
+                    assert_eq!(body[5], expected, "down_tag sequence escaped connection");
+                }
+
+                writer_task.await.unwrap().unwrap();
+            }));
+        }
+
+        for task in tasks {
+            task.await.unwrap();
+        }
+    }
 }

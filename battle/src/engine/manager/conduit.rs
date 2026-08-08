@@ -74,6 +74,13 @@ pub enum ConduitCommand {
         running: bool,
     },
     ChangePower(ConduitPowerChange),
+    ChangeCounter {
+        origin: CommandOrigin,
+        source_uid: i64,
+        team: i32,
+        counter_id: i32,
+        delta: i32,
+    },
     ClearPowers {
         origin: CommandOrigin,
         source_uid: i64,
@@ -161,6 +168,14 @@ pub enum ConduitChange {
         after: i32,
         kind: ConduitPowerChangeKind,
     },
+    CounterChanged {
+        origin: CommandOrigin,
+        source_uid: i64,
+        team: i32,
+        counter_id: i32,
+        requested_delta: i32,
+        after: i32,
+    },
     PowersCleared {
         origin: CommandOrigin,
         source_uid: i64,
@@ -232,6 +247,7 @@ pub struct ConduitManager {
     initialized: Vec<i32>,
     consumed_this_round: BTreeMap<(i32, i32), i32>,
     uses_this_round: BTreeMap<i64, i32>,
+    counters: BTreeMap<(i32, i32), i32>,
     pending_activations: BTreeMap<(i64, i32), PendingActivation>,
     running: HashSet<i64>,
 }
@@ -397,6 +413,13 @@ impl ConduitManager {
     pub fn uses(&self, source_uid: i64) -> i32 {
         self.uses_this_round
             .get(&source_uid)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn counter(&self, team: i32, counter_id: i32) -> i32 {
+        self.counters
+            .get(&(team, counter_id))
             .copied()
             .unwrap_or_default()
     }
@@ -623,6 +646,24 @@ impl ConduitManager {
                     kind: change.kind,
                 })
             }
+            ConduitCommand::ChangeCounter {
+                origin,
+                source_uid,
+                team,
+                counter_id,
+                delta,
+            } => {
+                let counter = self.counters.entry((team, counter_id)).or_default();
+                *counter = counter.saturating_add(delta).max(0);
+                Ok(ConduitChange::CounterChanged {
+                    origin,
+                    source_uid,
+                    team,
+                    counter_id,
+                    requested_delta: delta,
+                    after: *counter,
+                })
+            }
             ConduitCommand::ClearPowers {
                 origin,
                 source_uid,
@@ -756,26 +797,23 @@ impl ConduitManager {
         let Some(character) = configs.character.get(model_id) else {
             return;
         };
-        if character.device_id == 0 {
+        let device_id = configured_device_id(
+            configs,
+            character,
+            entity.ex_skill_level.unwrap_or_default(),
+        );
+        if device_id == 0 {
             return;
         }
-        let Some(definition) = configs.fight_device.get(character.device_id) else {
+        let Some(definition) = configs.fight_device.get(device_id) else {
             self.initialization_errors
-                .push(ConduitError::MissingDefinition(character.device_id));
+                .push(ConduitError::MissingDefinition(device_id));
             return;
         };
         let groups = [
-            parse_skill_group(
-                character.device_id,
-                ConduitSkillGroup::Primary,
-                &definition.skill1,
-            ),
-            parse_skill_group(
-                character.device_id,
-                ConduitSkillGroup::Secondary,
-                &definition.skill2,
-            ),
-            parse_unique_skill(character.device_id, &definition.unique_skill),
+            parse_skill_group(device_id, ConduitSkillGroup::Primary, &definition.skill1),
+            parse_skill_group(device_id, ConduitSkillGroup::Secondary, &definition.skill2),
+            parse_unique_skill(device_id, &definition.unique_skill),
         ];
         let mut skill_groups = Vec::with_capacity(groups.len());
         for group in groups {
@@ -801,6 +839,22 @@ impl ConduitManager {
                 skill_groups,
             });
     }
+}
+
+fn configured_device_id(
+    configs: &config::GameDB,
+    character: &config::character::Character,
+    ex_skill_level: i32,
+) -> i32 {
+    configs
+        .skill_ex_level
+        .iter()
+        .filter(|row| {
+            row.hero_id == character.id && row.skill_level <= ex_skill_level && row.device_id != 0
+        })
+        .max_by_key(|row| row.skill_level)
+        .map(|row| row.device_id)
+        .unwrap_or(character.device_id)
 }
 
 fn reduced_cost(cost: i32, reduction: i32) -> i32 {
@@ -914,6 +968,53 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn portrait_level_selects_the_matching_device_configuration() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            attacker: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(10),
+                    model_id: Some(3144),
+                    ex_skill_level: Some(5),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let manager = ConduitManager::seed(&fight);
+
+        assert!(manager.owns_skill(10, 31445131));
+        assert!(!manager.owns_skill(10, 31440131));
+    }
+
+    #[test]
+    fn conduit_counters_are_scoped_by_team_and_never_become_negative() {
+        let mut manager = ConduitManager::default();
+        manager
+            .execute(ConduitCommand::ChangeCounter {
+                origin: ORIGIN,
+                source_uid: 10,
+                team: 1,
+                counter_id: 7,
+                delta: 3,
+            })
+            .unwrap();
+        manager
+            .execute(ConduitCommand::ChangeCounter {
+                origin: ORIGIN,
+                source_uid: 10,
+                team: 1,
+                counter_id: 7,
+                delta: -5,
+            })
+            .unwrap();
+
+        assert_eq!(manager.counter(1, 7), 0);
+        assert_eq!(manager.counter(2, 7), 0);
     }
 
     #[test]

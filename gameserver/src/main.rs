@@ -30,6 +30,16 @@ async fn main() -> anyhow::Result<()> {
         db_name: cfg.database.path.to_string_lossy().to_string(),
     })
     .await?;
+    let (mail_users, announcement_mails) =
+        database::db::game::mail_campaign::reconcile_release_announcements(
+            &db,
+            common::time::ServerTime::now_ms(),
+        )
+        .await?;
+    info!(
+        "Release announcement reconciliation completed: users={}, delivered={}",
+        mail_users, announcement_mails
+    );
 
     info!(
         "Loading game data from {}",

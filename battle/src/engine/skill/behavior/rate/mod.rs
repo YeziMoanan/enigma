@@ -26,6 +26,11 @@ impl BehaviorHandler for Handler {
         context: BehaviorOpContext<'_>,
         behavior: &ParsedBehavior,
     ) -> Option<Vec<crate::engine::skill::rule::output::RuleOp>> {
+        if behavior.spec.kind == BehaviorKind::BulletCritRateAlter {
+            // This modifier is consumed while resolving each attack target. The passive
+            // subscriber still visits it during normal emission, where it has no output.
+            return Some(Vec::new());
+        }
         if behavior.spec.kind == BehaviorKind::ConduitPowerUp {
             return conduit_power_up_ops(context, behavior);
         }

@@ -19,7 +19,7 @@ pub struct UserCurrencyModel {
 pub struct Currency {
     pub user_id: i64,
     pub currency_id: i32,
-    pub quantity: i32,
+    pub quantity: i64,
     pub last_recover_time: Option<i64>,
     pub expired_time: Option<i64>,
 }
@@ -28,16 +28,41 @@ impl From<Currency> for sonettobuf::Currency {
     fn from(c: Currency) -> Self {
         sonettobuf::Currency {
             currency_id: Some(c.currency_id as u32),
-            quantity: Some(c.quantity),
+            quantity: Some(c.protocol_quantity()),
             last_recover_time: c.last_recover_time.map(|t| t as u64),
             expired_time: c.expired_time.map(|t| t as u64),
         }
     }
 }
 
+impl Currency {
+    pub fn protocol_quantity(&self) -> i32 {
+        self.quantity
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+    }
+}
+
 impl UserCurrencyModel {
     pub fn new(user_id: i64, pool: SqlitePool) -> Self {
         Self { user_id, pool }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Currency;
+
+    #[test]
+    fn protocol_quantity_clamps_legacy_balances_outside_i32() {
+        let currency = Currency {
+            user_id: 1,
+            currency_id: 3,
+            quantity: i64::from(i32::MAX) + 850_000_000,
+            last_recover_time: None,
+            expired_time: None,
+        };
+
+        assert_eq!(currency.protocol_quantity(), i32::MAX);
     }
 }
 
@@ -78,7 +103,7 @@ impl CurrencyModel<Currency> for UserCurrencyModel {
     }
 
     async fn update_quantity(&self, currency_id: i32, delta: i32) -> Result<bool, sqlx::Error> {
-        let current: Option<i32> = sqlx::query_scalar(
+        let current: Option<i64> = sqlx::query_scalar(
             "SELECT quantity FROM currencies WHERE user_id = ? AND currency_id = ?",
         )
         .bind(self.user_id)
@@ -88,7 +113,7 @@ impl CurrencyModel<Currency> for UserCurrencyModel {
 
         let current_qty = current.unwrap_or(0);
 
-        if delta < 0 && current_qty < delta.abs() {
+        if delta < 0 && current_qty < i64::from(delta).abs() {
             return Ok(false);
         }
 
