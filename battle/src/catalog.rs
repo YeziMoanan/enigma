@@ -1,5 +1,6 @@
 use crate::engine::manager::field::{FieldDefinition, FieldThreshold};
 use crate::engine::mechanic::impromptu::ImpromptuDefinition;
+use crate::engine::round::power::ClothPower;
 use crate::engine::skill::rule::{CommandOrigin, RuleDomain};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -274,13 +275,7 @@ impl BattleCatalog {
     }
 
     pub(crate) fn player_skills(self, cloth_id: Option<i32>) -> Vec<ConfiguredPlayerSkill> {
-        let cloth_id = cloth_id.unwrap_or(1);
-        let Some(cloth) = self
-            .game_data
-            .cloth_level
-            .iter()
-            .find(|cloth| cloth.id == cloth_id && cloth.level == 1)
-        else {
+        let Some(cloth) = self.cloth(cloth_id) else {
             return Vec::new();
         };
 
@@ -301,6 +296,38 @@ impl BattleCatalog {
         .into_iter()
         .filter(|skill| skill.skill_id != 0)
         .collect()
+    }
+
+    pub(crate) fn cloth_power(self, fight: &sonettobuf::Fight) -> Option<ClothPower> {
+        let cloth = self.cloth(fight.attacker.as_ref()?.cloth_id)?;
+        Some(ClothPower::configured(
+            cloth.max_power,
+            cloth.r#use,
+            cloth.r#move,
+            cloth.compose,
+            &cloth.recover,
+        ))
+    }
+
+    pub(crate) fn cloth_skill_terms(
+        self,
+        cloth_id: Option<i32>,
+        skill_id: i32,
+        use_count: usize,
+    ) -> Option<(i32, i32, i32)> {
+        let cloth = self.cloth(cloth_id)?;
+        let (costs, cooldown) = if cloth.skill1 == skill_id {
+            (&cloth.use_power1, cloth.cd1)
+        } else if cloth.skill2 == skill_id {
+            (&cloth.use_power2, cloth.cd2)
+        } else {
+            return None;
+        };
+        let cost = *costs.get(use_count.min(costs.len().checked_sub(1)?))?;
+        let next_cost = *costs
+            .get((use_count + 1).min(costs.len().saturating_sub(1)))
+            .unwrap_or(&cost);
+        Some((cost, next_cost, cooldown))
     }
 
     pub(crate) fn skill_is_ultimate_for_model(self, skill_id: i32, model_id: i32) -> bool {
@@ -582,6 +609,14 @@ impl BattleCatalog {
         self.game_data
             .skill_effect
             .get(self.skill_effect_id(skill_id))
+    }
+
+    fn cloth(self, cloth_id: Option<i32>) -> Option<&'static config::cloth_level::ClothLevel> {
+        let cloth_id = cloth_id.unwrap_or(1);
+        self.game_data
+            .cloth_level
+            .iter()
+            .find(|cloth| cloth.id == cloth_id && cloth.level == 1)
     }
 
     pub(crate) fn try_global() -> Option<Self> {
@@ -943,6 +978,48 @@ mod tests {
         );
         assert_eq!(catalog.player_skills(None), catalog.player_skills(Some(1)));
         assert!(catalog.player_skills(Some(-1)).is_empty());
+    }
+
+    #[test]
+    fn normalizes_cloth_power_and_skill_terms() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        let fight = sonettobuf::Fight {
+            attacker: Some(sonettobuf::FightTeam {
+                cloth_id: Some(1),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            catalog.cloth_power(&fight),
+            ClothPower::for_fight(crate::test_support::game_data(), &fight)
+        );
+        assert_eq!(
+            catalog.cloth_skill_terms(Some(1), 30010201, 0),
+            Some((40, 50, 1))
+        );
+        assert_eq!(
+            catalog.cloth_skill_terms(Some(1), 30010201, 99),
+            Some((60, 60, 1))
+        );
+        assert_eq!(
+            catalog.cloth_skill_terms(Some(1), 30010202, 0),
+            Some((25, 25, 0))
+        );
+        assert!(
+            catalog
+                .cloth_power(&sonettobuf::Fight {
+                    attacker: Some(sonettobuf::FightTeam {
+                        cloth_id: Some(-1),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })
+                .is_none()
+        );
+        assert!(catalog.cloth_skill_terms(Some(1), -1, 0).is_none());
     }
 
     #[test]
