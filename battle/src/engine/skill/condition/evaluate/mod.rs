@@ -956,8 +956,13 @@ fn condition_kind_matches(
             })
             .is_some_and(|source| {
                 source.ex_skill != 0
-                    && crate::engine::mechanic::card::CardMechanic
-                        .is_ultimate_skill(context.active_skill_id, source)
+                    && managers.is_some_and(|managers| {
+                        crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+                            managers,
+                            context.active_skill_id,
+                            source,
+                        )
+                    })
             }),
         ParsedConditionKind::TargetUseExSkill => {
             context.active_skill_source_uid != 0
@@ -966,16 +971,26 @@ fn condition_kind_matches(
                     .entity(context.active_skill_source_uid)
                     .is_some_and(|actor| {
                         actor.ex_skill != 0
-                            && crate::engine::mechanic::card::CardMechanic
-                                .is_ultimate_skill(context.active_skill_id, actor)
+                            && managers.is_some_and(|managers| {
+                                crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+                                    managers,
+                                    context.active_skill_id,
+                                    actor,
+                                )
+                            })
                     })
         }
         ParsedConditionKind::TeammateUseExSkill => pool.allies(source_uid).iter().any(|ally| {
             ally.uid != source_uid
                 && ally.uid == context.active_skill_source_uid
                 && ally.ex_skill != 0
-                && crate::engine::mechanic::card::CardMechanic
-                    .is_ultimate_skill(context.active_skill_id, ally)
+                && managers.is_some_and(|managers| {
+                    crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+                        managers,
+                        context.active_skill_id,
+                        ally,
+                    )
+                })
         }),
         ParsedConditionKind::ActiveSkillRank { compare, ranks } => {
             context.active_skill_rank != 0

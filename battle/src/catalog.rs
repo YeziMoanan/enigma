@@ -131,6 +131,13 @@ impl BattleCatalog {
             .unwrap_or_default()
     }
 
+    pub(crate) fn skill_is_ultimate_for_model(self, skill_id: i32, model_id: i32) -> bool {
+        self.game_data
+            .skill
+            .get(skill_id)
+            .is_some_and(|skill| skill.hero_id == model_id && self.skill_is_big(skill_id))
+    }
+
     fn skill_effect(self, skill_id: i32) -> Option<&'static config::skill_effect::SkillEffect> {
         self.game_data
             .skill_effect
@@ -406,6 +413,10 @@ mod tests {
         assert!(!catalog.skill_is_big(31390111));
         assert_eq!(catalog.skill_effect_tag(31446011), 14);
         assert_eq!(catalog.skill_effect_tag(31390111), 3);
+        assert!(catalog.skill_is_ultimate_for_model(31340131, 3134));
+        assert!(!catalog.skill_is_ultimate_for_model(31340111, 3134));
+        assert!(!catalog.skill_is_ultimate_for_model(31340131, 3139));
+        assert!(!catalog.skill_is_ultimate_for_model(-1, 3134));
         assert_eq!(catalog.skill_big_skill_point(-1), 0);
         assert!(!catalog.skill_is_big(-1));
         assert_eq!(catalog.skill_effect_tag(-1), 0);

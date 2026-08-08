@@ -140,8 +140,11 @@ pub(in crate::engine::runtime) fn emit_ops(
     ) {
         execution.context.active_skill_is_attack = catalog.is_attack(effect_skill_id);
         if matches!(trigger, SkillOpTrigger::Active) && invocation.card_index > 0 {
-            execution.context.active_skill_slot =
-                pool.skill_slot(invocation.plan.source_uid, invocation.plan.skill_id);
+            execution.context.active_skill_slot = pool.skill_slot(
+                managers,
+                invocation.plan.source_uid,
+                invocation.plan.skill_id,
+            );
             execution.context.active_skill_rank = managers
                 .game_data()
                 .skill
@@ -974,8 +977,11 @@ pub(in crate::engine::runtime) fn emit_ops(
                         skill_id: invocation.plan.skill_id,
                         target_uid: execution.primary_target_uid.unwrap_or_default(),
                         target_uids: execution.affected_targets.clone(),
-                        skill_slot: pool
-                            .skill_slot(invocation.plan.source_uid, invocation.plan.skill_id),
+                        skill_slot: pool.skill_slot(
+                            managers,
+                            invocation.plan.source_uid,
+                            invocation.plan.skill_id,
+                        ),
                         is_attack: catalog.is_attack(effect_skill_id),
                         rank: managers
                             .game_data()

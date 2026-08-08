@@ -708,8 +708,11 @@ fn run_player_card_ops(
         let source_uid = skill.plan.source_uid;
         let source_alive = !is_card_action || managers.hp.current(source_uid) > 0;
         let is_ultimate = pool.entity(source_uid).is_some_and(|entity| {
-            crate::engine::mechanic::card::CardMechanic
-                .is_ultimate_skill(skill.plan.skill_id, entity)
+            crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+                managers,
+                skill.plan.skill_id,
+                entity,
+            )
         });
         if source_alive
             && let crate::engine::skill::action::SkillTarget::Explicit(target_uid) = skill.target
@@ -998,7 +1001,11 @@ pub(super) fn run_active_action(
     }
     let source_uid = skill.plan.source_uid;
     let is_ultimate = pool.entity(source_uid).is_some_and(|entity| {
-        crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(skill.plan.skill_id, entity)
+        crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+            managers,
+            skill.plan.skill_id,
+            entity,
+        )
     });
     let boss_power =
         crate::engine::mechanic::card::CardMechanic.boss_ultimate_power(managers, source_uid);

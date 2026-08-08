@@ -454,7 +454,7 @@ pub(super) fn damage_ops(
             && let Some(feature) = crate::engine::skill::buff_act::dodge_spec_skill::avoidance(
                 managers,
                 target_uid,
-                pool.skill_slot(source_uid, skill_id),
+                pool.skill_slot(managers, source_uid, skill_id),
                 pool.entity(source_uid)
                     .map(|entity| entity.damage_type)
                     .unwrap_or_default(),

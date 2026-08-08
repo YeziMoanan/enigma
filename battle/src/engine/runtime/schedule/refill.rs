@@ -204,7 +204,8 @@ fn run_card_refill(
             .filter(|card| {
                 pool.entity(card.uid.unwrap_or_default())
                     .is_none_or(|entity| {
-                        !crate::engine::mechanic::card::CardMechanic.is_ultimate(card, entity)
+                        !crate::engine::mechanic::card::CardMechanic
+                            .is_ultimate(managers, card, entity)
                     })
             })
             .cloned()
@@ -238,7 +239,7 @@ fn run_card_refill(
         let is_ultimate = pool
             .entity(card.uid.unwrap_or_default())
             .is_some_and(|entity| {
-                crate::engine::mechanic::card::CardMechanic.is_ultimate(&card, entity)
+                crate::engine::mechanic::card::CardMechanic.is_ultimate(managers, &card, entity)
             });
         let is_device = crate::engine::mechanic::card::CardMechanic.is_device_card(managers, &card);
         if is_ultimate

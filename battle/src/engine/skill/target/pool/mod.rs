@@ -289,18 +289,20 @@ impl TargetPool {
             .find(|entity| entity.uid == uid)
     }
 
-    pub fn skill_slot(&self, source_uid: i64, skill_id: i32) -> i32 {
+    pub fn skill_slot(&self, managers: &BattleManagers, source_uid: i64, skill_id: i32) -> i32 {
         let Some(source) = self.entity(source_uid) else {
             return -1;
         };
-        let effect_id = crate::engine::skill::effect::catalog::configured_effect_id(skill_id);
+        let effect_id = managers.catalog().skill_effect_id(skill_id);
         if source.skill_group1.contains(&skill_id) || source.skill_group1.contains(&effect_id) {
             1
         } else if source.skill_group2.contains(&skill_id)
             || source.skill_group2.contains(&effect_id)
         {
             2
-        } else if crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(skill_id, source) {
+        } else if crate::engine::mechanic::card::CardMechanic
+            .is_ultimate_skill(managers, skill_id, source)
+        {
             3
         } else {
             -1

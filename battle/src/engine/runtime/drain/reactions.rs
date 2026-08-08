@@ -32,7 +32,7 @@ fn queued_ultimate_availability_sync(
         .card
         .hand()
         .iter()
-        .find(|card| mechanic.is_ultimate(card, entity))
+        .find(|card| mechanic.is_ultimate(managers, card, entity))
         .cloned();
     let (card, available) = if mechanic.can_add_normal_ultimate(managers, entity) {
         (

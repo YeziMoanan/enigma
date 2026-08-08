@@ -45,7 +45,8 @@ pub fn rule_ops(
         .find(|entity| {
             entity.skill_group1.contains(&skill_id)
                 || entity.skill_group2.contains(&skill_id)
-                || crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(skill_id, entity)
+                || crate::engine::mechanic::card::CardMechanic
+                    .is_ultimate_skill(managers, skill_id, entity)
         })?
         .uid;
     let origin = super::command_origin(subscriber)?;

@@ -84,10 +84,11 @@ fn skill_slot_resolves_card_skill_ids_to_their_configured_effect() {
         }),
         ..Default::default()
     });
+    let managers = BattleManagers::default();
 
-    assert_eq!(pool.skill_slot(1, 31260171), 1);
-    assert_eq!(pool.skill_slot(1, 31260172), 1);
-    assert_eq!(pool.skill_slot(1, 31260121), 2);
+    assert_eq!(pool.skill_slot(&managers, 1, 31260171), 1);
+    assert_eq!(pool.skill_slot(&managers, 1, 31260172), 1);
+    assert_eq!(pool.skill_slot(&managers, 1, 31260121), 2);
 }
 
 #[test]

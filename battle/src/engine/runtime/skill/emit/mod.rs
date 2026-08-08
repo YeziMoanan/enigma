@@ -88,7 +88,11 @@ fn action_event(
         target_uids: execution.affected_targets.clone(),
         attacked_target_uids: execution.attacked_targets.clone(),
         phase,
-        skill_slot: pool.skill_slot(invocation.plan.source_uid, invocation.plan.skill_id),
+        skill_slot: pool.skill_slot(
+            managers,
+            invocation.plan.source_uid,
+            invocation.plan.skill_id,
+        ),
         is_attack: catalog.is_attack(invocation.plan.skill_id),
         rank: managers
             .game_data()

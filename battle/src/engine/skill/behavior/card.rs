@@ -165,7 +165,11 @@ impl BehaviorHandler for Handler {
                 .iter()
                 .filter(|card| {
                     card.card.uid == Some(context.source_uid)
-                        && context.pool.skill_slot(context.source_uid, card.skill_id) == skill_slot
+                        && context.pool.skill_slot(
+                            context.managers,
+                            context.source_uid,
+                            card.skill_id,
+                        ) == skill_slot
                         && effect_tags
                             .contains(&context.managers.catalog().skill_effect_tag(card.skill_id))
                 })

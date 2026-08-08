@@ -323,8 +323,11 @@ pub fn run_ai_actions(
                 },
             );
             let is_ultimate = pool.entity(choice.source_uid).is_some_and(|entity| {
-                crate::engine::mechanic::card::CardMechanic
-                    .is_ultimate_skill(choice.skill_id, entity)
+                crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+                    managers,
+                    choice.skill_id,
+                    entity,
+                )
             });
             if let Some(delta) = card_play_resource_delta(
                 managers,

@@ -241,8 +241,8 @@ fn best_candidate(
                 return None;
             }
             let source = pool.entity(source_uid)?;
-            let ultimate =
-                crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(skill_id, source);
+            let ultimate = crate::engine::mechanic::card::CardMechanic
+                .is_ultimate_skill(managers, skill_id, source);
             if ultimate
                 && !crate::engine::mechanic::card::CardMechanic.ultimate_ready(managers, source)
             {
