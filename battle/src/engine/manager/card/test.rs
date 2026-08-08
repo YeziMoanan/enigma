@@ -508,6 +508,18 @@ fn removing_an_owner_composes_the_new_ai_queue_neighbors() {
 }
 
 #[test]
+fn reset_preserves_the_attached_catalog() {
+    crate::test_support::init_config();
+    let catalog = crate::catalog::BattleCatalog::new(crate::test_support::game_data());
+    let mut manager = CardManager::default();
+    manager.set_catalog(catalog);
+
+    manager.reset_with_draw_pile(vec![card(10, 100)], vec![card(11, 200)], 2);
+
+    assert_eq!(manager.deck.attached_catalog(), Some(catalog));
+}
+
+#[test]
 fn refill_keeps_drawing_after_compositions_until_the_hand_is_full() {
     let mut cards = CardManager::new(vec![card(1, 10), card(2, 20), card(3, 30), card(4, 40)]);
     cards.rank_up.insert((2, 20), 21);

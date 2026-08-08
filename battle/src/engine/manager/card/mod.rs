@@ -67,6 +67,10 @@ pub struct CardRefill {
 }
 
 impl CardManager {
+    pub(crate) fn set_catalog(&mut self, catalog: crate::catalog::BattleCatalog) {
+        self.deck = std::mem::take(&mut self.deck).with_catalog(catalog);
+    }
+
     pub(crate) fn execute_command(
         &mut self,
         command: CardCommand,
@@ -213,7 +217,11 @@ impl CardManager {
             return None;
         }
         self.ai_queue.retain(|card| card.uid != Some(owner_uid));
+        let catalog = self.deck.attached_catalog();
         let mut deck = CardDeck::new(std::mem::take(&mut self.ai_queue));
+        if let Some(catalog) = catalog {
+            deck = deck.with_catalog(catalog);
+        }
         let composed_owners = deck.compose_adjacent(&self.rank_up);
         self.ai_queue = deck.into_hand();
         Some(composed_owners)
@@ -233,7 +241,11 @@ impl CardManager {
         draw_pile: Vec<CardInfo>,
         deck_num: i32,
     ) {
+        let catalog = self.deck.attached_catalog();
         self.deck = CardDeck::with_draw_pile(hand, draw_pile);
+        if let Some(catalog) = catalog {
+            self.deck = std::mem::take(&mut self.deck).with_catalog(catalog);
+        }
         self.team_cards.clear();
         self.deck_num = deck_num;
         self.deck_capacity = deck_num;

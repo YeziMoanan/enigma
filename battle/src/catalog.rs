@@ -352,6 +352,14 @@ impl BattleCatalog {
         Some((cost, next_cost, cooldown))
     }
 
+    pub(crate) fn card_enchant_excluded_ids(self, enchant_id: i32) -> Vec<i32> {
+        self.card_enchant_ids(enchant_id, |row| &row.exclude_types)
+    }
+
+    pub(crate) fn card_enchant_rejected_ids(self, enchant_id: i32) -> Vec<i32> {
+        self.card_enchant_ids(enchant_id, |row| &row.reject_types)
+    }
+
     pub(crate) fn skill_is_ultimate_for_model(self, skill_id: i32, model_id: i32) -> bool {
         self.game_data
             .skill
@@ -631,6 +639,21 @@ impl BattleCatalog {
         self.game_data
             .skill_effect
             .get(self.skill_effect_id(skill_id))
+    }
+
+    fn card_enchant_ids(
+        self,
+        enchant_id: i32,
+        field: impl FnOnce(&config::card_enchant::CardEnchant) -> &str,
+    ) -> Vec<i32> {
+        self.game_data
+            .card_enchant
+            .get(enchant_id)
+            .map(field)
+            .into_iter()
+            .flat_map(|raw| raw.split('#'))
+            .filter_map(|id| id.parse().ok())
+            .collect()
     }
 
     fn cloth(self, cloth_id: Option<i32>) -> Option<&'static config::cloth_level::ClothLevel> {
@@ -1226,6 +1249,20 @@ mod tests {
             catalog.entity_ex_attributes(-1, None, Some(2)),
             EntityExAttributes::default()
         );
+    }
+
+    #[test]
+    fn normalizes_card_enchant_compatibility() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert!(catalog.card_enchant_excluded_ids(10_001).is_empty());
+        assert_eq!(
+            catalog.card_enchant_rejected_ids(10_001),
+            vec![10_002, 10_005, 10_007, 10_010, 10_011]
+        );
+        assert_eq!(catalog.card_enchant_rejected_ids(10_006), vec![10_003]);
+        assert!(catalog.card_enchant_rejected_ids(-1).is_empty());
     }
 
     #[test]

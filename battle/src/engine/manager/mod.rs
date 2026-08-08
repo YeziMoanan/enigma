@@ -1008,6 +1008,7 @@ impl BattleManagers {
         managers.eureka.seed(fight);
         managers.buff.set_catalog(catalog);
         managers.buff.seed(fight);
+        managers.card.set_catalog(catalog);
         managers.card.seed(fight);
         managers.conduit = ConduitManager::seed_with_game_data(game_data, fight);
         managers.entity = entity::EntityManager::seed_with_game_data(game_data, fight);
