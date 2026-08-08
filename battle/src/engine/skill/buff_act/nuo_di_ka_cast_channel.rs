@@ -48,7 +48,12 @@ pub fn rule_ops(
     };
     let origin = super::command_origin(subscriber)?;
     let key = bloodtithe::rule::key(subscriber.team_type);
-    let available = managers.gauge.get(key)?.current.max(0);
+    let available = managers
+        .gauge
+        .get(key)
+        .map(|state| state.current)
+        .unwrap_or_default()
+        .max(0);
     let groups = (available / *cost).min(*max_groups);
     if groups == 0 {
         return Some(vec![RuleOp::Skill(invocation(
@@ -140,6 +145,7 @@ mod tests {
 
     #[test]
     fn channel_spends_bloodtithe_stores_points_and_uses_configured_attack() {
+        crate::test_support::init_config();
         let fight = Fight {
             attacker: Some(FightTeam {
                 entitys: vec![FightEntityInfo {
@@ -207,6 +213,7 @@ mod tests {
 
     #[test]
     fn channel_uses_configured_heal_without_state_when_cost_is_unavailable() {
+        crate::test_support::init_config();
         let mut managers = BattleManagers::default();
         let origin =
             super::super::configured_command_origin(953, BuffActKind::BloodPoolTag).unwrap();
@@ -231,7 +238,24 @@ mod tests {
     }
 
     #[test]
+    fn channel_uses_configured_heal_when_bloodtithe_gauge_is_absent() {
+        let managers = BattleManagers::default();
+
+        let ops = rule_ops(
+            &managers,
+            &crate::engine::skill::effect::SkillEffectCatalog::default(),
+            &subscriber(),
+            &BattleEvent::Kind(EventKind::RoundEndAfterSettlement),
+        )
+        .unwrap();
+
+        assert!(matches!(ops.as_slice(), [RuleOp::Skill(invocation)]
+            if invocation.plan.skill_id == 31200182));
+    }
+
+    #[test]
     fn channel_clear_is_an_owner_emitted_untargeted_event() {
+        crate::test_support::init_config();
         let mut managers = BattleManagers::default();
         let origin =
             super::super::configured_command_origin(953, BuffActKind::BloodPoolTag).unwrap();

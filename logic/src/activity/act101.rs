@@ -58,7 +58,7 @@ pub async fn get101_bonus(
         .iter()
         .find(|row| row.activity_id == activity_id && row.id == day_id)
         .ok_or(AppError::InvalidRequest)?;
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let claimed =
         activity101::claim_activity101_day_in_transaction(&mut tx, player_id, activity_id, day_id)
             .await?;
@@ -111,7 +111,7 @@ pub async fn get101_bonus_list(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let mut claimed_ids = Vec::new();
     let mut reward_set = reward::RewardSet::default();
     for (day_id, bonus) in bonuses {
@@ -178,7 +178,7 @@ pub async fn get101_sp_bonus(
         return Err(AppError::InvalidRequest);
     }
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     if !activity_state::transition_in_transaction(
         &mut tx,
         player_id,
@@ -257,11 +257,17 @@ fn sp_bonus_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn init_config() {
+        let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../data/excel2json");
+        config::init(data_dir.to_str().unwrap()).unwrap();
+    }
 
     #[tokio::test]
     async fn bulk_claim_grants_each_day_once() {
-        let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data");
-        let _ = config::init(data_dir.to_str().unwrap());
+        init_config();
         let rows = &config::configs::get().activity101;
         let activity_id = rows.iter().next().unwrap().activity_id;
         let mut day_ids = rows
@@ -338,5 +344,57 @@ mod tests {
 
         assert!(claimed);
         assert!(!claimed_again);
+    }
+
+    #[tokio::test]
+    async fn claim_waits_for_an_existing_writer_instead_of_failing_locked() {
+        init_config();
+        let row = config::configs::get().activity101.iter().next().unwrap();
+        let name = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("enigma-act101-contention-{name}"));
+        let pool = database::connect_to(&database::DatabaseSettings {
+            db_name: dir.join("sonetto.db").to_string_lossy().to_string(),
+        })
+        .await
+        .unwrap();
+        database::run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, created_at, updated_at)
+             VALUES (7, 'act101-contended', 0, 0), (8, 'act101-writer', 0, 0);
+             INSERT INTO user_sign_in_info
+                (user_id, addup_sign_in_day, open_function_time, reward_mark)
+             VALUES (7, ?, 0, 0);",
+        )
+        .bind(row.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut writer = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        sqlx::query("UPDATE users SET updated_at = 1 WHERE id = 8")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        let claim_pool = pool.clone();
+        let activity_id = row.activity_id;
+        let day_id = row.id as u32;
+        let claim = tokio::spawn(async move {
+            get101_bonus(&claim_pool, 7, Some(activity_id), Some(day_id)).await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        writer.commit().await.unwrap();
+
+        let claim = tokio::time::timeout(Duration::from_secs(5), claim)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(claim.rewards.is_some());
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
