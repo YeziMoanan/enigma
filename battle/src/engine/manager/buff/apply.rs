@@ -145,7 +145,12 @@ impl BuffManager {
             count: Some(count),
             layer: Some(layer.max(0)),
             act_common_params: Some(definition.act_common_params.clone()),
-            r#type: Some(buff_wire_type(buff_id, source_uid, target_uid)),
+            r#type: Some(buff_wire_type(
+                self.catalog(),
+                buff_id,
+                source_uid,
+                target_uid,
+            )),
             ..Default::default()
         };
         let current_hp = hp.current(target_uid);
@@ -346,6 +351,7 @@ impl BuffManager {
                 }),
                 act_common_params: Some(definition.act_common_params.clone()),
                 r#type: Some(buff_wire_type(
+                    self.catalog(),
                     route.buff_id,
                     route.source_uid,
                     route.target_uid,
@@ -590,7 +596,7 @@ impl BuffManager {
         }) {
             active.buff.duration = Some(spec.duration);
         }
-        child.markers = halo::fanout_markers(spec.route.buff_id)
+        child.markers = halo::fanout_markers(self.catalog(), spec.route.buff_id)
             .into_iter()
             .map(|marker| BuffMarkerResult {
                 target_uid: spec.route.target_uid,
@@ -637,7 +643,7 @@ impl BuffManager {
             ) else {
                 continue;
             };
-            let mut markers = halo::fanout_markers(plan.spec.route.buff_id)
+            let mut markers = halo::fanout_markers(self.catalog(), plan.spec.route.buff_id)
                 .into_iter()
                 .map(|marker| BuffMarkerResult {
                     target_uid: plan.spec.route.target_uid,

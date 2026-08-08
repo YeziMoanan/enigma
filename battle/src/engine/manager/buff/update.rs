@@ -236,7 +236,7 @@ impl BuffManager {
             .buff
             .buff_id
             .into_iter()
-            .flat_map(halo::carriers)
+            .flat_map(|buff_id| halo::carriers(self.catalog(), buff_id))
             .filter_map(|carrier| carrier.linked_buff_id)
             .collect::<Vec<_>>();
         let mut removed = Vec::new();
@@ -248,7 +248,7 @@ impl BuffManager {
                         .buff
                         .buff_id
                         .into_iter()
-                        .flat_map(halo::carriers)
+                        .flat_map(|buff_id| halo::carriers(self.catalog(), buff_id))
                         .any(|carrier| carrier.linked_buff_id == Some(linked_id))
             });
             if still_owned {

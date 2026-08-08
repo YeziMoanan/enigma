@@ -309,7 +309,7 @@ impl BuffManager {
             return Vec::new();
         };
         let mut specs = Vec::new();
-        for carrier in halo::carriers(buff_id) {
+        for carrier in halo::carriers(self.catalog(), buff_id) {
             let fanout_buff_id = carrier.linked_buff_id.unwrap_or(buff_id);
             let Some(definition) = BuffDefinition::get(fanout_buff_id) else {
                 continue;
@@ -362,7 +362,7 @@ impl BuffManager {
             return Vec::new();
         };
         let mut specs = Vec::new();
-        for carrier in halo::carriers(carrier_buff_id)
+        for carrier in halo::carriers(self.catalog(), carrier_buff_id)
             .into_iter()
             .filter(|carrier| matches!(carrier.kind, HaloKind::Base | HaloKind::LayerMaster))
         {

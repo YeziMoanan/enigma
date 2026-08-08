@@ -138,6 +138,27 @@ impl BattleCatalog {
             .collect()
     }
 
+    pub(crate) fn buff_feature_tokens(self, buff_id: i32) -> Vec<String> {
+        self.game_data
+            .skill_buff
+            .get(buff_id)
+            .map(|row| row.features.as_str())
+            .unwrap_or_default()
+            .split('|')
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    pub(crate) fn buff_act_definition(
+        self,
+        opcode: i32,
+    ) -> Option<&'static crate::engine::skill::buff_act::registry::BuffActDefinition> {
+        let act = self.game_data.buff_act.get(opcode)?;
+        crate::engine::skill::buff_act::registry::find(opcode, &act.r#type)
+    }
+
     pub(crate) fn skill_effect_id(self, skill_id: i32) -> i32 {
         self.game_data
             .skill
@@ -463,6 +484,27 @@ mod tests {
             ]
         );
         assert!(catalog.buff_features(-1).is_empty());
+    }
+
+    #[test]
+    fn normalizes_buff_feature_tokens_and_registry_identity() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.buff_feature_tokens(109320111),
+            vec!["704#1#0", "100#211#50", "100#214#50", "100#206#50",]
+        );
+        assert_eq!(
+            catalog
+                .buff_act_definition(704)
+                .map(|definition| definition.key),
+            Some(crate::engine::skill::rule::DefinitionKey::new(
+                704, "HaloBase"
+            ))
+        );
+        assert!(catalog.buff_feature_tokens(-1).is_empty());
+        assert!(catalog.buff_act_definition(-1).is_none());
     }
 
     #[test]

@@ -80,6 +80,7 @@ pub(crate) fn refreshes_unchanged(buff_id: i32) -> bool {
 /// Owns active buff instances, storage policy, private act state, and buff UID allocation.
 /// Callers submit `BuffCommand`s rather than choosing stacking, exclusion, or UID policy.
 pub struct BuffManager {
+    catalog_data: Option<crate::catalog::BattleCatalog>,
     buffs: Vec<ActiveBuff>,
     entities: Vec<TrackedEntity>,
     team_types: HashMap<i64, i32>,
@@ -99,6 +100,7 @@ pub struct BuffManager {
 impl Default for BuffManager {
     fn default() -> Self {
         Self {
+            catalog_data: None,
             buffs: Vec::new(),
             entities: Vec::new(),
             team_types: HashMap::new(),
@@ -124,6 +126,20 @@ struct BuffTransactionState {
 }
 
 impl BuffManager {
+    pub(crate) fn set_catalog(&mut self, catalog: crate::catalog::BattleCatalog) {
+        self.catalog_data = Some(catalog);
+    }
+
+    fn catalog(&self) -> crate::catalog::BattleCatalog {
+        if let Some(catalog) = self.catalog_data {
+            return catalog;
+        }
+        #[cfg(test)]
+        return crate::catalog::BattleCatalog::new(crate::test_support::game_data());
+        #[cfg(not(test))]
+        panic!("buff manager was not constructed with a catalog")
+    }
+
     pub(crate) fn begin_transaction(&mut self) {
         if self.transaction.depth == 0 {
             self.transaction.progressed_stack_buff_ids.clear();
@@ -226,8 +242,13 @@ enum LayerHaloWireType {
     Slave = 2,
 }
 
-fn buff_wire_type(buff_id: i32, source_uid: i64, target_uid: i64) -> i32 {
-    if halo::has_layer_master(buff_id) {
+fn buff_wire_type(
+    catalog: crate::catalog::BattleCatalog,
+    buff_id: i32,
+    source_uid: i64,
+    target_uid: i64,
+) -> i32 {
+    if halo::has_layer_master(catalog, buff_id) {
         if source_uid == target_uid {
             LayerHaloWireType::Master as i32
         } else {
