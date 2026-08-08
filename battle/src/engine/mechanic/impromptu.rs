@@ -40,8 +40,7 @@ impl ImpromptuDefinition {
         }
     }
 
-    pub fn from_config() -> Option<Self> {
-        let db = config::try_get()?;
+    pub fn from_game_data(db: &config::GameDB) -> Option<Self> {
         Some(Self::new(
             db.fight_asfd_const.get(5)?.value.parse().ok()?,
             db.buff_act
@@ -118,6 +117,7 @@ pub const fn inspiration_key(emitter_uid: i64) -> GaugeKey {
 }
 
 pub fn enable_rule_ops(
+    db: &config::GameDB,
     gauges: &GaugeManager,
     features: &[ActiveBuffFeature],
     emitter_uid: i64,
@@ -133,7 +133,7 @@ pub fn enable_rule_ops(
         })
         .filter_map(|feature| {
             let origin = buff_act::feature_command_origin(feature)?;
-            let definition = ImpromptuDefinition::from_config()?;
+            let definition = ImpromptuDefinition::from_game_data(db)?;
             Some(ImpromptuEnable {
                 team: feature.team_type,
                 emitter_uid,
@@ -325,7 +325,7 @@ pub fn action_queue_committed_rule_ops(
         .into_iter()
         .collect::<Vec<_>>();
     if current.saturating_add(gained) > 0
-        && let Some(definition) = ImpromptuDefinition::from_config()
+        && let Some(definition) = ImpromptuDefinition::from_game_data(managers.game_data())
         && let Some(origin) = buff_act::feature_command_origin(tag)
     {
         ops.push(RuleOp::Command(BattleCommand::Card(
@@ -382,7 +382,7 @@ pub fn build_plan(managers: &BattleManagers, team: i32, emitter_uid: i64) -> Opt
     if inspiration <= 0 {
         return None;
     }
-    let definition = ImpromptuDefinition::from_config()?;
+    let definition = ImpromptuDefinition::from_game_data(managers.game_data())?;
     Some(ImpromptuPlan {
         source_uid: emitter_uid,
         skill_id: definition.skill_id(),
@@ -490,9 +490,14 @@ mod tests {
         let tag = feature(10, 1, 20, "EmitterTag", vec![875]);
         let gain = feature(10, 1, 21, "UseSkillTeamAddEmitterEnergy", vec![881, 1, 2]);
         let mut managers = BattleManagers::default();
-        let enable = enable_rule_ops(&managers.gauge, &[tag.clone(), gain.clone()], 99998)
-            .pop()
-            .unwrap();
+        let enable = enable_rule_ops(
+            crate::test_support::game_data(),
+            &managers.gauge,
+            &[tag.clone(), gain.clone()],
+            99998,
+        )
+        .pop()
+        .unwrap();
         for output in [enable.team_energy, enable.inspiration] {
             let RuleOp::Command(BattleCommand::Gauge(command)) = output else {
                 panic!("gauge command");
