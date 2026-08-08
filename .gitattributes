@@ -1,1 +1,2 @@
 data/reverse1999/*.json text eol=lf
+database/migrations/*.sql text eol=lf
