@@ -171,6 +171,31 @@ fn fight_catalog_follows_layered_passive_skill_links() {
 }
 
 #[test]
+fn scoped_catalog_falls_back_for_declared_card_ranks_missing_skill_rows() {
+    init_config();
+
+    let catalog = SkillEffectCatalog::from_roots(
+        config::configs::get(),
+        [31440112, 31440113, 31440122, 31440123, 31450123],
+        [],
+    );
+
+    for (skill_id, effect_id) in [
+        (31440112, 31440111),
+        (31440113, 31440111),
+        (31440122, 31440121),
+        (31440123, 31440121),
+        (31450123, 31450122),
+    ] {
+        assert_eq!(
+            catalog.get(skill_id).map(|effect| effect.skill_id),
+            Some(effect_id)
+        );
+        assert_eq!(super::parse::configured_effect_id(skill_id), effect_id);
+    }
+}
+
+#[test]
 fn fight_catalog_follows_shield_counter_skill() {
     init_config();
 

@@ -1,5 +1,6 @@
 use super::parse::{
-    RawSlot, monster_model_skills, numeric_ids, parse_slot, parse_target, row_slots, rule_issue,
+    RawSlot, configured_effect_id_for_db, monster_model_skills, numeric_ids, parse_slot,
+    parse_target, row_slots, rule_issue,
 };
 use super::*;
 
@@ -149,12 +150,7 @@ impl SkillEffectCatalog {
                     self.reinforced_skills.insert(skill_id, reinforced);
                     skills.push_back(reinforced);
                 }
-                let effect_id = db
-                    .skill
-                    .get(skill_id)
-                    .map(|skill| skill.skill_effect)
-                    .filter(|id| *id != 0)
-                    .unwrap_or(skill_id);
+                let effect_id = configured_effect_id_for_db(db, skill_id);
                 if effect_id != skill_id {
                     self.insert_alias(skill_id, effect_id);
                 }
