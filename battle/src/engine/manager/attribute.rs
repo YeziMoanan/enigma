@@ -45,7 +45,7 @@ impl AttributeManager {
             .chain(fight.defender.iter())
             .filter_map(|team| team.assist_boss.as_ref())
         {
-            self.register(entity);
+            self.register_with_catalog(catalog, entity);
         }
     }
 
@@ -57,8 +57,15 @@ impl AttributeManager {
         );
     }
 
-    pub fn register(&mut self, entity: &FightEntityInfo) {
-        let Some(target) = crate::engine::skill::target::TargetEntity::from_fight_entity(entity)
+    pub fn register_with_catalog(
+        &mut self,
+        catalog: crate::catalog::BattleCatalog,
+        entity: &FightEntityInfo,
+    ) {
+        let Some(target) =
+            crate::engine::skill::target::TargetEntity::from_fight_entity_with_catalog(
+                catalog, entity,
+            )
         else {
             return;
         };
@@ -74,6 +81,14 @@ impl AttributeManager {
             target.crit_def,
             target.add_dmg,
             target.drop_dmg,
+        );
+    }
+
+    #[cfg(test)]
+    pub fn register(&mut self, entity: &FightEntityInfo) {
+        self.register_with_catalog(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            entity,
         );
     }
 

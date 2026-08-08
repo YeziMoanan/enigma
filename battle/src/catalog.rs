@@ -261,6 +261,21 @@ impl BattleCatalog {
             .collect()
     }
 
+    pub(crate) fn careers(self, career: i32) -> Vec<i32> {
+        self.game_data
+            .fight_effect_group
+            .get(career)
+            .map(|group| {
+                group
+                    .career
+                    .split('#')
+                    .filter_map(|value| value.parse().ok())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|careers| !careers.is_empty())
+            .unwrap_or_else(|| vec![career])
+    }
+
     fn configured_battle(
         self,
         fight: &sonettobuf::Fight,
@@ -661,6 +676,16 @@ mod tests {
                 })
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn normalizes_grouped_careers() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.careers(101), vec![1, 2]);
+        assert_eq!(catalog.careers(1), vec![1]);
+        assert_eq!(catalog.careers(-1), vec![-1]);
     }
 
     #[test]

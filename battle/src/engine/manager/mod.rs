@@ -847,7 +847,7 @@ impl BattleManagers {
     fn register_entity_state(&mut self, entity: &FightEntityInfo) {
         let game_data = self.game_data();
         let team_type = entity.team_type.unwrap_or_default();
-        self.attribute.register(entity);
+        self.attribute.register_with_catalog(self.catalog(), entity);
         self.hp.register(entity);
         self.toughness.register_with_game_data(game_data, entity);
         self.ex_point.register_with_game_data(game_data, entity);

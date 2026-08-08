@@ -176,7 +176,7 @@ impl TargetPool {
         if let Some(team) = &fight.attacker {
             pool.teams
                 .extend(team_identities(team).filter_map(|entity| entity.uid.map(|uid| (uid, 1))));
-            pool.attacker_main = alive_uids(&team.entitys);
+            pool.attacker_main = alive_uids(catalog, &team.entitys);
             if let Some(uid) = team.assist_boss.as_ref().and_then(|entity| entity.uid) {
                 pool.assist_bosses.insert(1, uid);
                 pool.assist_boss_skills.push((
@@ -186,13 +186,13 @@ impl TargetPool {
                         .map(|entity| entity.passive_skill.clone())
                         .unwrap_or_default(),
                 ));
-                pool.virtual_entities.extend(
-                    team.assist_boss
-                        .as_ref()
-                        .and_then(TargetEntity::from_fight_entity),
-                );
+                pool.virtual_entities
+                    .extend(team.assist_boss.as_ref().and_then(|entity| {
+                        TargetEntity::from_fight_entity_with_catalog(catalog, entity)
+                    }));
             }
             pool.attacker_all = alive_uids(
+                catalog,
                 team.entitys
                     .iter()
                     .chain(&team.sub_entitys)
@@ -202,7 +202,7 @@ impl TargetPool {
         if let Some(team) = &fight.defender {
             pool.teams
                 .extend(team_identities(team).filter_map(|entity| entity.uid.map(|uid| (uid, 2))));
-            pool.defender_main = alive_uids(&team.entitys);
+            pool.defender_main = alive_uids(catalog, &team.entitys);
             if let Some(uid) = team.assist_boss.as_ref().and_then(|entity| entity.uid) {
                 pool.assist_bosses.insert(2, uid);
                 pool.assist_boss_skills.push((
@@ -212,13 +212,13 @@ impl TargetPool {
                         .map(|entity| entity.passive_skill.clone())
                         .unwrap_or_default(),
                 ));
-                pool.virtual_entities.extend(
-                    team.assist_boss
-                        .as_ref()
-                        .and_then(TargetEntity::from_fight_entity),
-                );
+                pool.virtual_entities
+                    .extend(team.assist_boss.as_ref().and_then(|entity| {
+                        TargetEntity::from_fight_entity_with_catalog(catalog, entity)
+                    }));
             }
             pool.defender_all = alive_uids(
+                catalog,
                 team.entitys
                     .iter()
                     .chain(&team.sub_entitys)
@@ -248,6 +248,7 @@ impl TargetPool {
         included_uid: Option<i64>,
     ) -> Self {
         let mut pool = self.clone();
+        let catalog = pool.catalog();
         for entities in [
             &mut pool.attacker_main,
             &mut pool.attacker_all,
@@ -255,11 +256,14 @@ impl TargetPool {
             &mut pool.defender_all,
         ] {
             entities.retain_mut(|entity| {
-                if let Some(identity) = managers
-                    .entity
-                    .snapshot(entity.uid)
-                    .as_ref()
-                    .and_then(TargetEntity::from_fight_entity)
+                if let Some(identity) =
+                    managers
+                        .entity
+                        .snapshot(entity.uid)
+                        .as_ref()
+                        .and_then(|entity| {
+                            TargetEntity::from_fight_entity_with_catalog(catalog, entity)
+                        })
                 {
                     *entity = identity;
                 }
@@ -279,7 +283,7 @@ impl TargetPool {
                 .entity
                 .snapshot(entity.uid)
                 .as_ref()
-                .and_then(TargetEntity::from_fight_entity)
+                .and_then(|entity| TargetEntity::from_fight_entity_with_catalog(catalog, entity))
             {
                 *entity = identity;
             }
@@ -453,15 +457,29 @@ fn average_emitter(allies: &[TargetEntity]) -> TargetEntity {
     }
 }
 
-fn alive_uids<'a>(entities: impl IntoIterator<Item = &'a FightEntityInfo>) -> Vec<TargetEntity> {
+fn alive_uids<'a>(
+    catalog: crate::catalog::BattleCatalog,
+    entities: impl IntoIterator<Item = &'a FightEntityInfo>,
+) -> Vec<TargetEntity> {
     entities
         .into_iter()
-        .filter_map(TargetEntity::from_fight_entity)
+        .filter_map(|entity| TargetEntity::from_fight_entity_with_catalog(catalog, entity))
         .collect()
 }
 
 impl TargetEntity {
+    #[cfg(test)]
     pub(crate) fn from_fight_entity(entity: &FightEntityInfo) -> Option<Self> {
+        Self::from_fight_entity_with_catalog(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            entity,
+        )
+    }
+
+    pub(crate) fn from_fight_entity_with_catalog(
+        catalog: crate::catalog::BattleCatalog,
+        entity: &FightEntityInfo,
+    ) -> Option<Self> {
         let current_hp = entity.current_hp.unwrap_or(1);
         if current_hp <= 0 {
             return None;
@@ -475,7 +493,7 @@ impl TargetEntity {
             model_id: entity.model_id.unwrap_or_default(),
             model_label: model_label(entity.model_id.unwrap_or_default()),
             career: entity.career.unwrap_or_default(),
-            careers: configured_careers(entity.career.unwrap_or_default()),
+            careers: catalog.careers(entity.career.unwrap_or_default()),
             weak_careers: entity.weak_careers.clone(),
             damage_type: damage_type(entity),
             position: entity.position.unwrap_or_default(),
@@ -552,20 +570,6 @@ impl TargetEntity {
             .iter()
             .any(|career| other.careers.contains(career))
     }
-}
-
-fn configured_careers(career: i32) -> Vec<i32> {
-    config::try_get()
-        .and_then(|db| db.fight_effect_group.get(career))
-        .map(|group| {
-            group
-                .career
-                .split('#')
-                .filter_map(|value| value.parse().ok())
-                .collect::<Vec<_>>()
-        })
-        .filter(|careers| !careers.is_empty())
-        .unwrap_or_else(|| vec![career])
 }
 
 fn battle_tags(entity: &FightEntityInfo) -> Vec<i32> {
