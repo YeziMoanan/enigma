@@ -86,7 +86,7 @@ pub(crate) fn modified(
             )
         })
         .sum::<i32>()
-        + burn_type_id()
+        + burn_type_id(managers.game_data())
             .filter(|type_id| {
                 managers
                     .buff
@@ -101,9 +101,8 @@ pub(crate) fn modified(
     .max(1)
 }
 
-pub(super) fn burn_type_id() -> Option<i32> {
-    config::configs::get()
-        .fight_const
+pub(super) fn burn_type_id(db: &config::GameDB) -> Option<i32> {
+    db.fight_const
         .get(BURN_BUFF_FIGHT_CONST)?
         .value
         .parse()
