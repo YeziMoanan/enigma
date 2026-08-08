@@ -1,3 +1,4 @@
+use crate::engine::mechanic::impromptu::ImpromptuDefinition;
 use crate::engine::skill::rule::{CommandOrigin, RuleDomain};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9,6 +10,7 @@ pub(crate) struct LingeringGlowAttributeBuff {
 #[derive(Clone, Copy)]
 pub struct BattleCatalog {
     game_data: &'static config::GameDB,
+    impromptu_definition: Option<ImpromptuDefinition>,
     lingering_glow_attribute_buff: Option<LingeringGlowAttributeBuff>,
 }
 
@@ -16,6 +18,7 @@ impl BattleCatalog {
     pub fn new(game_data: &'static config::GameDB) -> Self {
         Self {
             game_data,
+            impromptu_definition: impromptu_definition(game_data),
             lingering_glow_attribute_buff: lingering_glow_attribute_buff(game_data),
         }
     }
@@ -27,6 +30,23 @@ impl BattleCatalog {
     pub(crate) fn lingering_glow_attribute_buff(self) -> Option<LingeringGlowAttributeBuff> {
         self.lingering_glow_attribute_buff
     }
+
+    pub(crate) fn impromptu_definition(self) -> Option<ImpromptuDefinition> {
+        self.impromptu_definition
+    }
+}
+
+pub(crate) fn impromptu_definition(game_data: &config::GameDB) -> Option<ImpromptuDefinition> {
+    Some(ImpromptuDefinition::new(
+        game_data.fight_asfd_const.get(5)?.value.parse().ok()?,
+        game_data.buff_act.iter().find_map(|act| {
+            let definition = crate::engine::skill::buff_act::registry::find(act.id, &act.r#type)?;
+            (definition.kind
+                == crate::engine::skill::buff_act::registry::BuffActKind::EmitterDamageUp)
+                .then_some(definition.key.opcode)
+        })?,
+        game_data.fight_asfd_const.get(6)?.value.parse().ok()?,
+    ))
 }
 
 fn lingering_glow_attribute_buff(game_data: &config::GameDB) -> Option<LingeringGlowAttributeBuff> {
@@ -86,6 +106,44 @@ mod tests {
                     key: crate::engine::skill::rule::DefinitionKey::new(1053, "AttrByHeatScale"),
                 },
             })
+        );
+    }
+
+    #[test]
+    fn normalizes_impromptu_definition() {
+        crate::test_support::init_config();
+        let game_data = crate::test_support::game_data();
+        let catalog = BattleCatalog::new(game_data);
+        let definition = catalog.impromptu_definition().unwrap();
+
+        assert_eq!(
+            definition.skill_id(),
+            game_data
+                .fight_asfd_const
+                .get(5)
+                .unwrap()
+                .value
+                .parse::<i32>()
+                .unwrap()
+        );
+        assert_eq!(
+            game_data
+                .buff_act
+                .get(definition.damage_up_act_id())
+                .unwrap()
+                .r#type,
+            "EmitterDamageUp"
+        );
+        assert_eq!(
+            definition.damage_rate(2),
+            game_data
+                .fight_asfd_const
+                .get(6)
+                .unwrap()
+                .value
+                .parse::<i32>()
+                .unwrap()
+                * 2
         );
     }
 

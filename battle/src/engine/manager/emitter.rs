@@ -345,7 +345,7 @@ mod tests {
     fn emitter_definition_is_resolved_from_config_types() {
         crate::test_support::init_config();
         let db = config::get();
-        let definition = ImpromptuDefinition::from_game_data(db).unwrap();
+        let definition = crate::catalog::impromptu_definition(db).unwrap();
 
         assert_eq!(
             definition.skill_id(),

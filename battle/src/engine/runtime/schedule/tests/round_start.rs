@@ -504,7 +504,7 @@ fn round_start_generated_cards_exist_before_card_energy_allocation() {
     let mut managers = BattleManagers::seeded(&fight);
     let features = managers.buff.active_features(&managers.hp);
     let enable = enable_rule_ops(
-        crate::test_support::game_data(),
+        crate::catalog::impromptu_definition(crate::test_support::game_data()),
         &managers.gauge,
         &features,
         10,

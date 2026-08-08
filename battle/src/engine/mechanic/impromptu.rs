@@ -40,20 +40,6 @@ impl ImpromptuDefinition {
         }
     }
 
-    pub fn from_game_data(db: &config::GameDB) -> Option<Self> {
-        Some(Self::new(
-            db.fight_asfd_const.get(5)?.value.parse().ok()?,
-            db.buff_act
-                .iter()
-                .find(|act| {
-                    buff_act::registry::kind(act.id, &act.r#type)
-                        == Some(BuffActKind::EmitterDamageUp)
-                })?
-                .id,
-            db.fight_asfd_const.get(6)?.value.parse().ok()?,
-        ))
-    }
-
     pub const fn skill_id(self) -> i32 {
         self.skill_id
     }
@@ -117,7 +103,7 @@ pub const fn inspiration_key(emitter_uid: i64) -> GaugeKey {
 }
 
 pub fn enable_rule_ops(
-    db: &config::GameDB,
+    definition: Option<ImpromptuDefinition>,
     gauges: &GaugeManager,
     features: &[ActiveBuffFeature],
     emitter_uid: i64,
@@ -133,7 +119,7 @@ pub fn enable_rule_ops(
         })
         .filter_map(|feature| {
             let origin = buff_act::feature_command_origin(feature)?;
-            let definition = ImpromptuDefinition::from_game_data(db)?;
+            let definition = definition?;
             Some(ImpromptuEnable {
                 team: feature.team_type,
                 emitter_uid,
@@ -325,7 +311,7 @@ pub fn action_queue_committed_rule_ops(
         .into_iter()
         .collect::<Vec<_>>();
     if current.saturating_add(gained) > 0
-        && let Some(definition) = ImpromptuDefinition::from_game_data(managers.game_data())
+        && let Some(definition) = managers.catalog().impromptu_definition()
         && let Some(origin) = buff_act::feature_command_origin(tag)
     {
         ops.push(RuleOp::Command(BattleCommand::Card(
@@ -382,7 +368,7 @@ pub fn build_plan(managers: &BattleManagers, team: i32, emitter_uid: i64) -> Opt
     if inspiration <= 0 {
         return None;
     }
-    let definition = ImpromptuDefinition::from_game_data(managers.game_data())?;
+    let definition = managers.catalog().impromptu_definition()?;
     Some(ImpromptuPlan {
         source_uid: emitter_uid,
         skill_id: definition.skill_id(),
@@ -491,7 +477,7 @@ mod tests {
         let gain = feature(10, 1, 21, "UseSkillTeamAddEmitterEnergy", vec![881, 1, 2]);
         let mut managers = BattleManagers::default();
         let enable = enable_rule_ops(
-            crate::test_support::game_data(),
+            crate::catalog::impromptu_definition(crate::test_support::game_data()),
             &managers.gauge,
             &[tag.clone(), gain.clone()],
             99998,
