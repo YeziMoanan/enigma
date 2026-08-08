@@ -170,7 +170,7 @@ impl TargetPool {
     pub fn from_fight_with_catalog(catalog: crate::catalog::BattleCatalog, fight: &Fight) -> Self {
         let mut pool = Self {
             catalog_data: Some(catalog),
-            boss_model_ids: configured_boss_model_ids(fight),
+            boss_model_ids: catalog.boss_model_ids(fight),
             ..Self::default()
         };
         if let Some(team) = &fight.attacker {
@@ -414,26 +414,6 @@ impl TargetPool {
     pub fn source_is_attacker(&self, source_uid: i64) -> bool {
         self.team_type(source_uid) == Some(1)
     }
-}
-
-fn configured_boss_model_ids(fight: &Fight) -> Vec<i32> {
-    let Some(db) = config::try_get() else {
-        return Vec::new();
-    };
-    let Some(battle) = crate::engine::fight::configured_battle(fight) else {
-        return Vec::new();
-    };
-    let wave = fight.cur_wave.unwrap_or(1).max(1) as usize - 1;
-    battle
-        .monster_group_ids
-        .split('#')
-        .filter_map(|id| id.parse::<i32>().ok())
-        .nth(wave)
-        .and_then(|group_id| db.monster_group.get(group_id))
-        .into_iter()
-        .flat_map(|group| group.boss_id.split('#'))
-        .filter_map(|id| id.parse().ok())
-        .collect()
 }
 
 fn team_identities(team: &FightTeam) -> impl Iterator<Item = &FightEntityInfo> {

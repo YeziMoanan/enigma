@@ -244,6 +244,36 @@ impl BattleCatalog {
         .unwrap_or(1000)
     }
 
+    pub(crate) fn boss_model_ids(self, fight: &sonettobuf::Fight) -> Vec<i32> {
+        let Some(battle) = self.configured_battle(fight) else {
+            return Vec::new();
+        };
+        let wave = fight.cur_wave.unwrap_or(1).max(1) as usize - 1;
+        battle
+            .monster_group_ids
+            .split('#')
+            .filter_map(|id| id.parse::<i32>().ok())
+            .nth(wave)
+            .and_then(|group_id| self.game_data.monster_group.get(group_id))
+            .into_iter()
+            .flat_map(|group| group.boss_id.split('#'))
+            .filter_map(|id| id.parse().ok())
+            .collect()
+    }
+
+    fn configured_battle(
+        self,
+        fight: &sonettobuf::Fight,
+    ) -> Option<&'static config::battle::Battle> {
+        match fight.battle_id {
+            Some(battle_id) => self.game_data.battle.get(battle_id),
+            None => fight
+                .episode_id
+                .and_then(|episode_id| self.game_data.episode.get(episode_id))
+                .and_then(|episode| self.game_data.battle.get(episode.battle_id)),
+        }
+    }
+
     fn skill_effect(self, skill_id: i32) -> Option<&'static config::skill_effect::SkillEffect> {
         self.game_data
             .skill_effect
@@ -599,6 +629,38 @@ mod tests {
         assert_eq!(catalog.career_multiplier(-1, 4), 1000);
         assert_eq!(catalog.strongest_career_multiplier(1), 1300);
         assert_eq!(catalog.strongest_career_multiplier(-1), 1000);
+    }
+
+    #[test]
+    fn normalizes_current_wave_boss_models() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.boss_model_ids(&sonettobuf::Fight {
+                episode_id: Some(90001601),
+                ..Default::default()
+            }),
+            vec![900016101, 900016102]
+        );
+        assert!(
+            catalog
+                .boss_model_ids(&sonettobuf::Fight {
+                    episode_id: Some(90001601),
+                    battle_id: Some(i32::MAX),
+                    ..Default::default()
+                })
+                .is_empty()
+        );
+        assert!(
+            catalog
+                .boss_model_ids(&sonettobuf::Fight {
+                    episode_id: Some(90001601),
+                    cur_wave: Some(2),
+                    ..Default::default()
+                })
+                .is_empty()
+        );
     }
 
     #[test]
