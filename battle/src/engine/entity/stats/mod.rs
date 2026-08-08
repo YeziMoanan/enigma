@@ -206,10 +206,6 @@ impl Stats {
         core + talent_bonus(game, input, level, rank) + Self::equipment(game, input)
     }
 
-    pub(super) fn equipment_bonus(input: &StatInputs) -> Self {
-        Self::equipment(configs::get(), input)
-    }
-
     pub(crate) fn equipment(game: &config::GameDB, input: &StatInputs) -> Self {
         equip_bonus(game, input)
             + equip_break_bonus(

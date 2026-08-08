@@ -9,7 +9,7 @@ use super::{
     input::{EquipmentBuildInput, HeroBuildInput},
     passive::Passive,
     skill::Skill,
-    stats::{BattleBalance, StatInputs, Stats, rank_from_level},
+    stats::{BattleBalance, StatInputs, Stats, configured_rank},
 };
 
 pub struct EntityBuilder {
@@ -154,7 +154,23 @@ impl EntityBuilder {
         position: i32,
         team_type: i32,
     ) -> Result<(FightEntityInfo, Stats)> {
-        let tables = config::configs::get();
+        Self::configured_trial(
+            crate::catalog::BattleCatalog::new(config::configs::get()),
+            trial_id,
+            uid,
+            position,
+            team_type,
+        )
+    }
+
+    pub(crate) fn configured_trial(
+        catalog: crate::catalog::BattleCatalog,
+        trial_id: i32,
+        uid: i64,
+        position: i32,
+        team_type: i32,
+    ) -> Result<(FightEntityInfo, Stats)> {
+        let tables = catalog.game_data();
         let trial = tables
             .hero_trial
             .get(trial_id)
@@ -163,7 +179,7 @@ impl EntityBuilder {
             .character
             .get(trial.hero_id)
             .with_context(|| format!("unknown trial character {}", trial.hero_id))?;
-        let rank = rank_from_level(trial.hero_id, trial.level);
+        let rank = configured_rank(tables, trial.hero_id, trial.level);
         let talent = tables
             .character_talent
             .iter()
@@ -186,20 +202,24 @@ impl EntityBuilder {
             ..Default::default()
         };
         let linked_psychube = tables.linked_psychube_id(trial.hero_id, trial.equip_id);
-        let mut stats = Stats::build(&inputs);
+        let mut stats = Stats::configured(tables, &inputs);
         if let Some(equip_id) = linked_psychube {
             stats = stats
-                + Stats::equipment_bonus(&StatInputs {
-                    equip_id,
-                    ..inputs.clone()
-                });
+                + Stats::equipment(
+                    tables,
+                    &StatInputs {
+                        equip_id,
+                        ..inputs.clone()
+                    },
+                );
         }
         let attr = stats.base();
         let (skill_group1, skill_group2, configured_ex_skill) =
-            Skill::for_loadout(trial.hero_id, trial.ex_skill_lv);
-        let ex_point_type = Self::ex_point_type(trial.hero_id);
+            Skill::active_skills(tables, trial.hero_id, trial.ex_skill_lv);
+        let (ex_point_type, ex_point_max) = Self::ex_point_spec(tables, trial.hero_id);
         let ex_skill = Self::wire_ex_skill(ex_point_type, configured_ex_skill);
-        let mut passive_skill = Passive::for_ranked_loadout(
+        let mut passive_skill = Passive::ranked(
+            tables,
             trial.hero_id,
             rank,
             trial.ex_skill_lv,
@@ -207,7 +227,11 @@ impl EntityBuilder {
             (trial.facets_id != 0).then_some((trial.facets_id, trial.facetslevel)),
         );
         if let Some(equip_id) = linked_psychube {
-            passive_skill.extend(Passive::psychube(equip_id, Some(trial.equip_refine.max(1))));
+            passive_skill.extend(Passive::psychube_from(
+                tables,
+                equip_id,
+                Some(trial.equip_refine.max(1)),
+            ));
         }
         let passive_skill = passive_skill
             .into_iter()
@@ -262,7 +286,7 @@ impl EntityBuilder {
                 destiny_stone: Some(trial.facets_id),
                 destiny_rank: Some(trial.facetslevel),
                 custom_unit_id: Some(0),
-                ex_point_max: Some(Self::ex_point_max(trial.hero_id)),
+                ex_point_max: Some(ex_point_max),
                 ..Default::default()
             },
             stats,
@@ -317,14 +341,6 @@ impl EntityBuilder {
             custom_unit_id: Some(0),
             ..Default::default()
         }
-    }
-
-    fn ex_point_type(hero_id: i32) -> i32 {
-        Self::ex_point_spec(config::configs::get(), hero_id).0
-    }
-
-    fn ex_point_max(hero_id: i32) -> i32 {
-        Self::ex_point_spec(config::configs::get(), hero_id).1
     }
 
     fn wire_ex_skill(ex_point_type: i32, configured: i32) -> i32 {
@@ -435,7 +451,18 @@ mod tests {
     fn device_power_trial_keeps_its_unique_skill_out_of_ex_skill() {
         crate::test_support::init_config();
 
-        let (entity, _) = EntityBuilder::trial(116385001, 10, 1, 1).unwrap();
+        let legacy = EntityBuilder::trial(116385001, 10, 1, 1).unwrap();
+        let explicit = EntityBuilder::configured_trial(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            116385001,
+            10,
+            1,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(explicit, legacy);
+        let (entity, _) = explicit;
 
         assert_eq!(entity.model_id, Some(3149));
         assert_eq!(entity.ex_point_type, Some(4));

@@ -208,7 +208,8 @@ impl Attacker {
 
         for (index, (trial_id, position)) in selected_trials.iter().copied().enumerate() {
             let uid = -i64::try_from(aid_ids.len() + index + 1)?;
-            let (entity, stats) = EntityBuilder::trial(trial_id, uid, position, 1)?;
+            let (entity, stats) =
+                EntityBuilder::configured_trial(catalog, trial_id, uid, position, 1)?;
             ex_attributes.push((uid, stats.ex()));
             sp_attributes.push((uid, stats.sp()));
             if position > 0 {

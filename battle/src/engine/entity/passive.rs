@@ -144,7 +144,17 @@ impl Passive {
         psychube: Option<(i32, i32)>,
         destiny: Option<(i32, i32)>,
     ) -> Vec<PassiveSkill> {
-        let game = configs::get();
+        Self::ranked(configs::get(), hero_id, rank, ex_level, psychube, destiny)
+    }
+
+    pub(crate) fn ranked(
+        game: &config::GameDB,
+        hero_id: i32,
+        rank: i32,
+        ex_level: i32,
+        psychube: Option<(i32, i32)>,
+        destiny: Option<(i32, i32)>,
+    ) -> Vec<PassiveSkill> {
         let insight_level = game
             .character_rank
             .iter()
@@ -252,11 +262,7 @@ impl Passive {
         }
     }
 
-    pub(super) fn psychube(equip_id: i32, skill_level: Option<i32>) -> Vec<PassiveSkill> {
-        Self::psychube_from(configs::get(), equip_id, skill_level)
-    }
-
-    fn psychube_from(
+    pub(crate) fn psychube_from(
         game: &config::GameDB,
         equip_id: i32,
         skill_level: Option<i32>,

@@ -89,7 +89,7 @@ impl Skill {
         parse_skill_group(&character.skill, group)
     }
 
-    fn active_skills(
+    pub(crate) fn active_skills(
         game: &config::GameDB,
         hero_id: i32,
         ex_level: i32,
