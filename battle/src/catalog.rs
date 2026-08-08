@@ -22,6 +22,12 @@ pub(crate) struct ConfiguredBuffFeature {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ConfiguredPlayerSkill {
+    pub skill_id: i32,
+    pub need_power: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EntityExAttributes {
     pub crit_rate: i32,
     pub crit_resist: i32,
@@ -265,6 +271,36 @@ impl BattleCatalog {
                                 as i32
                 )
         })
+    }
+
+    pub(crate) fn player_skills(self, cloth_id: Option<i32>) -> Vec<ConfiguredPlayerSkill> {
+        let cloth_id = cloth_id.unwrap_or(1);
+        let Some(cloth) = self
+            .game_data
+            .cloth_level
+            .iter()
+            .find(|cloth| cloth.id == cloth_id && cloth.level == 1)
+        else {
+            return Vec::new();
+        };
+
+        [
+            ConfiguredPlayerSkill {
+                skill_id: cloth.skill1,
+                need_power: Some(cloth.use_power1.first().copied().unwrap_or(0)),
+            },
+            ConfiguredPlayerSkill {
+                skill_id: cloth.skill2,
+                need_power: Some(cloth.use_power2.first().copied().unwrap_or(0)),
+            },
+            ConfiguredPlayerSkill {
+                skill_id: cloth.skill3,
+                need_power: None,
+            },
+        ]
+        .into_iter()
+        .filter(|skill| skill.skill_id != 0)
+        .collect()
     }
 
     pub(crate) fn skill_is_ultimate_for_model(self, skill_id: i32, model_id: i32) -> bool {
@@ -885,6 +921,28 @@ mod tests {
         assert_eq!(catalog.skill_extra_kind(-1), 0);
         assert_eq!(catalog.skill_type(-1), 0);
         assert!(!catalog.skill_is_attack(-1));
+    }
+
+    #[test]
+    fn normalizes_player_skills_in_slot_order() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.player_skills(Some(1)),
+            vec![
+                ConfiguredPlayerSkill {
+                    skill_id: 30010201,
+                    need_power: Some(40),
+                },
+                ConfiguredPlayerSkill {
+                    skill_id: 30010202,
+                    need_power: Some(25),
+                },
+            ]
+        );
+        assert_eq!(catalog.player_skills(None), catalog.player_skills(Some(1)));
+        assert!(catalog.player_skills(Some(-1)).is_empty());
     }
 
     #[test]

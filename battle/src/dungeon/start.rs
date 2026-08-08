@@ -26,6 +26,7 @@ pub fn build_fight(
     params: Option<&str>,
 ) -> Result<BuiltFight> {
     let mut attacker = Attacker::get(
+        catalog,
         roster,
         episode_id,
         battle_id,

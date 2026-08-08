@@ -142,6 +142,7 @@ pub struct BuiltAttacker {
 
 impl Attacker {
     pub fn get(
+        catalog: crate::catalog::BattleCatalog,
         roster: &BattleRoster,
         episode_id: i32,
         battle_id: i32,
@@ -244,7 +245,7 @@ impl Attacker {
         }
 
         let player_entity = EntityBuilder::player(roster.user_id, 1);
-        let skill_infos = Team::get_player_skills(fight_group.cloth_id);
+        let skill_infos = Team::player_skills(catalog, fight_group.cloth_id);
 
         let mut team = Team::build(
             entitys,
