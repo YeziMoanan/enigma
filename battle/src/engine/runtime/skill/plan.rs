@@ -290,6 +290,7 @@ fn additional_damage(
         .iter()
         .filter_map(|modifier| {
             crate::engine::skill::buff_act::additional_damage::configured(
+                managers.catalog(),
                 modifier.buff_id,
                 source_uid,
                 source_uid,

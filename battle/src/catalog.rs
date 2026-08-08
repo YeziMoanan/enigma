@@ -12,6 +12,15 @@ pub(crate) struct MagicCircleDefinition {
     pub self_skills: Vec<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfiguredBuffFeature {
+    pub act_type: String,
+    pub effect_time: i32,
+    pub effect_condition: i32,
+    pub raw: String,
+    pub values: Vec<i32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LingeringGlowAttributeBuff {
     pub buff_id: i32,
@@ -103,6 +112,30 @@ impl BattleCatalog {
             .skill_bufftype
             .get(type_id)
             .is_some_and(|buff_type| buff_type.take_act == "1")
+    }
+
+    pub(crate) fn buff_features(self, buff_id: i32) -> Vec<ConfiguredBuffFeature> {
+        self.game_data
+            .skill_buff
+            .get(buff_id)
+            .into_iter()
+            .flat_map(|buff| buff.features.split('|'))
+            .filter_map(|raw| {
+                let values = raw
+                    .split('#')
+                    .map(str::parse)
+                    .collect::<Result<Vec<i32>, _>>()
+                    .ok()?;
+                let act = self.game_data.buff_act.get(*values.first()?)?;
+                Some(ConfiguredBuffFeature {
+                    act_type: act.r#type.clone(),
+                    effect_time: act.effect_time,
+                    effect_condition: act.effect_condition,
+                    raw: raw.to_owned(),
+                    values,
+                })
+            })
+            .collect()
     }
 
     pub(crate) fn skill_effect_id(self, skill_id: i32) -> i32 {
@@ -396,6 +429,40 @@ mod tests {
         assert!(catalog.buff_expires_after_owner_attack(2220010));
         assert!(!catalog.buff_has_effect_count(-1));
         assert!(!catalog.buff_expires_after_owner_attack(-1));
+    }
+
+    #[test]
+    fn normalizes_configured_buff_features_in_order() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.buff_features(31260151),
+            vec![
+                ConfiguredBuffFeature {
+                    act_type: "CreateMaxHpAdditionalDamageAndRemove".to_owned(),
+                    effect_time: 203,
+                    effect_condition: 0,
+                    raw: "1026#1#750#31260171".to_owned(),
+                    values: vec![1026, 1, 750, 31260171],
+                },
+                ConfiguredBuffFeature {
+                    act_type: "SubBuff".to_owned(),
+                    effect_time: 0,
+                    effect_condition: 0,
+                    raw: "933#31260201".to_owned(),
+                    values: vec![933, 31260201],
+                },
+                ConfiguredBuffFeature {
+                    act_type: "Bullet".to_owned(),
+                    effect_time: 208,
+                    effect_condition: 3,
+                    raw: "827".to_owned(),
+                    values: vec![827],
+                },
+            ]
+        );
+        assert!(catalog.buff_features(-1).is_empty());
     }
 
     #[test]

@@ -796,6 +796,7 @@ pub(in crate::engine::runtime) fn emit_ops(
         }
         for additional in &execution.modifiers.additional_damage {
             let Some((feature, _)) = crate::engine::skill::buff_act::additional_damage::configured(
+                managers.catalog(),
                 additional.buff_id,
                 invocation.plan.source_uid,
                 invocation.plan.source_uid,
