@@ -130,6 +130,10 @@ impl BuffManager {
         self.catalog_data = Some(catalog);
     }
 
+    pub(crate) fn try_catalog(&self) -> Option<crate::catalog::BattleCatalog> {
+        self.catalog_data
+    }
+
     fn catalog(&self) -> crate::catalog::BattleCatalog {
         if let Some(catalog) = self.catalog_data {
             return catalog;
