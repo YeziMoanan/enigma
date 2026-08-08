@@ -123,7 +123,7 @@ fn next_ai_snapshot_is_published_after_current_ai_settlement() {
 }
 
 #[test]
-fn configured_wave_advances_before_the_next_round_cue() {
+fn configured_wave_uses_the_client_barrier_before_the_next_round_cue() {
     crate::test_support::init_config();
     let (entitys, sub_entitys) =
         crate::engine::fight::defender::Defender::build_wave_entities(251401, 2, 2, 0).unwrap();
@@ -189,36 +189,32 @@ fn configured_wave_advances_before_the_next_round_cue() {
             .filter_map(|card| card.skill_id)
             .all(|skill_id| runtime.catalog.get(skill_id).is_some())
     );
-    let effect_types = round
+    let wave = round
         .fight_step
         .iter()
-        .flat_map(|step| step.act_effect.iter())
-        .filter_map(|effect| effect.effect_type)
-        .collect::<Vec<_>>();
-    let wave_snapshot = round
-        .fight_step
-        .iter()
-        .flat_map(|step| step.act_effect.iter())
-        .find(|effect| {
-            effect.effect_type
-                == Some(sonettobuf::effect_type_enum::EffectType::Newchangewave as i32)
-        })
-        .and_then(|effect| effect.fight.as_ref())
-        .and_then(|fight| fight.attacker.as_ref())
+        .position(|step| step.act_type == Some(sonettobuf::fight_step::ActType::Changewave as i32))
         .unwrap();
+    let wave_push = runtime.take_wave_push().unwrap();
+    let wave_snapshot = wave_push.attacker.as_ref().unwrap();
     assert_eq!(wave_snapshot.card_deck_size, Some(44));
     assert_eq!(wave_snapshot.power, Some(31));
-    let wave = effect_types
+    assert!(round.fight_step.iter().all(|step| {
+        step.act_effect.iter().all(|effect| {
+            effect.effect_type
+                != Some(sonettobuf::effect_type_enum::EffectType::Newchangewave as i32)
+        })
+    }));
+    let next_round = round
+        .fight_step
         .iter()
-        .position(|effect| {
-            *effect == sonettobuf::effect_type_enum::EffectType::Newchangewave as i32
+        .position(|step| {
+            step.act_effect.iter().any(|effect| {
+                effect.effect_type
+                    == Some(sonettobuf::effect_type_enum::EffectType::Changeround as i32)
+            })
         })
         .unwrap();
-    let round = effect_types
-        .iter()
-        .position(|effect| *effect == sonettobuf::effect_type_enum::EffectType::Changeround as i32)
-        .unwrap();
-    assert!(wave < round);
+    assert!(wave < next_round);
 }
 
 #[test]

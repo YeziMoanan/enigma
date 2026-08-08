@@ -63,6 +63,11 @@ pub enum ParsedConditionKind {
         compare: ConditionCompare,
         threshold: i32,
     },
+    BuffGroupTypeCount {
+        group_ids: Vec<i32>,
+        compare: ConditionCompare,
+        threshold: i32,
+    },
     BuffGroup(Vec<i32>),
     NoBuffGroup(Vec<i32>),
     FromBuffAndToBuff {
@@ -572,6 +577,15 @@ fn negate_kind(kind: ParsedConditionKind) -> ParsedConditionKind {
             threshold,
         } => ParsedConditionKind::BuffTypeCount {
             type_ids,
+            compare: negate_compare(compare),
+            threshold,
+        },
+        ParsedConditionKind::BuffGroupTypeCount {
+            group_ids,
+            compare,
+            threshold,
+        } => ParsedConditionKind::BuffGroupTypeCount {
+            group_ids,
             compare: negate_compare(compare),
             threshold,
         },

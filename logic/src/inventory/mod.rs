@@ -1,4 +1,4 @@
-use crate::{error::AppError, reward, types::red_dot_id::RedDotId};
+use crate::{error::AppError, hero, reward, types::red_dot_id::RedDotId};
 use common::time::ServerTime;
 use database::{
     db::game::{currencies, equipment as equipment_db, items, player_infos, red_dots},
@@ -20,7 +20,14 @@ use std::collections::BTreeMap;
 
 #[repr(i32)]
 enum ItemSubType {
+    SpecifiedGift = 48,
+    OptionalGift = 53,
+    DestinyStoneUp = 64,
+    SkinSelectGift = 71,
+    HeroExpBoxKey = 77,
+    HeroExpBox = 79,
     EquipmentLevelUp = 84,
+    NewDestinyStoneUp = 86,
 }
 
 #[repr(i32)]
@@ -49,7 +56,7 @@ use currency::*;
 #[cfg(test)]
 use item::item_rewards;
 use item::*;
-use item_effect::{target_item_rewards, use_equipment_level_item};
+use item_effect::{effect_ids, target_item_rewards, use_equipment_level_item};
 use power::*;
 
 #[derive(Clone, Copy, Debug)]

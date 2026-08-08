@@ -249,6 +249,12 @@ impl SkillEffectCatalog {
                         Some(BuffActKind::BloodValueUseSkill) => {
                             skills.extend(values.get(3).copied())
                         }
+                        Some(BuffActKind::RedOrBlueCount) => {
+                            skills.extend(values.iter().skip(2).take(3).copied())
+                        }
+                        Some(BuffActKind::MeiLeiErCharge) => {
+                            skills.extend(values.get(3).copied())
+                        }
                         Some(
                             BuffActKind::UseSkillToEnemy
                             | BuffActKind::ConsumeBuffContinueChannel

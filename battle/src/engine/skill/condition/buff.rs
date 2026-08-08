@@ -73,6 +73,18 @@ pub fn no_buff_group(_: i32, _: &str, raw_args: &[String]) -> Option<ParsedCondi
     Some(ParsedConditionKind::NoBuffGroup(parse_buff_ids(raw_args)?))
 }
 
+pub fn buff_group_type_at_least(
+    _: i32,
+    _: &str,
+    raw_args: &[String],
+) -> Option<ParsedConditionKind> {
+    Some(ParsedConditionKind::BuffGroupTypeCount {
+        group_ids: parse_buff_ids(raw_args.get(..1)?)?,
+        compare: ConditionCompare::GreaterThanOrEqual,
+        threshold: raw_args.get(1)?.parse().ok()?,
+    })
+}
+
 pub fn from_and_to_buff(_: i32, _: &str, raw_args: &[String]) -> Option<ParsedConditionKind> {
     Some(ParsedConditionKind::FromBuffAndToBuff {
         from_buff_id: raw_args.first()?.parse().ok()?,
@@ -414,6 +426,14 @@ mod tests {
         assert_eq!(
             no_buff_group(78208, "NoBuffGroup", &["5".into()]),
             Some(ParsedConditionKind::NoBuffGroup(vec![5]))
+        );
+        assert_eq!(
+            buff_group_type_at_least(668203, "HasBuffGroupIdMoreThan", &["7".into(), "3".into()],),
+            Some(ParsedConditionKind::BuffGroupTypeCount {
+                group_ids: vec![7],
+                compare: ConditionCompare::GreaterThanOrEqual,
+                threshold: 3,
+            })
         );
     }
 

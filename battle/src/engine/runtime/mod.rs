@@ -42,6 +42,7 @@ pub struct BattleRuntime {
     round_state: RoundState,
     determinism: RoundDeterminism,
     pending_redeal: Option<RedealCardInfoPush>,
+    pending_wave_push: Option<Fight>,
     cloth_skill_uses: HashMap<i32, usize>,
     objectives: objective::ObjectiveProgress,
 }
@@ -80,6 +81,10 @@ impl BattleRuntime {
     /// Returns the synchronized fight state and most recently committed round for reconnect.
     pub fn reconnect_state(&self) -> (Fight, Option<FightRound>) {
         (self.fight.clone(), self.round.clone())
+    }
+
+    pub fn take_wave_push(&mut self) -> Option<Fight> {
+        self.pending_wave_push.take()
     }
 
     pub fn dead_attacker_count(&self) -> usize {
@@ -251,6 +256,7 @@ impl BattleRuntime {
             round_state,
             determinism,
             pending_redeal: None,
+            pending_wave_push: None,
             cloth_skill_uses: HashMap::new(),
             objectives: Default::default(),
         }

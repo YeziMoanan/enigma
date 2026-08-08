@@ -5,6 +5,21 @@ use super::normalize_effect_tree;
 pub struct StepPacket;
 
 impl StepPacket {
+    pub fn change_wave() -> FightStep {
+        FightStep {
+            act_type: Some(fight_step::ActType::Changewave as i32),
+            from_id: Some(0),
+            to_id: Some(0),
+            act_id: Some(0),
+            act_effect: Vec::new(),
+            card_index: Some(0),
+            support_hero_id: Some(0),
+            fake_timeline: Some(false),
+            real_skill_type: Some(0),
+            real_skin_id: Some(0),
+        }
+    }
+
     pub fn effect(effects: Vec<ActEffect>) -> Option<FightStep> {
         if effects.is_empty() {
             return None;

@@ -763,8 +763,8 @@ impl ConduitManager {
                 .find(|device| device.uid == source_uid)?;
             device
                 .skill_groups
-                .get(device.selected_group.saturating_sub(1) as usize)?
                 .iter()
+                .flatten()
                 .find(|skill| skill.skill_id == skill_id)
                 .copied()
                 .map(|skill| (*team, skill))
@@ -1115,6 +1115,56 @@ mod tests {
         assert_eq!(manager.power(1, 1), 1);
         assert_eq!(manager.consumed(1, 1), 3);
         assert_eq!(manager.uses(10), 1);
+    }
+
+    #[test]
+    fn an_in_flight_skill_survives_switching_to_another_group() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            attacker: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(10),
+                    model_id: Some(3149),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut manager = ConduitManager::seed(&fight);
+        manager
+            .execute(ConduitCommand::ChangePower(ConduitPowerChange {
+                origin: ORIGIN,
+                source_uid: 10,
+                team: 1,
+                power_id: 1,
+                delta: 3,
+                kind: ConduitPowerChangeKind::Standard,
+            }))
+            .unwrap();
+        manager
+            .execute(ConduitCommand::BeginSkill {
+                source_uid: 10,
+                skill_id: 31490121,
+                cost_reduction: 0,
+            })
+            .unwrap();
+        manager
+            .execute(ConduitCommand::SetSkillGroup {
+                origin: ORIGIN,
+                source_uid: 10,
+                group: 2,
+            })
+            .unwrap();
+
+        assert!(
+            manager
+                .execute(ConduitCommand::FinishSkill {
+                    source_uid: 10,
+                    skill_id: 31490121,
+                })
+                .is_ok()
+        );
     }
 
     #[test]

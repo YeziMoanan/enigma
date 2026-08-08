@@ -36,6 +36,7 @@ mod talent;
 pub use destiny::{destiny_available, destiny_stones};
 pub(crate) use profile::snapshot_data;
 pub(crate) use profile::snapshot_data as snapshot;
+pub(crate) use progression::duplicate_item_id;
 
 #[derive(Clone, Copy, Debug)]
 pub struct HeroManager {
@@ -56,8 +57,6 @@ impl HeroManager {
 
 #[cfg(test)]
 use destiny::next_destiny_slot;
-#[cfg(test)]
-use progression::duplicate_item_id;
 #[cfg(test)]
 use specialization::{hero_3124_talent_id, update_talent_extra_str};
 

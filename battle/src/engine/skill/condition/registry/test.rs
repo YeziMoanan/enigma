@@ -2049,3 +2049,35 @@ fn hand_skill_presence_keeps_exact_card_identity_and_round_timing() {
         })
     );
 }
+
+#[test]
+fn r12_observed_condition_routes_keep_their_exact_semantics() {
+    assert_eq!(
+        parse(
+            537201,
+            "HasTypeIdBuffTotalCountMoreThan",
+            &["31100201".into(), "4".into()],
+        ),
+        Some(ParsedConditionKind::BuffTypeCount {
+            type_ids: vec![31100201],
+            compare: ConditionCompare::GreaterThanOrEqual,
+            threshold: 4,
+        })
+    );
+    assert_eq!(
+        parse(668203, "HasBuffGroupIdMoreThan", &["7".into(), "3".into()],),
+        Some(ParsedConditionKind::BuffGroupTypeCount {
+            group_ids: vec![7],
+            compare: ConditionCompare::GreaterThanOrEqual,
+            threshold: 3,
+        })
+    );
+    assert_eq!(
+        parse(1021002, "BattleTagCheck", &["10000".into()]),
+        Some(ParsedConditionKind::BattleTagCount {
+            tag_id: 10000,
+            compare: ConditionCompare::GreaterThanOrEqual,
+            threshold: 1,
+        })
+    );
+}

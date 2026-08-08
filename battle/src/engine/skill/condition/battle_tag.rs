@@ -16,6 +16,15 @@ pub fn parse(_opcode: i32, _type_name: &str, raw_args: &[String]) -> Option<Pars
     })
 }
 
+pub fn present(_opcode: i32, _type_name: &str, raw_args: &[String]) -> Option<ParsedConditionKind> {
+    let tag_id = raw_args.first()?.parse().ok()?;
+    (raw_args.len() == 1).then_some(ParsedConditionKind::BattleTagCount {
+        tag_id,
+        compare: ConditionCompare::GreaterThanOrEqual,
+        threshold: 1,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -32,6 +41,14 @@ mod tests {
                 tag_id: 114,
                 compare: ConditionCompare::GreaterThanOrEqual,
                 threshold: 3,
+            })
+        );
+        assert_eq!(
+            present(1021002, "BattleTagCheck", &["10000".into()]),
+            Some(ParsedConditionKind::BattleTagCount {
+                tag_id: 10000,
+                compare: ConditionCompare::GreaterThanOrEqual,
+                threshold: 1,
             })
         );
     }

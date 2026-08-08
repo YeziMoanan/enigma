@@ -586,7 +586,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repeated_and_concurrent_login_create_one_account_and_one_initial_mail() {
+    async fn repeated_and_concurrent_login_create_one_account_and_all_campaign_mail() {
         let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
@@ -657,7 +657,11 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        let expected = mail_campaign::initial_manifest().unwrap().mails.len() as i64;
+        let expected = (mail_campaign::initial_manifest().unwrap().mails.len()
+            + mail_campaign::release_announcement_manifest()
+                .unwrap()
+                .announcements
+                .len()) as i64;
         assert_eq!(
             (user_count, mail_count, delivery_count),
             (1, expected, expected)

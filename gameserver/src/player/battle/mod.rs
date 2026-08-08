@@ -7,9 +7,10 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 use sonettobuf::{
     Act229HeroNo, AutoRoundReply, AutoRoundRequest, BeginRoundReply, BeginRoundRequest, CardInfo,
-    CardInfoPush, FightEntityInfo, FightReason, FightRoundOperRecord, ReconnectFightReply,
-    RedealCardInfoPush, ResetRoundReply, StartDungeonReply, StartDungeonRequest,
-    UseClothSkillOperRecord, UseClothSkillReply, UseClothSkillRequest, fight_reason,
+    CardInfoPush, FightEntityInfo, FightReason, FightRoundOperRecord, FightWavePush,
+    ReconnectFightReply, RedealCardInfoPush, ResetRoundReply, StartDungeonReply,
+    StartDungeonRequest, UseClothSkillOperRecord, UseClothSkillReply, UseClothSkillRequest,
+    fight_reason,
 };
 use sqlx::SqlitePool;
 use std::io::Read;
@@ -118,7 +119,10 @@ impl BattleState {
             .use_cloth_skill(request)
     }
 
-    pub fn begin_round(&mut self, request: BeginRoundRequest) -> Result<BeginRoundReply, AppError> {
+    pub fn begin_round(
+        &mut self,
+        request: BeginRoundRequest,
+    ) -> Result<(BeginRoundReply, Option<FightWavePush>), AppError> {
         self.active
             .as_mut()
             .ok_or(AppError::InvalidRequest)?
@@ -594,11 +598,18 @@ impl ActiveBattle {
         self.runtime.card_info_push()
     }
 
-    pub fn begin_round(&mut self, request: BeginRoundRequest) -> Result<BeginRoundReply, AppError> {
+    pub fn begin_round(
+        &mut self,
+        request: BeginRoundRequest,
+    ) -> Result<(BeginRoundReply, Option<FightWavePush>), AppError> {
         let reply = ::battle::dungeon::begin_round(&mut self.runtime, request.clone())
             .map_err(AppError::Custom)?;
+        let wave_push = self
+            .runtime
+            .take_wave_push()
+            .map(|fight| FightWavePush { fight: Some(fight) });
         self.record_round(request);
-        compress_round_steps(reply)
+        Ok((compress_round_steps(reply)?, wave_push))
     }
 
     fn record_round(&mut self, request: BeginRoundRequest) {

@@ -1287,7 +1287,7 @@ impl HeroModel<HeroData> for UserHeroModel {
         }
 
         sqlx::query(
-            "INSERT INTO hero_birthday_info (user_id, hero_id, birthday_count) VALUES (?, ?, ?)",
+            "INSERT INTO hero_birthday_info (user_id, hero_id, birthday_count) VALUES (?, ?, ?)\n             ON CONFLICT(user_id, hero_id) DO NOTHING",
         )
         .bind(self.user_id)
         .bind(hero_id)
@@ -2406,5 +2406,41 @@ mod tests {
         assert_eq!(super::visible_hero_skin(3146, 314601), 314602);
         assert_eq!(super::visible_hero_skin(3146, 314602), 314602);
         assert_eq!(super::visible_hero_skin(3144, 314401), 314401);
+    }
+
+    #[tokio::test]
+    async fn hero_creation_reuses_an_existing_birthday_row() {
+        init_config();
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, created_at, updated_at) VALUES (91, 'birthday', 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO hero_birthday_info (user_id, hero_id, birthday_count) VALUES (91, 3003, 2)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let model = super::UserHeroModel::new(91, pool.clone());
+        let mut tx = pool.begin().await.unwrap();
+        let grant = model
+            .grant_hero_in_transaction(&mut tx, 3003)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert!(grant.is_new);
+        let count: i32 = sqlx::query_scalar(
+            "SELECT birthday_count FROM hero_birthday_info WHERE user_id = 91 AND hero_id = 3003",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 2);
     }
 }

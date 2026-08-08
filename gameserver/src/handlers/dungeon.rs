@@ -477,7 +477,11 @@ pub async fn on_begin_round(
     req: ClientPacket,
 ) -> Result<(), AppError> {
     let request = BeginRoundRequest::decode(&req.data[..])?;
-    let reply = ctx.player_mut()?.battle.begin_round(request)?;
+    let (reply, wave_push) = ctx.player_mut()?.battle.begin_round(request)?;
+
+    if let Some(wave_push) = wave_push {
+        ctx.notify(CmdId::FightWavePushCmd, wave_push).await?;
+    }
 
     ctx.send_reply(CmdId::BeginRoundCmd, reply, 0, req.up_tag)
         .await

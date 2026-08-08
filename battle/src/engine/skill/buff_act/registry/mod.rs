@@ -1110,6 +1110,10 @@ buff_act_definitions! {
         effect_time_subscription: false,
         supports: super::add_attr_by_other_buff_layer::supports, state_consumer: true,
         wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1036, "AddAttrByOtherBuffLayer"), &[EffectType::None as i32, EffectType::Attr as i32]));
+    (1141, "AddAttrByOtherBuffLayer") => AddAttrByOtherBuffLayer,
+        effect_time_subscription: false,
+        supports: super::add_attr_by_other_buff_layer::supports, state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1141, "AddAttrByOtherBuffLayer"), &[EffectType::None as i32, EffectType::Attr as i32]));
     (1041, "RaspberryBigSkill") => RaspberryBigSkill,
         effect_time_subscription: false, supports: |_| true, state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1041, "RaspberryBigSkill"), &[EffectType::None as i32]));
     (1042, "Raspberry") => Raspberry, events: [EventKind::BuffRemoved],

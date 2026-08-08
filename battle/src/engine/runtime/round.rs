@@ -48,6 +48,7 @@ impl BattleRuntime {
         &mut self,
         request: &BeginRoundRequest,
     ) -> Result<FightRound, String> {
+        self.pending_wave_push = None;
         let active_round = self.round_state.cur_round;
         self.round_state.begin_round();
         self.fight.cur_round = Some(self.round_state.cur_round);
@@ -324,6 +325,7 @@ impl BattleRuntime {
                 .advance_wave(&mut self.fight)
                 .map_err(|error| error.to_string())?
         {
+            self.pending_wave_push = Some(change.fight.clone());
             wave_entering_uids = change.entering_uids.clone();
             catalog.extend_entities_and_warn(
                 config::configs::get(),

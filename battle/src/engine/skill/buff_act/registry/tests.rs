@@ -451,6 +451,25 @@ fn layered_attribute_penalty_is_an_exact_static_consumer() {
         &args[..6]
     ));
     assert!(find(1029, "AddAttrByOtherBuffLayer").is_some());
+    assert!(find(1141, "AddAttrByOtherBuffLayer").is_some());
+}
+
+#[test]
+fn r12_rapport_attribute_penalty_reuses_the_exact_layered_consumer() {
+    let args = [204, -150, 31460002, -30, 5, 204, 0];
+    let definition = find(1141, "AddAttrByOtherBuffLayer").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::AddAttrByOtherBuffLayer);
+    assert_eq!(
+        definition.destination(),
+        Some(BuffActDestination::StateConsumer)
+    );
+    assert!(has_destination(1141, "AddAttrByOtherBuffLayer", &args));
+    assert!(!has_destination(
+        1141,
+        "AddAttrByOtherBuffLayer",
+        &args[..6]
+    ));
 }
 
 #[test]

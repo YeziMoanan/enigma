@@ -297,7 +297,7 @@ pub(super) fn required_rank_level(requirement: &str) -> Option<i32> {
     requirement.strip_prefix("1#")?.parse().ok()
 }
 
-pub(super) fn duplicate_item_id(hero_id: i32) -> Result<u32, AppError> {
+pub(crate) fn duplicate_item_id(hero_id: i32) -> Result<u32, AppError> {
     let character = config::configs::get()
         .character
         .get(hero_id)

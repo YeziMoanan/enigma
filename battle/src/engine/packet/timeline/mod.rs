@@ -82,7 +82,42 @@ fn project_frame(
     writes_reduce_hp: bool,
     hurt_info_layout: HurtInfoWireLayout,
     redeal_layout: RedealWireLayout,
-) -> Result<Option<FightStep>, ProjectionError> {
+) -> Result<Vec<FightStep>, ProjectionError> {
+    if matches!(frame.owner, FrameOwner::StageWave { .. }) {
+        let mut has_wave_change = false;
+        let mut effects = Vec::new();
+        for item in &frame.items {
+            if matches!(
+                item,
+                FrameItem::Change(change)
+                    if matches!(change.as_ref(), BattleChange::WaveAdvanced(_))
+            ) {
+                has_wave_change = true;
+                continue;
+            }
+            match item {
+                FrameItem::Change(change) => effects.extend(project_change(
+                    change.as_ref(),
+                    writes_reduce_hp,
+                    hurt_info_layout,
+                    redeal_layout,
+                )?),
+                FrameItem::Child(child) => effects.extend(project_child(
+                    child,
+                    writes_reduce_hp,
+                    hurt_info_layout,
+                    redeal_layout,
+                )?),
+                FrameItem::Cue(cue) => effects.extend(project_cue(cue, redeal_layout)),
+            }
+        }
+        let mut steps = Vec::with_capacity(2);
+        if has_wave_change {
+            steps.push(StepPacket::change_wave());
+        }
+        steps.extend(StepPacket::effect(effects));
+        return Ok(steps);
+    }
     let effects = project_frame_items(
         &frame.items,
         writes_reduce_hp,
@@ -90,15 +125,15 @@ fn project_frame(
         redeal_layout,
     )?;
     if effects.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
-    match &frame.owner {
+    let step = match &frame.owner {
         FrameOwner::Skill {
             source_uid,
             skill_id,
             card_index,
             target_uid,
-        } => Ok(Some(normalize_framed_step(
+        } => Some(normalize_framed_step(
             EffectPacket::skill_fight_step_with_card_index(
                 *skill_id,
                 *source_uid,
@@ -106,53 +141,52 @@ fn project_frame(
                 *card_index,
                 effects,
             ),
-        ))),
+        )),
         FrameOwner::ConduitAction {
             source_uid,
             group,
             skill_position,
             target_uid,
-        } => Ok(Some(normalize_framed_step(
-            EffectPacket::conduit_fight_step(
-                *source_uid,
-                target_uid.unwrap_or_default(),
-                *group,
-                *skill_position,
-                effects,
-            ),
+        } => Some(normalize_framed_step(EffectPacket::conduit_fight_step(
+            *source_uid,
+            target_uid.unwrap_or_default(),
+            *group,
+            *skill_position,
+            effects,
         ))),
-        FrameOwner::ConduitStopped { source_uid, group } => Ok(Some(normalize_framed_step(
+        FrameOwner::ConduitStopped { source_uid, group } => Some(normalize_framed_step(
             EffectPacket::conduit_fight_step(*source_uid, 0, *group, 1, effects),
-        ))),
+        )),
         FrameOwner::BuffAct {
             owner_uid,
             source_uid,
             buff_id,
             ..
-        } => Ok(Some(normalize_framed_step(
+        } => Some(normalize_framed_step(
             EffectPacket::effect_fight_step_action(*source_uid, *owner_uid, *buff_id, effects),
-        ))),
-        FrameOwner::BuffRule { emitter_uid, .. } => Ok(Some(normalize_framed_step(
+        )),
+        FrameOwner::BuffRule { emitter_uid, .. } => Some(normalize_framed_step(
             EffectPacket::effect_fight_step_action(*emitter_uid, 0, 0, effects),
-        ))),
+        )),
         FrameOwner::EventEffect {
             source_uid,
             target_uid,
-        } => Ok(Some(normalize_framed_step(
+        } => Some(normalize_framed_step(
             EffectPacket::effect_fight_step_action(*source_uid, *target_uid, 0, effects),
-        ))),
-        FrameOwner::SetupBuffAct { .. } => Ok(StepPacket::effect(effects)),
-        FrameOwner::SetupMechanic => Ok(StepPacket::effect(effects).map(|mut step| {
+        )),
+        FrameOwner::SetupBuffAct { .. } => StepPacket::effect(effects),
+        FrameOwner::SetupMechanic => StepPacket::effect(effects).map(|mut step| {
             step.fake_timeline = Some(true);
             step
-        })),
+        }),
         FrameOwner::SetupSide(_)
         | FrameOwner::SetupEntity { .. }
         | FrameOwner::StageWave { .. }
         | FrameOwner::EventRule
         | FrameOwner::RoundPhase(_)
-        | FrameOwner::Command => Ok(StepPacket::effect(effects)),
-    }
+        | FrameOwner::Command => StepPacket::effect(effects),
+    };
+    Ok(step.into_iter().collect())
 }
 
 fn project_frame_items(
@@ -187,10 +221,12 @@ fn project_child(
     writes_reduce_hp: bool,
     hurt_info_layout: HurtInfoWireLayout,
     redeal_layout: RedealWireLayout,
-) -> Result<Option<ActEffect>, ProjectionError> {
+) -> Result<Vec<ActEffect>, ProjectionError> {
     Ok(
         project_frame(frame, writes_reduce_hp, hurt_info_layout, redeal_layout)?
-            .map(EffectPacket::from_fight_step),
+            .into_iter()
+            .map(EffectPacket::from_fight_step)
+            .collect(),
     )
 }
 

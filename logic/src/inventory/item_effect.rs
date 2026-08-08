@@ -116,7 +116,7 @@ fn reward_has_id(rewards: &reward::RewardSet, target_id: i32) -> bool {
         || rewards.bp_scores.iter().any(|(id, _)| *id == target_id)
 }
 
-fn effect_ids(effect: &str) -> Vec<i32> {
+pub(super) fn effect_ids(effect: &str) -> Vec<i32> {
     effect
         .split(|c: char| !c.is_ascii_digit())
         .filter_map(|part| part.parse().ok())

@@ -40,6 +40,148 @@ fn raw_hero_selector_uses_target_id_as_hero() {
     assert!(rewards.items.is_empty());
 }
 
+#[test]
+fn reward_id_gift_never_turns_the_default_target_into_item_zero() {
+    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+    let _ = config::init(&data_dir);
+
+    let rewards = item_rewards(491003, 1, Some(0)).unwrap();
+
+    assert!(!rewards.is_empty());
+    assert!(!rewards.items.iter().any(|(id, _)| *id == 0));
+    assert!(item_rewards(491003, 1, Some(123456)).is_err());
+}
+
+#[test]
+fn optional_and_skin_gifts_validate_the_selected_material_type() {
+    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+    let _ = config::init(&data_dir);
+
+    let optional = item_rewards(510010, 2, Some(110104)).unwrap();
+    assert_eq!(optional.items, vec![(110104, 2)]);
+    assert!(item_rewards(510010, 1, Some(115013)).is_err());
+
+    let skin = item_rewards(713201, 1, Some(306204)).unwrap();
+    assert_eq!(skin.skins, vec![(306204, 1)]);
+    assert!(skin.items.is_empty());
+    assert!(item_rewards(713201, 1, Some(306205)).is_err());
+}
+
+#[tokio::test]
+async fn hero_exp_box_consumes_its_key_and_grants_the_selected_portrait() {
+    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+    let _ = config::init(&data_dir);
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at)
+         VALUES (29, 'hero-exp-box', 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    UserHeroModel::new(29, pool.clone())
+        .create_hero(3003)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO items (user_id, item_id, quantity)
+         VALUES (29, 793401, 1), (29, 770001, 3)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    use_items(
+        &pool,
+        29,
+        vec![M2qEntry {
+            material_id: Some(793401),
+            quantity: Some(1),
+            ..Default::default()
+        }],
+        Some(3003),
+    )
+    .await
+    .unwrap();
+
+    let quantities: Vec<(i64, i32)> = sqlx::query_as(
+        "SELECT item_id, quantity FROM items
+         WHERE user_id = 29 AND item_id IN (793401, 770001, 133003)
+         ORDER BY item_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(quantities, vec![(133003, 1), (770001, 0), (793401, 0)]);
+}
+
+#[tokio::test]
+async fn destiny_ticket_maxes_the_slot_and_unlocks_the_selected_stone() {
+    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+    let _ = config::init(&data_dir);
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at)
+         VALUES (30, 'destiny-ticket', 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let heroes = UserHeroModel::new(30, pool.clone());
+    heroes.create_hero(3052).await.unwrap();
+    heroes.set_rank_and_level(3052, 4, 150).await.unwrap();
+    sqlx::query(
+        "UPDATE heroes SET destiny_rank = 2, destiny_level = 3
+         WHERE user_id = 30 AND hero_id = 3052",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO items (user_id, item_id, quantity) VALUES (30, 642801, 1)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (_, changed, _, _) = use_items(
+        &pool,
+        30,
+        vec![M2qEntry {
+            material_id: Some(642801),
+            quantity: Some(1),
+            ..Default::default()
+        }],
+        Some(305201),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(changed.hero_ids, vec![3052]);
+    let progress: (i32, i32) = sqlx::query_as(
+        "SELECT destiny_rank, destiny_level FROM heroes
+         WHERE user_id = 30 AND hero_id = 3052",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(progress, (4, 10));
+    let unlocks: Vec<i32> = sqlx::query_scalar(
+        "SELECT stone_id FROM hero_destiny_stone_unlocks
+         WHERE hero_uid = (SELECT uid FROM heroes WHERE user_id = 30 AND hero_id = 3052)",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(unlocks, vec![305201]);
+    let quantity: i32 =
+        sqlx::query_scalar("SELECT quantity FROM items WHERE user_id = 30 AND item_id = 642801")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(quantity, 0);
+}
+
 #[tokio::test]
 async fn equipment_level_item_consumes_once_and_maxes_the_configured_target() {
     let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));

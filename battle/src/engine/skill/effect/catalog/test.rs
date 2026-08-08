@@ -754,3 +754,17 @@ fn active_and_passive_use_skill_type_not_damage_type() {
     assert!(catalog.is_passive(30610141));
     assert_eq!(catalog.skill_type(30950127), 2);
 }
+
+#[test]
+fn buff_owned_dynamic_skills_are_reachable_from_their_buff_roots() {
+    init_config();
+
+    let catalog = SkillEffectCatalog::from_roots(
+        config::configs::get(),
+        std::iter::empty(),
+        [31100149, 31460143],
+    );
+
+    assert!(catalog.get(31100176).is_some());
+    assert!(catalog.get(31460183).is_some());
+}

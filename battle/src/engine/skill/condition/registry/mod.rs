@@ -421,6 +421,8 @@ condition_definitions! {
     [535215] "TypeIdBuffCountMoreThan" => buff::buff_type_at_least, event_trigger(EventKind::AllyAction, None);
     [535303] "TypeIdBuffCountMoreThan" => buff::buff_type_at_least, event_trigger(EventKind::RoundEndEntitySettlement, None);
     [535304] "TypeIdBuffCountMoreThan" => buff::buff_type_at_least, event_trigger(EventKind::RoundEndAfterSettlement, None);
+    [537201] "HasTypeIdBuffTotalCountMoreThan" => buff::buff_type_at_least, event_trigger(EventKind::SkillAction, Some(SkillPhase::Immediate));
+    [537203] "HasTypeIdBuffTotalCountMoreThan" => buff::buff_type_at_least, predicate(&[]);
     [536208] "TypeIdBuffCountLessThan" => buff::buff_type_at_most, event_trigger(EventKind::SkillAction, Some(SkillPhase::AfterDamage));
     [536201] "TypeIdBuffCountLessThan" => buff::buff_type_at_most, event_trigger(EventKind::SkillAction, Some(SkillPhase::Immediate));
     [536210] "TypeIdBuffCountLessThan" => buff::buff_type_at_most, event_trigger(EventKind::SkillAction, Some(SkillPhase::AfterHit));
@@ -443,6 +445,7 @@ condition_definitions! {
     [518210] "PerHasBuffTypeLayer" => buff::per_type_layer, event_trigger(EventKind::SkillAction, Some(SkillPhase::AfterHit));
     [77203] "HasBuffGroup" => buff::buff_group, filters_behavior_targets(predicate(&[EventKind::BuffChanged]));
     [77208] "HasBuffGroup" => buff::buff_group, filters_behavior_targets(event_trigger(EventKind::SkillAction, Some(SkillPhase::AfterDamage)));
+    [668203] "HasBuffGroupIdMoreThan" => buff::buff_group_type_at_least, filters_behavior_targets(predicate(&[EventKind::BuffChanged]));
     [78208] "NoBuffGroup" => buff::no_buff_group, filters_behavior_targets(event_trigger(EventKind::SkillAction, Some(SkillPhase::AfterDamage)));
     [1007204] "FromBuffAndToBuff" => buff::from_and_to_buff, predicate(&[EventKind::BuffChanged]);
     [701201] "HasMasterHalo" => buff::master_halo, predicate(&[EventKind::BuffChanged]);
@@ -513,6 +516,7 @@ condition_definitions! {
     [762005] "BattleTagNum" => battle_tag::parse, setup_route(SetupStage::EnterFight, 0, &[]);
     [762021] "BattleTagNum" => battle_tag::parse, setup_route(SetupStage::BattleStart, 0, &[]);
     [762103] "BattleTagNum" => battle_tag::parse, setup_route(SetupStage::RoundStart, 1, &[]);
+    [1021002] "BattleTagCheck" => battle_tag::present, predicate(&[]);
     [760212] "CurUseCardEnchant" => card::current_enchant, event_trigger(EventKind::AllyAction, None);
     [760402] "CurUseCardEnchant" => card::current_enchant, event_trigger(EventKind::SkillAction, Some(SkillPhase::AfterHit));
     [16010, 16203] "TargetCareer" => career::target_career, predicate(&[]);
