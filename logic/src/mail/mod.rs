@@ -149,7 +149,7 @@ impl MailManager {
             .map(|(incr_id, _)| *incr_id)
             .collect::<Vec<_>>();
         let material_changes = rewards.material_changes();
-        let mut tx = db.begin().await?;
+        let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
         mail::mark_claimed_in_transaction(&mut tx, self.player_id, &incr_ids).await?;
         let applied_rewards =
             reward::apply_in_transaction(&mut tx, db, self.player_id, rewards).await?;
