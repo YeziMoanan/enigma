@@ -159,6 +159,14 @@ impl BattleCatalog {
             .collect()
     }
 
+    pub(crate) fn buff_type_id(self, buff_id: i32) -> i32 {
+        self.game_data
+            .skill_buff
+            .get(buff_id)
+            .map(|row| row.type_id)
+            .unwrap_or_default()
+    }
+
     pub(crate) fn buff_act_definition(
         self,
         opcode: i32,

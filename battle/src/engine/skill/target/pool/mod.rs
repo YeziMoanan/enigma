@@ -68,7 +68,9 @@ struct TargetBuff {
     id: i32,
     type_id: i32,
     source_uid: i64,
-    features: Vec<&'static str>,
+    features: Vec<String>,
+    act_kinds: Vec<crate::engine::skill::buff_act::registry::BuffActKind>,
+    monster_labels: Vec<i32>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -273,7 +275,7 @@ impl TargetPool {
                 entity.buffs = managers
                     .buff
                     .active_for(entity.uid)
-                    .map(TargetBuff::from_buff_info)
+                    .map(|buff| TargetBuff::from_buff_info(catalog, buff))
                     .collect();
                 entity.current_hp > 0 || included_uid == Some(entity.uid)
             });
@@ -296,7 +298,7 @@ impl TargetPool {
             entity.buffs = managers
                 .buff
                 .active_for(entity.uid)
-                .map(TargetBuff::from_buff_info)
+                .map(|buff| TargetBuff::from_buff_info(catalog, buff))
                 .collect();
         }
         pool
@@ -524,7 +526,7 @@ impl TargetEntity {
             buffs: entity
                 .buffs
                 .iter()
-                .map(TargetBuff::from_buff_info)
+                .map(|buff| TargetBuff::from_buff_info(catalog, buff))
                 .collect(),
         })
     }
@@ -698,19 +700,33 @@ fn base_ex_attributes(entity: &FightEntityInfo) -> ExAttributes {
 }
 
 impl TargetBuff {
-    fn from_buff_info(buff: &BuffInfo) -> Self {
+    fn from_buff_info(catalog: crate::catalog::BattleCatalog, buff: &BuffInfo) -> Self {
         let id = buff.buff_id.unwrap_or_default();
-        let row = config::try_get().and_then(|db| db.skill_buff.get(id));
+        let features = catalog.buff_feature_tokens(id);
         Self {
             id,
-            type_id: buff
-                .r#type
-                .or_else(|| row.map(|row| row.type_id))
-                .unwrap_or_default(),
+            type_id: buff.r#type.unwrap_or_else(|| catalog.buff_type_id(id)),
             source_uid: buff.from_uid.unwrap_or_default(),
-            features: row
-                .map(|row| split_features(&row.features))
-                .unwrap_or_default(),
+            features: features.clone(),
+            act_kinds: features
+                .iter()
+                .filter_map(|feature| {
+                    let opcode = feature.split('#').next()?.parse().ok()?;
+                    Some(catalog.buff_act_definition(opcode)?.kind)
+                })
+                .collect(),
+            monster_labels: features
+                .iter()
+                .filter_map(|feature| {
+                    let mut values = feature
+                        .split('#')
+                        .filter_map(|value| value.parse::<i32>().ok());
+                    let opcode = values.next()?;
+                    (catalog.buff_act_definition(opcode)?.kind
+                        == crate::engine::skill::buff_act::registry::BuffActKind::MonsterLabel)
+                        .then(|| values.next())?
+                })
+                .collect(),
         }
     }
 
@@ -718,45 +734,12 @@ impl TargetBuff {
         &self,
         kind: crate::engine::skill::buff_act::registry::BuffActKind,
     ) -> bool {
-        self.features.iter().any(|feature| {
-            let Some(opcode) = feature
-                .split('#')
-                .next()
-                .and_then(|value| value.parse::<i32>().ok())
-            else {
-                return false;
-            };
-            config::try_get()
-                .and_then(|db| db.buff_act.get(opcode))
-                .and_then(|act| crate::engine::skill::buff_act::registry::kind(opcode, &act.r#type))
-                == Some(kind)
-        })
+        self.act_kinds.contains(&kind)
     }
 
     fn has_monster_label(&self, label: i32) -> bool {
-        self.features.iter().any(|feature| {
-            let mut values = feature
-                .split('#')
-                .filter_map(|value| value.parse::<i32>().ok());
-            let Some(act_id) = values.next() else {
-                return false;
-            };
-            let is_label = config::try_get()
-                .and_then(|db| db.buff_act.get(act_id))
-                .and_then(|act| {
-                    crate::engine::skill::buff_act::registry::kind(act.id, &act.r#type)
-                })
-                == Some(crate::engine::skill::buff_act::registry::BuffActKind::MonsterLabel);
-            is_label && values.next() == Some(label)
-        })
+        self.monster_labels.contains(&label)
     }
-}
-
-fn split_features(raw: &'static str) -> Vec<&'static str> {
-    raw.split('|')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect()
 }
 
 #[cfg(test)]
