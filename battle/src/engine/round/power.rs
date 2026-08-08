@@ -10,9 +10,9 @@ pub struct ClothPower {
 }
 
 impl ClothPower {
-    pub fn for_fight(fight: &Fight) -> Option<Self> {
+    pub fn for_fight(game_data: &config::GameDB, fight: &Fight) -> Option<Self> {
         let cloth_id = fight.attacker.as_ref()?.cloth_id.unwrap_or(1);
-        let config = config::try_get()?
+        let config = game_data
             .cloth_level
             .iter()
             .find(|cloth| cloth.id == cloth_id && cloth.level == 1)?;
@@ -26,8 +26,8 @@ impl ClothPower {
         })
     }
 
-    pub fn initial(fight: &Fight) -> i32 {
-        let Some(rule) = Self::for_fight(fight) else {
+    pub fn initial(game_data: &config::GameDB, fight: &Fight) -> i32 {
+        let Some(rule) = Self::for_fight(game_data, fight) else {
             return fight
                 .attacker
                 .as_ref()

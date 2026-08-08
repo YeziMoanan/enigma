@@ -421,7 +421,7 @@ impl BattleRuntime {
                 &mut self.determinism,
                 context,
             );
-            if let Some(power) = ClothPower::for_fight(&self.fight) {
+            if let Some(power) = ClothPower::for_fight(game_data, &self.fight) {
                 self.round_state.power =
                     power.recover_round(self.round_state.power, self.round_state.cur_round);
             }
@@ -555,7 +555,7 @@ fn apply_cloth_power(
     state: &mut RoundState,
     result: &drain::DrainResult,
 ) {
-    let Some(power) = ClothPower::for_fight(fight) else {
+    let Some(power) = ClothPower::for_fight(managers.game_data(), fight) else {
         return;
     };
     let mut moved_card = false;

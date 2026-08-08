@@ -99,13 +99,16 @@ fn third_wave_entity_info_uses_the_latest_authoritative_roster() {
 #[test]
 fn refill_and_player_move_compositions_grant_cloth_power() {
     crate::test_support::init_config();
-    let power = crate::engine::round::power::ClothPower::for_fight(&Fight {
-        attacker: Some(FightTeam {
-            cloth_id: Some(1),
+    let power = crate::engine::round::power::ClothPower::for_fight(
+        crate::test_support::game_data(),
+        &Fight {
+            attacker: Some(FightTeam {
+                cloth_id: Some(1),
+                ..Default::default()
+            }),
             ..Default::default()
-        }),
-        ..Default::default()
-    })
+        },
+    )
     .unwrap();
 
     assert_eq!(

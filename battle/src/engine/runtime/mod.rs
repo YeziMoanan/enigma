@@ -257,7 +257,7 @@ impl BattleRuntime {
             managers.attribute.override_sp(uid, &attributes);
         }
         managers.attribute.sync_emitter_average(&fight);
-        let round_state = RoundState::start(&fight);
+        let round_state = RoundState::start(game_data, &fight);
         let determinism =
             RoundDeterminism::with_seed(fight.battle_id.unwrap_or_default().max(0) as u64);
         let skill_catalog = SkillEffectCatalog::from_fight(game_data, &fight);
