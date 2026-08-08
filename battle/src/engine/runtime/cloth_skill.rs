@@ -71,8 +71,12 @@ impl BattleRuntime {
                 if skill_info.cd.unwrap_or_default() > 0 || self.round_state.power < cost {
                     return None;
                 }
-                let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight)
-                    .runtime_view(&self.managers);
+                let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                    self.catalog_data
+                        .expect("battle runtime was not constructed with a catalog"),
+                    &self.fight,
+                )
+                .runtime_view(&self.managers);
                 let result = drain::run_skill(
                     &mut self.managers,
                     &pool,
@@ -344,8 +348,12 @@ impl BattleRuntime {
                     2 => definition.skills[1],
                     _ => return None,
                 };
-                let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight)
-                    .runtime_view(&self.managers);
+                let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                    self.catalog_data
+                        .expect("battle runtime was not constructed with a catalog"),
+                    &self.fight,
+                )
+                .runtime_view(&self.managers);
                 if !self.managers.buff.has_buff_act_kind(
                     owner_uid,
                     crate::engine::skill::buff_act::registry::BuffActKind::EzioBigSkill,

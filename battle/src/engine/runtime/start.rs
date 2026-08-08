@@ -22,7 +22,10 @@ fn run_start_schedule(
     determinism: &mut RoundDeterminism,
     hand_size: usize,
 ) -> Result<(Vec<FightStep>, Vec<CardInfo>), String> {
-    let pool = crate::engine::skill::target::TargetPool::from_fight(fight);
+    let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+        managers.catalog(),
+        fight,
+    );
     let context = crate::engine::skill::target::TargetContext {
         battle_id: fight.battle_id.unwrap_or_default(),
         current_round: 1,
@@ -104,7 +107,11 @@ impl BattleRuntime {
     pub(super) fn build_start_round_from_schedule(&mut self) -> Result<FightRound, String> {
         let game_data = self.game_data();
         let battle_id = self.fight.battle_id.unwrap_or_default();
-        let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
         let context = crate::engine::skill::target::TargetContext {
             battle_id,
             current_round: self.round_state.cur_round,
@@ -153,7 +160,11 @@ impl BattleRuntime {
         self.determinism.enqueue_card_draws(
             crate::engine::manager::card::start::configured_refill_draws(game_data, &self.fight)?,
         );
-        let opening_pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        let opening_pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
         let opening_team_cards = crate::engine::mechanic::card::CardMechanic.special_team_cards(
             &opening_pool,
             &self.managers,

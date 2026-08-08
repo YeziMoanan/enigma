@@ -1059,7 +1059,11 @@ fn condition_kind_matches(
                     .any(crate::engine::skill::buff_act::forces_career_restraint)
             });
             let restrained = forces_restraint
-                || crate::engine::damage::handler::restrains_target(attacker.career, defender);
+                || crate::engine::damage::handler::restrains_target(
+                    pool.catalog(),
+                    attacker.career,
+                    defender,
+                );
             restrained == matches!(condition.kind, ParsedConditionKind::HurtRestrained)
         }
         ParsedConditionKind::EntityCount {

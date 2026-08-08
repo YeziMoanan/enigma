@@ -28,7 +28,8 @@ pub struct WaveManager {
 }
 
 impl WaveManager {
-    pub fn seed_with_game_data(db: &config::GameDB, fight: &Fight) -> Self {
+    pub fn seed_with_catalog(catalog: crate::catalog::BattleCatalog, fight: &Fight) -> Self {
+        let db = catalog.game_data();
         let Some(battle) = db.battle.get(fight.battle_id.unwrap_or_default()) else {
             return Self::default();
         };
@@ -40,11 +41,12 @@ impl WaveManager {
             .filter_map(|group_id| db.monster_group.get(*group_id))
             .map(|group| monster_ids(&group.monster).len())
             .sum();
-        let occupied_offset = crate::engine::skill::target::TargetPool::from_fight(fight)
-            .entities()
-            .filter_map(|entity| (entity.uid < 0).then_some(entity.uid.unsigned_abs() as usize))
-            .max()
-            .unwrap_or_default();
+        let occupied_offset =
+            crate::engine::skill::target::TargetPool::from_fight_with_catalog(catalog, fight)
+                .entities()
+                .filter_map(|entity| (entity.uid < 0).then_some(entity.uid.unsigned_abs() as usize))
+                .max()
+                .unwrap_or_default();
         Self {
             group_ids,
             current_index,
@@ -55,7 +57,10 @@ impl WaveManager {
 
     #[cfg(test)]
     pub fn seed(fight: &Fight) -> Self {
-        Self::seed_with_game_data(crate::test_support::game_data(), fight)
+        Self::seed_with_catalog(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            fight,
+        )
     }
 
     pub(crate) fn advance(&mut self) -> anyhow::Result<Option<WaveRoster>> {

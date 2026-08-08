@@ -77,7 +77,11 @@ impl BattleRuntime {
 
     /// Evaluates the current terminal or wave outcome from manager-owned state.
     pub fn outcome(&self) -> BattleOutcome {
-        let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
         battle_outcome(&self.fight, &pool, &self.managers)
     }
 

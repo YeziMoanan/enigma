@@ -439,7 +439,7 @@ pub fn run_promotions(
     context: TargetContext,
     promotions: impl IntoIterator<Item = crate::engine::fight::reserve::Promotion>,
 ) -> Result<DrainResult, DrainError> {
-    let pool = TargetPool::from_fight(fight);
+    let pool = TargetPool::from_fight_with_catalog(managers.catalog(), fight);
     let mut result = DrainResult::default();
     for promotion in promotions {
         let entering_uid = promotion.entering_uid;

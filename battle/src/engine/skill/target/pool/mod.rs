@@ -146,6 +146,7 @@ pub struct TargetContext {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TargetPool {
+    catalog_data: Option<crate::catalog::BattleCatalog>,
     pub attacker_main: Vec<TargetEntity>,
     pub attacker_all: Vec<TargetEntity>,
     pub defender_main: Vec<TargetEntity>,
@@ -158,8 +159,17 @@ pub struct TargetPool {
 }
 
 impl TargetPool {
+    #[cfg(test)]
     pub fn from_fight(fight: &Fight) -> Self {
+        Self::from_fight_with_catalog(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            fight,
+        )
+    }
+
+    pub fn from_fight_with_catalog(catalog: crate::catalog::BattleCatalog, fight: &Fight) -> Self {
         let mut pool = Self {
+            catalog_data: Some(catalog),
             boss_model_ids: configured_boss_model_ids(fight),
             ..Self::default()
         };
@@ -221,6 +231,11 @@ impl TargetPool {
             pool.teams.insert(crate::engine::manager::emitter::UID, 1);
         }
         pool
+    }
+
+    pub(crate) fn catalog(&self) -> crate::catalog::BattleCatalog {
+        self.catalog_data
+            .expect("target pool was not constructed with a catalog")
     }
 
     pub(crate) fn runtime_view(&self, managers: &BattleManagers) -> Self {

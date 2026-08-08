@@ -25,7 +25,11 @@ impl BattleRuntime {
         team: i32,
         emitter_uid: i64,
     ) -> Result<Vec<FightStep>, String> {
-        let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
         let result = schedule::run_player_action_queue(
             &mut self.managers,
             &pool,
@@ -92,7 +96,11 @@ impl BattleRuntime {
         let mut ai_envelope = self.managers.card.ai_queue().to_vec();
 
         let catalog = &mut self.catalog;
-        let mut pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        let mut pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
         let context = crate::engine::skill::target::TargetContext {
             battle_id: self.fight.battle_id.unwrap_or_default(),
             current_round: self.round_state.cur_round,
@@ -178,7 +186,11 @@ impl BattleRuntime {
         self.objectives.record_promotions(&promotions);
         if !promotions.is_empty() {
             self.managers.sync_roster(&self.fight);
-            pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+            pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                self.catalog_data
+                    .expect("battle runtime was not constructed with a catalog"),
+                &self.fight,
+            );
         }
         if !promotions.is_empty() {
             fight_steps.extend(project_result(
@@ -341,7 +353,11 @@ impl BattleRuntime {
                 game_data,
                 crate::engine::manager::wave::entering_entities(&change),
             );
-            pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+            pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                self.catalog_data
+                    .expect("battle runtime was not constructed with a catalog"),
+                &self.fight,
+            );
             fight_steps.extend(project_result(
                 schedule::run_wave_entry(
                     &mut self.managers,

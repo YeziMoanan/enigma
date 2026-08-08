@@ -42,6 +42,14 @@ pub struct BattleCatalog {
     lingering_glow_attribute_buff: Option<LingeringGlowAttributeBuff>,
 }
 
+impl PartialEq for BattleCatalog {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.game_data, other.game_data)
+    }
+}
+
+impl Eq for BattleCatalog {}
+
 impl BattleCatalog {
     pub fn new(game_data: &'static config::GameDB) -> Self {
         Self {
@@ -190,6 +198,50 @@ impl BattleCatalog {
             .skill
             .get(skill_id)
             .is_some_and(|skill| skill.hero_id == model_id && self.skill_is_big(skill_id))
+    }
+
+    pub(crate) fn fight_const_value(self, id: i32) -> i32 {
+        self.game_data
+            .fight_const
+            .get(id)
+            .and_then(|row| row.value.parse().ok())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn career_multiplier(self, source: i32, target: i32) -> i32 {
+        let Some(row) = self.game_data.fight_effect.get(source) else {
+            return 1000;
+        };
+        match target {
+            1 => row.career1,
+            2 => row.career2,
+            3 => row.career3,
+            4 => row.career4,
+            5 => row.career5,
+            6 => row.career6,
+            7 => row.career7,
+            8 => row.career8,
+            _ => 1000,
+        }
+    }
+
+    pub(crate) fn strongest_career_multiplier(self, source: i32) -> i32 {
+        let Some(row) = self.game_data.fight_effect.get(source) else {
+            return 1000;
+        };
+        [
+            row.career1,
+            row.career2,
+            row.career3,
+            row.career4,
+            row.career5,
+            row.career6,
+            row.career7,
+            row.career8,
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(1000)
     }
 
     fn skill_effect(self, skill_id: i32) -> Option<&'static config::skill_effect::SkillEffect> {
@@ -529,6 +581,24 @@ mod tests {
         assert_eq!(catalog.skill_big_skill_point(-1), 0);
         assert!(!catalog.skill_is_big(-1));
         assert_eq!(catalog.skill_effect_tag(-1), 0);
+    }
+
+    #[test]
+    fn normalizes_damage_affinity_data() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.fight_const_value(11), 100);
+        assert_eq!(catalog.fight_const_value(12), 150);
+        assert_eq!(catalog.fight_const_value(13), 300);
+        assert_eq!(catalog.fight_const_value(14), 0);
+        assert_eq!(catalog.fight_const_value(-1), 0);
+        assert_eq!(catalog.career_multiplier(1, 4), 1300);
+        assert_eq!(catalog.career_multiplier(1, 1), 1000);
+        assert_eq!(catalog.career_multiplier(1, -1), 1000);
+        assert_eq!(catalog.career_multiplier(-1, 4), 1000);
+        assert_eq!(catalog.strongest_career_multiplier(1), 1300);
+        assert_eq!(catalog.strongest_career_multiplier(-1), 1000);
     }
 
     #[test]

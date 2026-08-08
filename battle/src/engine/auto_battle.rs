@@ -42,7 +42,8 @@ pub(crate) fn plan(
     determinism: &RoundDeterminism,
     devices_opers: Vec<FightDeviceOper>,
 ) -> AutoRoundReply {
-    let pool = TargetPool::from_fight(fight).runtime_view(managers);
+    let pool =
+        TargetPool::from_fight_with_catalog(managers.catalog(), fight).runtime_view(managers);
     let mut cards = managers.card.clone();
     let mut normal_ap = round_state.act_point.max(0);
     if !apply_prefix(

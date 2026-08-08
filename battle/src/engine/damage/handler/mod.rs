@@ -25,7 +25,7 @@ mod origin;
 mod resolve;
 
 pub(crate) use affinity::restrains_target;
-use affinity::{critical_technique_bonus, regular_multiplier, strongest_career_multiplier};
+use affinity::{critical_technique_bonus, regular_multiplier};
 pub(crate) use critical::{
     chance as crit_chance, damage_multiplier as crit_damage_multiplier,
     excess_rate as excess_crit_rate,
@@ -578,6 +578,7 @@ impl BehaviorHandler for Handler {
                                     from_uid: source_uid,
                                     is_crit,
                                     career_restraint: restrains_target(
+                                        context.managers.catalog(),
                                         context.modifiers.attack_career.unwrap_or(source.career),
                                         target,
                                     ),

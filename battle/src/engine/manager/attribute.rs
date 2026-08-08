@@ -11,10 +11,10 @@ pub struct AttributeManager {
 }
 
 impl AttributeManager {
-    pub fn seed(&mut self, fight: &Fight) {
+    pub fn seed_with_catalog(&mut self, catalog: crate::catalog::BattleCatalog, fight: &Fight) {
         self.base_values.clear();
         self.values.clear();
-        let pool = TargetPool::from_fight(fight);
+        let pool = TargetPool::from_fight_with_catalog(catalog, fight);
         let emitter = pool.entity(crate::engine::manager::emitter::UID);
         for target in pool.entities().chain(emitter) {
             self.register_values(
@@ -47,6 +47,14 @@ impl AttributeManager {
         {
             self.register(entity);
         }
+    }
+
+    #[cfg(test)]
+    pub fn seed(&mut self, fight: &Fight) {
+        self.seed_with_catalog(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            fight,
+        );
     }
 
     pub fn register(&mut self, entity: &FightEntityInfo) {

@@ -994,7 +994,7 @@ impl BattleManagers {
             fight_version: fight.version.unwrap_or_default(),
             ..Self::default()
         };
-        managers.attribute.seed(fight);
+        managers.attribute.seed_with_catalog(catalog, fight);
         managers.battle_rule = battle_rule::BattleRuleManager::seed(fight);
         managers.hp.seed(fight);
         managers.toughness.seed_with_game_data(game_data, fight);
@@ -1005,7 +1005,7 @@ impl BattleManagers {
         managers.card.seed(fight);
         managers.conduit = ConduitManager::seed_with_game_data(game_data, fight);
         managers.entity = entity::EntityManager::seed_with_game_data(game_data, fight);
-        managers.wave = wave::WaveManager::seed_with_game_data(game_data, fight);
+        managers.wave = wave::WaveManager::seed_with_catalog(catalog, fight);
         managers
     }
 

@@ -21,7 +21,7 @@ use crate::engine::{
 
 use super::{
     affinity::career_multiplier_against, critical_technique_bonus, regular_multiplier,
-    restrains_target, strongest_career_multiplier,
+    restrains_target,
 };
 
 #[derive(Clone, Copy)]
@@ -168,6 +168,7 @@ pub fn resolve_configured_replacement_damage_command(
             from_uid: request.source_uid,
             is_crit: request.is_crit,
             career_restraint: restrains_target(
+                runtime.pool.catalog(),
                 request.attack_career.unwrap_or(source.career),
                 target,
             ),
@@ -240,7 +241,11 @@ fn resolve_row_damage_result(
             attack_replacement,
         },
     );
-    let career_restraint = restrains_target(request.attack_career.unwrap_or(source.career), target);
+    let career_restraint = restrains_target(
+        runtime.pool.catalog(),
+        request.attack_career.unwrap_or(source.career),
+        target,
+    );
     (amount > 0).then_some(ResolvedRowDamage {
         source_uid,
         target_uid,
@@ -701,12 +706,15 @@ pub(super) fn direct_damage(
     } else {
         source.career
     };
-    let natural_career = career_multiplier_against(source_career, target);
+    let natural_career = career_multiplier_against(runtime.pool.catalog(), source_career, target);
     let career = if formula_rules.applies_career && (natural_career > 1000 || forced_career) {
         (if natural_career > 1000 {
             natural_career
         } else {
-            strongest_career_multiplier(source_career)
+            runtime
+                .pool
+                .catalog()
+                .strongest_career_multiplier(source_career)
         }) + source_active_features
             .iter()
             .filter(|feature| feature.owner_uid == source.uid)
@@ -807,7 +815,7 @@ pub(super) fn direct_damage(
     let final_rate = (1000 + separate_final_delta).max(300);
 
     let source_crit = attributes.get(source.uid, AttrId::CriticalDmg);
-    let technique_crit = critical_technique_bonus(source, target.level, 12);
+    let technique_crit = critical_technique_bonus(runtime.pool.catalog(), source, target.level, 12);
     let buff_crit = attribute_delta(source, AttrId::CriticalDmg)
         + attack_attribute_delta(AttrId::CriticalDmg)
         + attack_local_attribute(AttrId::CriticalDmg);
