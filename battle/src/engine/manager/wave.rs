@@ -63,12 +63,16 @@ impl WaveManager {
         )
     }
 
-    pub(crate) fn advance(&mut self) -> anyhow::Result<Option<WaveRoster>> {
+    pub(crate) fn advance(
+        &mut self,
+        catalog: crate::catalog::BattleCatalog,
+    ) -> anyhow::Result<Option<WaveRoster>> {
         let next_index = self.current_index.saturating_add(1);
         let Some(&group_id) = self.group_ids.get(next_index) else {
             return Ok(None);
         };
-        let (entitys, sub_entitys) = Defender::build_wave_entities(
+        let (entitys, sub_entitys) = Defender::build_wave(
+            catalog,
             group_id,
             self.monster_max,
             DEFENDER_TEAM,
@@ -124,15 +128,16 @@ mod tests {
             ..Default::default()
         };
         let mut waves = WaveManager::seed(&fight);
+        let catalog = crate::catalog::BattleCatalog::new(crate::test_support::game_data());
 
         assert!(waves.has_next_wave());
 
-        let second = waves.advance().unwrap().unwrap();
+        let second = waves.advance(catalog).unwrap().unwrap();
         assert_eq!(second.wave, 2);
         assert_eq!(second.entering_uids, vec![-3, -4]);
         assert_eq!(second.entitys.len(), 2);
 
-        let third = waves.advance().unwrap().unwrap();
+        let third = waves.advance(catalog).unwrap().unwrap();
         assert_eq!(third.wave, 3);
         assert_eq!(third.entering_uids, vec![-5, -6]);
         assert!(waves.has_next_wave());

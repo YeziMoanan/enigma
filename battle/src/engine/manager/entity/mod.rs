@@ -165,6 +165,7 @@ impl EntityManager {
 
     pub(crate) fn execute_command(
         &mut self,
+        catalog: crate::catalog::BattleCatalog,
         command: EntityCommand,
         hp: &HpManager,
     ) -> Result<EntityChanges, EntityCommandError> {
@@ -182,7 +183,7 @@ impl EntityManager {
                     .copied()
                     .ok_or(EntityCommandError::MissingSource)?;
                 let uid = self.next_special_uid;
-                let entity = Defender::build_monster_with_uid(model_id, uid, position, team_type)
+                let entity = Defender::build_monster(catalog, model_id, uid, position, team_type)
                     .map_err(|_| EntityCommandError::MissingModel)?;
                 self.next_special_uid -= 1;
                 self.teams.insert(uid, team_type);
@@ -202,7 +203,7 @@ impl EntityManager {
                     .ok_or(EntityCommandError::MissingSource)?;
                 let uid = self.next_special_uid;
                 let entity =
-                    Defender::build_monster_with_uid(model_id, uid, SPECIAL_POSITION, team_type)
+                    Defender::build_monster(catalog, model_id, uid, SPECIAL_POSITION, team_type)
                         .map_err(|_| EntityCommandError::MissingModel)?;
                 self.next_special_uid -= 1;
                 self.teams.insert(uid, team_type);
@@ -223,7 +224,8 @@ impl EntityManager {
                     .get(&command.target_uid)
                     .ok_or(EntityCommandError::MissingSource)?
                     .clone();
-                let mut entity = Defender::build_monster_with_uid(
+                let mut entity = Defender::build_monster(
+                    catalog,
                     model_id,
                     command.target_uid,
                     current.position.unwrap_or_default(),
@@ -231,7 +233,8 @@ impl EntityManager {
                 )
                 .map_err(|_| EntityCommandError::MissingModel)?;
                 let intrinsic_identity = current.model_id.and_then(|current_model_id| {
-                    Defender::build_monster_with_uid(
+                    Defender::build_monster(
+                        catalog,
                         current_model_id,
                         command.target_uid,
                         current.position.unwrap_or_default(),

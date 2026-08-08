@@ -629,7 +629,8 @@ impl BattleManagers {
         &mut self,
         command: entity::EntityCommand,
     ) -> Result<entity::EntityChanges, entity::EntityCommandError> {
-        let mut changes = self.entity.execute_command(command, &self.hp)?;
+        let catalog = self.catalog();
+        let mut changes = self.entity.execute_command(catalog, command, &self.hp)?;
         if matches!(changes.operation, entity::EntityOperation::Transform { .. }) {
             changes.entity.ex_point = Some(self.ex_point.get(changes.target_uid));
             changes.entity.shield_value = Some(self.hp.shield(changes.target_uid));
@@ -878,7 +879,8 @@ impl BattleManagers {
         fight: &mut Fight,
     ) -> anyhow::Result<Option<wave::WaveAdvanced>> {
         self.sync_entities(fight);
-        let Some(roster) = self.wave.advance()? else {
+        let catalog = self.catalog();
+        let Some(roster) = self.wave.advance(catalog)? else {
             return Ok(None);
         };
         self.entity

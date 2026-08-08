@@ -282,7 +282,14 @@ pub(crate) fn monster_instance_ex_stats_with_game_data(
 }
 
 pub fn monster_stats(model_id: i32, level: i32) -> Option<Stats> {
-    let game = configs::get();
+    configured_monster_stats(configs::get(), model_id, level)
+}
+
+pub(crate) fn configured_monster_stats(
+    game: &config::GameDB,
+    model_id: i32,
+    level: i32,
+) -> Option<Stats> {
     let monster = game.monster.get(model_id)?;
     let skill = game.monster_skill_template.get(monster.skill_template)?;
     let level = if level > 0 {

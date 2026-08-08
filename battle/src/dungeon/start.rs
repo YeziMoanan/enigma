@@ -35,7 +35,7 @@ pub fn build_fight(
         params,
     )?;
     let defender_uid_offset = attacker.reserved_uid_offset;
-    let mut defender = Defender::get(battle_id, defender_uid_offset)?;
+    let mut defender = Defender::configured(catalog, battle_id, defender_uid_offset)?;
     attacker.team.sp_entitys = defender.attacker_sp_entitys;
     attacker.team.sp_fight_entities = defender.attacker_sp_fight_entities;
     apply_battle_rules(

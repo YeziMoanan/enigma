@@ -163,7 +163,8 @@ impl Attacker {
         if use_configured_aids {
             for (index, monster_id) in aid_ids.iter().copied().enumerate() {
                 let uid = -i64::try_from(index + 1)?;
-                entitys.push(Defender::build_monster_with_uid(
+                entitys.push(Defender::build_monster(
+                    catalog,
                     monster_id,
                     uid,
                     (index + 1) as i32,
@@ -197,7 +198,7 @@ impl Attacker {
             if *hero_uid == 0 {
                 continue;
             }
-            if let Some(entity) = configured_aid(&aid_ids, *hero_uid, position)? {
+            if let Some(entity) = configured_aid(catalog, &aid_ids, *hero_uid, position)? {
                 entitys.push(entity);
                 continue;
             }
@@ -223,7 +224,7 @@ impl Attacker {
             if *hero_uid == 0 {
                 continue;
             }
-            if let Some(entity) = configured_aid(&aid_ids, *hero_uid, -1)? {
+            if let Some(entity) = configured_aid(catalog, &aid_ids, *hero_uid, -1)? {
                 sub_entitys.push(entity);
                 continue;
             }
@@ -543,7 +544,12 @@ fn validate_composition(
     Ok(())
 }
 
-fn configured_aid(aid_ids: &[i32], uid: i64, position: i32) -> Result<Option<FightEntityInfo>> {
+fn configured_aid(
+    catalog: crate::catalog::BattleCatalog,
+    aid_ids: &[i32],
+    uid: i64,
+    position: i32,
+) -> Result<Option<FightEntityInfo>> {
     if uid >= 0 {
         return Ok(None);
     }
@@ -552,8 +558,8 @@ fn configured_aid(aid_ids: &[i32], uid: i64, position: i32) -> Result<Option<Fig
     let monster_id = *aid_ids
         .get(index)
         .ok_or_else(|| anyhow::anyhow!("configured aid uid {uid} is not declared by the battle"))?;
-    Ok(Some(Defender::build_monster_with_uid(
-        monster_id, uid, position, 1,
+    Ok(Some(Defender::build_monster(
+        catalog, monster_id, uid, position, 1,
     )?))
 }
 
