@@ -313,6 +313,24 @@ impl BattleCatalog {
             .unwrap_or_default()
     }
 
+    pub(crate) fn entity_base_technic(
+        self,
+        model_id: i32,
+        level: i32,
+        entity_type: Option<i32>,
+        fallback: i32,
+    ) -> i32 {
+        if entity_type != Some(1) {
+            return fallback;
+        }
+        self.game_data
+            .character_level
+            .iter()
+            .find(|row| row.hero_id == model_id && row.level == level)
+            .map(|row| row.technic)
+            .unwrap_or(fallback)
+    }
+
     fn configured_battle(
         self,
         fight: &sonettobuf::Fight,
@@ -737,6 +755,17 @@ mod tests {
         assert_eq!(catalog.entity_damage_type(900016101, Some(2)), 1);
         assert_eq!(catalog.entity_damage_type(-1, Some(1)), 0);
         assert_eq!(catalog.entity_damage_type(-1, Some(2)), 0);
+    }
+
+    #[test]
+    fn normalizes_entity_base_technic() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.entity_base_technic(3081, 1, Some(1), 99), 273);
+        assert_eq!(catalog.entity_base_technic(3081, 2, Some(1), 99), 99);
+        assert_eq!(catalog.entity_base_technic(3081, 1, Some(2), 99), 99);
+        assert_eq!(catalog.entity_base_technic(-1, 1, Some(1), 99), 99);
     }
 
     #[test]

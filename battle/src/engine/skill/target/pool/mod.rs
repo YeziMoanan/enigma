@@ -507,7 +507,12 @@ impl TargetEntity {
             defense: attr.and_then(|attr| attr.defense).unwrap_or_default(),
             mdefense: attr.and_then(|attr| attr.mdefense).unwrap_or_default(),
             technic: attr.and_then(|attr| attr.technic).unwrap_or_default(),
-            base_technic: base_technic(entity),
+            base_technic: catalog.entity_base_technic(
+                entity.model_id.unwrap_or_default(),
+                entity.level.unwrap_or_default(),
+                entity.entity_type,
+                attr.and_then(|attr| attr.technic).unwrap_or_default(),
+            ),
             crit_rate: ex.crit_rate,
             crit_resist: ex.crit_resist,
             crit_dmg: ex.crit_dmg,
@@ -596,28 +601,6 @@ fn battle_tags(entity: &FightEntityInfo) -> Vec<i32> {
     tags.sort_unstable();
     tags.dedup();
     tags
-}
-
-fn base_technic(entity: &FightEntityInfo) -> i32 {
-    let fallback = entity
-        .attr
-        .as_ref()
-        .and_then(|attr| attr.technic)
-        .unwrap_or_default();
-    if entity.entity_type != Some(1) {
-        return fallback;
-    }
-    let Some(db) = config::try_get() else {
-        return fallback;
-    };
-    db.character_level
-        .iter()
-        .find(|row| {
-            row.hero_id == entity.model_id.unwrap_or_default()
-                && row.level == entity.level.unwrap_or_default()
-        })
-        .map(|row| row.technic)
-        .unwrap_or(fallback)
 }
 
 #[derive(Debug, Clone, Copy)]
