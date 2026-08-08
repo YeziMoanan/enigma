@@ -1,5 +1,16 @@
+use crate::engine::manager::field::{FieldDefinition, FieldThreshold};
 use crate::engine::mechanic::impromptu::ImpromptuDefinition;
 use crate::engine::skill::rule::{CommandOrigin, RuleDomain};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MagicCircleDefinition {
+    pub duration: i32,
+    pub allied_attributes: Vec<(i32, i32)>,
+    pub enemy_attributes: Vec<(i32, i32)>,
+    pub allied_buffs: Vec<i32>,
+    pub enemy_buffs: Vec<i32>,
+    pub self_skills: Vec<i32>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LingeringGlowAttributeBuff {
@@ -49,6 +60,67 @@ impl BattleCatalog {
     pub(crate) fn impromptu_definition(self) -> Option<ImpromptuDefinition> {
         self.impromptu_definition
     }
+
+    pub(crate) fn magic_circle(self, circle_id: i32) -> Option<MagicCircleDefinition> {
+        magic_circle_definition(self.game_data, circle_id)
+    }
+
+    pub(crate) fn magic_circle_thresholds(self) -> Vec<FieldThreshold> {
+        self.game_data
+            .fight_dnsz
+            .iter()
+            .filter_map(|threshold| {
+                let circle = self.game_data.magic_circle.get(threshold.id)?;
+                Some(FieldThreshold {
+                    level: threshold.level,
+                    progress: threshold.progress,
+                    definition: FieldDefinition {
+                        field_id: threshold.id,
+                        duration: circle.round,
+                    },
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn try_global() -> Option<Self> {
+        config::try_get().map(Self::new)
+    }
+}
+
+fn magic_circle_definition(
+    game_data: &config::GameDB,
+    circle_id: i32,
+) -> Option<MagicCircleDefinition> {
+    let row = game_data.magic_circle.get(circle_id)?;
+    Some(MagicCircleDefinition {
+        duration: row.round,
+        allied_attributes: parse_attribute_pairs(&row.self_attrs),
+        enemy_attributes: parse_attribute_pairs(&row.enemy_attrs),
+        allied_buffs: parse_positive_ids(&row.self_buff),
+        enemy_buffs: parse_positive_ids(&row.enemy_buff),
+        self_skills: parse_positive_ids(&row.self_skills),
+    })
+}
+
+fn parse_attribute_pairs(raw: &str) -> Vec<(i32, i32)> {
+    parse_integers(raw)
+        .chunks_exact(2)
+        .map(|pair| (pair[0], pair[1]))
+        .collect()
+}
+
+fn parse_positive_ids(raw: &str) -> Vec<i32> {
+    parse_integers(raw)
+        .into_iter()
+        .filter(|id| *id > 0)
+        .collect()
+}
+
+fn parse_integers(raw: &str) -> Vec<i32> {
+    raw.split(['|', '#'])
+        .filter_map(|value| value.trim().parse().ok())
+        .collect()
 }
 
 fn configured_fight_version(raw: Option<&str>) -> ConfiguredFightVersion {
@@ -190,6 +262,65 @@ mod tests {
                 .unwrap()
                 * 2
         );
+    }
+
+    #[test]
+    fn normalizes_magic_circle_attributes_and_thresholds() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.magic_circle(30001),
+            Some(MagicCircleDefinition {
+                duration: 3,
+                allied_attributes: vec![(205, 150)],
+                enemy_attributes: Vec::new(),
+                allied_buffs: Vec::new(),
+                enemy_buffs: Vec::new(),
+                self_skills: Vec::new(),
+            })
+        );
+        assert_eq!(
+            catalog.magic_circle_thresholds(),
+            vec![
+                FieldThreshold {
+                    level: 1,
+                    progress: 0,
+                    definition: FieldDefinition {
+                        field_id: 30001,
+                        duration: 3,
+                    },
+                },
+                FieldThreshold {
+                    level: 2,
+                    progress: 50,
+                    definition: FieldDefinition {
+                        field_id: 30002,
+                        duration: 3,
+                    },
+                },
+                FieldThreshold {
+                    level: 3,
+                    progress: 120,
+                    definition: FieldDefinition {
+                        field_id: 30003,
+                        duration: 2,
+                    },
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn normalizes_magic_circle_linked_battle_rules() {
+        crate::test_support::init_config();
+
+        let blood_domain = BattleCatalog::new(crate::test_support::game_data())
+            .magic_circle(100051)
+            .unwrap();
+
+        assert_eq!(blood_domain.allied_buffs, vec![308801312]);
+        assert_eq!(blood_domain.self_skills, vec![308801821]);
     }
 
     #[test]

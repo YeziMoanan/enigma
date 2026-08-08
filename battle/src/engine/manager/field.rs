@@ -148,7 +148,7 @@ impl FieldManager {
 
     pub fn attribute_delta(
         &self,
-        game_data: &config::GameDB,
+        catalog: crate::catalog::BattleCatalog,
         uid: i64,
         attr_id: AttrId,
         pool: &TargetPool,
@@ -158,18 +158,17 @@ impl FieldManager {
         };
         self.states()
             .filter_map(|state| {
-                let row = game_data.magic_circle.get(state.definition.field_id)?;
+                let definition = catalog.magic_circle(state.definition.field_id)?;
                 Some(if state.team == entity_team {
-                    row.self_attrs.as_str()
+                    definition.allied_attributes
                 } else {
-                    row.enemy_attrs.as_str()
+                    definition.enemy_attributes
                 })
             })
-            .flat_map(|raw| raw.split(['#', '|']))
-            .filter_map(|value| value.trim().parse::<i32>().ok())
-            .collect::<Vec<_>>()
-            .chunks_exact(2)
-            .filter_map(|pair| (pair[0] == attr_id as i32).then_some(pair[1]))
+            .flatten()
+            .filter_map(|(configured_attr, delta)| {
+                (configured_attr == attr_id as i32).then_some(delta)
+            })
             .sum()
     }
 
@@ -502,7 +501,7 @@ mod tests {
 
         assert_eq!(
             manager.attribute_delta(
-                crate::test_support::game_data(),
+                crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
                 10,
                 AttrId::DmgBonus,
                 &pool
@@ -511,7 +510,7 @@ mod tests {
         );
         assert_eq!(
             manager.attribute_delta(
-                crate::test_support::game_data(),
+                crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
                 -1,
                 AttrId::DmgBonus,
                 &pool
