@@ -527,7 +527,11 @@ impl TargetEntity {
             passive_skills: entity.passive_skill.clone(),
             destiny_stone: entity.destiny_stone.unwrap_or_default(),
             destiny_rank: entity.destiny_rank.unwrap_or_default(),
-            battle_tags: battle_tags(entity),
+            battle_tags: catalog.entity_battle_tags(
+                entity.model_id.unwrap_or_default(),
+                entity.destiny_stone.unwrap_or_default(),
+                entity.destiny_rank.unwrap_or_default(),
+            ),
             buffs: entity
                 .buffs
                 .iter()
@@ -579,28 +583,6 @@ impl TargetEntity {
             .iter()
             .any(|career| other.careers.contains(career))
     }
-}
-
-fn battle_tags(entity: &FightEntityInfo) -> Vec<i32> {
-    let stone_tags = crate::engine::entity::destiny::Destiny::battle_tags(
-        entity.destiny_stone.unwrap_or_default(),
-        entity.destiny_rank.unwrap_or_default(),
-    );
-    let mut tags = stone_tags.unwrap_or_else(|| {
-        config::try_get()
-            .and_then(|db| db.character.get(entity.model_id.unwrap_or_default()))
-            .map(|character| {
-                character
-                    .battle_tag
-                    .split('#')
-                    .filter_map(|tag| tag.parse().ok())
-                    .collect()
-            })
-            .unwrap_or_default()
-    });
-    tags.sort_unstable();
-    tags.dedup();
-    tags
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -331,6 +331,46 @@ impl BattleCatalog {
             .unwrap_or(fallback)
     }
 
+    pub(crate) fn entity_battle_tags(
+        self,
+        model_id: i32,
+        destiny_stone: i32,
+        destiny_rank: i32,
+    ) -> Vec<i32> {
+        let stone_tags = if destiny_stone <= 0 || destiny_rank <= 0 {
+            None
+        } else {
+            self.game_data
+                .character_destiny_facets_consume
+                .iter()
+                .find(|row| row.facets_id == destiny_stone)
+                .and_then(|row| {
+                    let tags = row
+                        .tag
+                        .split('#')
+                        .filter_map(|tag| tag.parse().ok())
+                        .collect::<Vec<_>>();
+                    (!tags.is_empty()).then_some(tags)
+                })
+        };
+        let mut tags = stone_tags.unwrap_or_else(|| {
+            self.game_data
+                .character
+                .get(model_id)
+                .map(|character| {
+                    character
+                        .battle_tag
+                        .split('#')
+                        .filter_map(|tag| tag.parse().ok())
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
+        tags.sort_unstable();
+        tags.dedup();
+        tags
+    }
+
     fn configured_battle(
         self,
         fight: &sonettobuf::Fight,
@@ -766,6 +806,23 @@ mod tests {
         assert_eq!(catalog.entity_base_technic(3081, 2, Some(1), 99), 99);
         assert_eq!(catalog.entity_base_technic(3081, 1, Some(2), 99), 99);
         assert_eq!(catalog.entity_base_technic(-1, 1, Some(1), 99), 99);
+    }
+
+    #[test]
+    fn normalizes_entity_battle_tags() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.entity_battle_tags(3081, 0, 0), vec![101, 105, 117]);
+        assert_eq!(
+            catalog.entity_battle_tags(3081, 308101, 1),
+            vec![102, 114, 116]
+        );
+        assert_eq!(
+            catalog.entity_battle_tags(3081, 308101, 0),
+            vec![101, 105, 117]
+        );
+        assert!(catalog.entity_battle_tags(-1, -1, -1).is_empty());
     }
 
     #[test]
