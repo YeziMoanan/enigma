@@ -242,7 +242,15 @@ fn collect_passive_skill_links(
     }
 }
 
+#[cfg(test)]
 pub(super) fn resolve_features(raw_features: &str) -> Vec<ResolvedBuffFeature> {
+    resolve_features_from(config::try_get(), raw_features)
+}
+
+pub(super) fn resolve_features_from(
+    game: Option<&config::GameDB>,
+    raw_features: &str,
+) -> Vec<ResolvedBuffFeature> {
     raw_features
         .split('|')
         .map(str::trim)
@@ -255,7 +263,7 @@ pub(super) fn resolve_features(raw_features: &str) -> Vec<ResolvedBuffFeature> {
                 .collect::<Vec<_>>();
             let act = values
                 .first()
-                .and_then(|act_id| config::try_get()?.buff_act.get(*act_id));
+                .and_then(|act_id| game?.buff_act.get(*act_id));
             let registered = act.and_then(|act| {
                 crate::engine::skill::buff_act::registry::find(act.id, &act.r#type)
             });

@@ -124,6 +124,12 @@ impl BuffPolicy {
             .unwrap_or(Err(BuffPolicyError::MissingDefinition(buff_id)))
     }
 
+    pub(super) fn configured(game: &config::GameDB, buff_id: i32) -> Result<Self, BuffPolicyError> {
+        BuffDefinition::configured(game, buff_id)
+            .ok_or(BuffPolicyError::MissingDefinition(buff_id))
+            .and_then(|definition| Self::compile(&definition))
+    }
+
     fn compile(definition: &BuffDefinition) -> Result<Self, BuffPolicyError> {
         validate_include_entries(
             definition.id(),
@@ -281,6 +287,16 @@ mod tests {
     #[test]
     fn reports_only_include_entries_without_runtime_semantics() {
         crate::test_support::init_config();
+        let game = crate::test_support::game_data();
+
+        assert_eq!(
+            BuffPolicy::configured(game, 6200501),
+            BuffPolicy::try_for_buff_id(6200501)
+        );
+        assert_eq!(
+            BuffPolicy::configured(game, -1),
+            Err(BuffPolicyError::MissingDefinition(-1))
+        );
 
         assert!(
             BuffPolicy::try_for_buff_id(31170002)

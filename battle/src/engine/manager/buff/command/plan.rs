@@ -353,10 +353,7 @@ impl BuffManager {
                 (update.origin, BuffPlanAction::ChangeDuration(plans))
             }
             BuffCommand::RefreshDuration(update) => {
-                if update.target_uid == 0
-                    || update.buff_uid == 0
-                    || update.minimum_duration <= 0
-                {
+                if update.target_uid == 0 || update.buff_uid == 0 || update.minimum_duration <= 0 {
                     return Err(BuffCommandError::InvalidDurationChange);
                 }
                 let active = self
@@ -560,7 +557,7 @@ impl BuffManager {
             }
         };
         let route = BuffRoute::new(request.source_uid, request.target_uid, request.buff_id);
-        let mut policy = BuffPolicy::try_for_buff_id(request.buff_id)
+        let mut policy = BuffPolicy::configured(self.catalog().game_data(), request.buff_id)
             .map_err(BuffCommandError::InvalidPolicy)?;
         policy.lifetime.duration = definition.duration;
         let unconditional = matches!(

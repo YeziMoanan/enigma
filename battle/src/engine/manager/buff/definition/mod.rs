@@ -138,54 +138,58 @@ impl BuffDefinition {
                 db.skill_buff
                     .all()
                     .iter()
-                    .map(|row| {
-                        let effective_type_id = if row.type_id != 0 {
-                            row.type_id
-                        } else {
-                            row.id
-                        };
-                        let buff_type = db.skill_bufftype.get(effective_type_id);
-                        let include_types = buff_type
-                            .map(|row| row.include_types.as_str())
-                            .unwrap_or_default();
-                        let exclude_types = buff_type
-                            .map(|row| row.exclude_types.as_str())
-                            .unwrap_or_default();
-                        let take_stage = buff_type.map(|row| row.take_stage).unwrap_or_default();
-                        let features = row.features.as_str();
-                        let status_id = buff_type.map(|row| row.r#type).unwrap_or(row.is_good_buff);
-                        let include_entries = parse_include_entries(include_types);
-                        let include_types_valid = include_entries.is_ok();
-                        (
-                            row.id,
-                            Self {
-                                id: row.id,
-                                type_id: row.type_id,
-                                group: buff_type.map(|row| row.group).unwrap_or_default(),
-                                is_no_show: row.is_no_show != 0,
-                                status_id,
-                                status: BuffStatus::from_id(status_id),
-                                duration: row.during_time,
-                                count: row.effect_count,
-                                exclude_buff_ids: parse_exclude_buff_ids(exclude_types),
-                                exclude_status_ids: parse_exclude_status_ids(exclude_types),
-                                include_entries: include_entries.unwrap_or_default(),
-                                include_types_valid,
-                                attribute_deltas: parse_attribute_deltas(features),
-                                features: super::feature::resolve_features(features),
-                                has_features: !features.trim().is_empty(),
-                                act_common_params: initial_act_common_params(features),
-                                take_stage,
-                                take_act: buff_type
-                                    .map(|row| row.take_act.clone())
-                                    .unwrap_or_default(),
-                            },
-                        )
-                    })
+                    .map(|row| (row.id, Self::from_row(db, row)))
                     .collect()
             })
             .get(&buff_id)
             .cloned()
+    }
+
+    pub(super) fn configured(game: &config::GameDB, buff_id: i32) -> Option<Self> {
+        game.skill_buff
+            .get(buff_id)
+            .map(|row| Self::from_row(game, row))
+    }
+
+    fn from_row(game: &config::GameDB, row: &config::skill_buff::SkillBuff) -> Self {
+        let effective_type_id = if row.type_id != 0 {
+            row.type_id
+        } else {
+            row.id
+        };
+        let buff_type = game.skill_bufftype.get(effective_type_id);
+        let include_types = buff_type
+            .map(|row| row.include_types.as_str())
+            .unwrap_or_default();
+        let exclude_types = buff_type
+            .map(|row| row.exclude_types.as_str())
+            .unwrap_or_default();
+        let features = row.features.as_str();
+        let status_id = buff_type.map(|row| row.r#type).unwrap_or(row.is_good_buff);
+        let include_entries = parse_include_entries(include_types);
+        let include_types_valid = include_entries.is_ok();
+        Self {
+            id: row.id,
+            type_id: row.type_id,
+            group: buff_type.map(|row| row.group).unwrap_or_default(),
+            is_no_show: row.is_no_show != 0,
+            status_id,
+            status: BuffStatus::from_id(status_id),
+            duration: row.during_time,
+            count: row.effect_count,
+            exclude_buff_ids: parse_exclude_buff_ids(exclude_types),
+            exclude_status_ids: parse_exclude_status_ids(exclude_types),
+            include_entries: include_entries.unwrap_or_default(),
+            include_types_valid,
+            attribute_deltas: parse_attribute_deltas(features),
+            features: super::feature::resolve_features_from(Some(game), features),
+            has_features: !features.trim().is_empty(),
+            act_common_params: initial_act_common_params(features),
+            take_stage: buff_type.map(|row| row.take_stage).unwrap_or_default(),
+            take_act: buff_type
+                .map(|row| row.take_act.clone())
+                .unwrap_or_default(),
+        }
     }
 
     pub fn effective_type_id(&self) -> i32 {

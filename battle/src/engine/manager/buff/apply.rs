@@ -490,7 +490,7 @@ impl BuffManager {
             return None;
         }
         let route = BuffRoute::new(source_uid, target_uid, buff_id);
-        let policy = BuffPolicy::for_buff_id(buff_id)?;
+        let policy = BuffPolicy::configured(self.catalog().game_data(), buff_id).ok()?;
         let plan = self.plan_layer_refresh(route, definition, &policy, args)?;
         let promoted_uid = matches!(plan, LayerRefreshPlan::PromoteRestored { .. }).then(|| {
             let planned = uid_policy::plan(
