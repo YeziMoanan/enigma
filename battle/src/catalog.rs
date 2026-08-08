@@ -182,6 +182,15 @@ impl BattleCatalog {
             .collect()
     }
 
+    pub(crate) fn buff_feature_rows(self, buff_id: i32) -> Vec<&'static str> {
+        self.game_data
+            .skill_buff
+            .get(buff_id)
+            .into_iter()
+            .flat_map(|buff| buff.features.split('|'))
+            .collect()
+    }
+
     pub(crate) fn buff_type_id(self, buff_id: i32) -> i32 {
         self.game_data
             .skill_buff
