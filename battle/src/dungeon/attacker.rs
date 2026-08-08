@@ -244,8 +244,10 @@ impl Attacker {
             ex_attributes.push((hero_input.uid, stats.ex()));
             sp_attributes.push((hero_input.uid, stats.sp()));
 
-            let mut builder =
-                EntityBuilder::new(hero_input, position, 1, false).with_equips(equip_inputs);
+            let mut builder = EntityBuilder::new(hero_input, position, 1, false)
+                .with_catalog(catalog)
+                .with_equips(equip_inputs)
+                .with_stats(stats);
             if let Some(balance) = balance {
                 builder = builder.with_balance(balance, stats);
             }
@@ -270,7 +272,10 @@ impl Attacker {
             ex_attributes.push((hero_input.uid, stats.ex()));
             sp_attributes.push((hero_input.uid, stats.sp()));
 
-            let mut builder = EntityBuilder::new(hero_input, -1, 1, true).with_equips(equip_inputs);
+            let mut builder = EntityBuilder::new(hero_input, -1, 1, true)
+                .with_catalog(catalog)
+                .with_equips(equip_inputs)
+                .with_stats(stats);
             if let Some(balance) = balance {
                 builder = builder.with_balance(balance, stats);
             }

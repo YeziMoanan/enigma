@@ -50,7 +50,15 @@ impl Passive {
         equips: &[EquipmentBuildInput],
         destiny: Option<&HashMap<i32, i32>>,
     ) -> Vec<PassiveSkill> {
-        let game = configs::get();
+        Self::for_build(configs::get(), hero, equips, destiny)
+    }
+
+    pub(crate) fn for_build(
+        game: &config::GameDB,
+        hero: &HeroBuildInput,
+        equips: &[EquipmentBuildInput],
+        destiny: Option<&HashMap<i32, i32>>,
+    ) -> Vec<PassiveSkill> {
         let mut passives = Self::base(game, hero.hero_id);
         Self::apply_upgrades(
             game,
