@@ -276,6 +276,35 @@ impl BattleCatalog {
             .unwrap_or_else(|| vec![career])
     }
 
+    pub(crate) fn model_label(self, model_id: i32) -> i32 {
+        self.game_data
+            .monster
+            .get(model_id)
+            .map(|monster| monster.label)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn entity_damage_type(self, model_id: i32, entity_type: Option<i32>) -> i32 {
+        if entity_type == Some(1) {
+            return self
+                .game_data
+                .character
+                .get(model_id)
+                .map(|row| row.dmg_type)
+                .unwrap_or_default();
+        }
+        self.game_data
+            .monster
+            .get(model_id)
+            .and_then(|monster| {
+                self.game_data
+                    .monster_skill_template
+                    .get(monster.skill_template)
+            })
+            .map(|row| row.dmg_type)
+            .unwrap_or_default()
+    }
+
     fn configured_battle(
         self,
         fight: &sonettobuf::Fight,
@@ -686,6 +715,20 @@ mod tests {
         assert_eq!(catalog.careers(101), vec![1, 2]);
         assert_eq!(catalog.careers(1), vec![1]);
         assert_eq!(catalog.careers(-1), vec![-1]);
+    }
+
+    #[test]
+    fn normalizes_entity_identity_metadata() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.model_label(900016101), 7);
+        assert_eq!(catalog.model_label(-1), 0);
+        assert_eq!(catalog.entity_damage_type(3081, Some(1)), 1);
+        assert_eq!(catalog.entity_damage_type(3081, Some(2)), 0);
+        assert_eq!(catalog.entity_damage_type(900016101, Some(2)), 1);
+        assert_eq!(catalog.entity_damage_type(-1, Some(1)), 0);
+        assert_eq!(catalog.entity_damage_type(-1, Some(2)), 0);
     }
 
     #[test]

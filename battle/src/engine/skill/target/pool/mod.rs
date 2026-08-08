@@ -491,11 +491,13 @@ impl TargetEntity {
             uid: entity.uid?,
             level: entity.level.unwrap_or_default(),
             model_id: entity.model_id.unwrap_or_default(),
-            model_label: model_label(entity.model_id.unwrap_or_default()),
+            model_label: catalog.model_label(entity.model_id.unwrap_or_default()),
             career: entity.career.unwrap_or_default(),
             careers: catalog.careers(entity.career.unwrap_or_default()),
             weak_careers: entity.weak_careers.clone(),
-            damage_type: damage_type(entity),
+            damage_type: EntityDamageType::from_wire(
+                catalog.entity_damage_type(entity.model_id.unwrap_or_default(), entity.entity_type),
+            ),
             position: entity.position.unwrap_or_default(),
             current_hp,
             max_hp: attr.and_then(|attr| attr.hp).unwrap_or(1),
@@ -592,28 +594,6 @@ fn battle_tags(entity: &FightEntityInfo) -> Vec<i32> {
     tags.sort_unstable();
     tags.dedup();
     tags
-}
-
-fn damage_type(entity: &FightEntityInfo) -> EntityDamageType {
-    let Some(db) = config::try_get() else {
-        return EntityDamageType::Unknown;
-    };
-    let model_id = entity.model_id.unwrap_or_default();
-    if entity.entity_type == Some(1) {
-        return EntityDamageType::from_wire(
-            db.character
-                .get(model_id)
-                .map(|row| row.dmg_type)
-                .unwrap_or_default(),
-        );
-    }
-    EntityDamageType::from_wire(
-        db.monster
-            .get(model_id)
-            .and_then(|monster| db.monster_skill_template.get(monster.skill_template))
-            .map(|row| row.dmg_type)
-            .unwrap_or_default(),
-    )
 }
 
 fn base_technic(entity: &FightEntityInfo) -> i32 {
@@ -770,13 +750,6 @@ impl TargetBuff {
             is_label && values.next() == Some(label)
         })
     }
-}
-
-pub(crate) fn model_label(model_id: i32) -> i32 {
-    config::try_get()
-        .and_then(|db| db.monster.get(model_id))
-        .map(|monster| monster.label)
-        .unwrap_or_default()
 }
 
 fn split_features(raw: &'static str) -> Vec<&'static str> {
