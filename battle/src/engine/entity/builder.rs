@@ -51,7 +51,11 @@ impl EntityBuilder {
     }
 
     pub fn with_balance(mut self, balance: BattleBalance, stats: Stats) -> Self {
-        let inputs = balance.apply(StatInputs::from_build_input(&self.hero, None));
+        let game = self
+            .catalog
+            .map(crate::catalog::BattleCatalog::game_data)
+            .unwrap_or_else(config::configs::get);
+        let inputs = balance.configured(game, StatInputs::from_build_input(&self.hero, None));
         self.hero.level = inputs.level;
         self.hero.rank = inputs.rank;
         self.hero.talent = inputs.talent;

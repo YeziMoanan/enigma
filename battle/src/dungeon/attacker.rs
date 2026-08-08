@@ -187,6 +187,7 @@ impl Attacker {
         let aid_ids = setup.aid_ids;
         let selected_trials = setup.selected_trials;
         let use_configured_aids = setup.use_configured_aids;
+        let game = catalog.game_data();
 
         let mut entitys = Vec::new();
         let mut sub_entitys = Vec::new();
@@ -239,8 +240,8 @@ impl Attacker {
             let hero_input = fighter.hero.clone();
             let equip_inputs = fighter.equips.clone();
             let stats = balance
-                .map(|balance| balance.stats_for(&hero_input, &equip_inputs))
-                .unwrap_or_else(|| Stats::build_for_loadout(&hero_input, &equip_inputs));
+                .map(|balance| balance.stats(game, &hero_input, &equip_inputs))
+                .unwrap_or_else(|| Stats::loadout(game, &hero_input, &equip_inputs));
             ex_attributes.push((hero_input.uid, stats.ex()));
             sp_attributes.push((hero_input.uid, stats.sp()));
 
@@ -267,8 +268,8 @@ impl Attacker {
             let hero_input = fighter.hero.clone();
             let equip_inputs = fighter.equips.clone();
             let stats = balance
-                .map(|balance| balance.stats_for(&hero_input, &equip_inputs))
-                .unwrap_or_else(|| Stats::build_for_loadout(&hero_input, &equip_inputs));
+                .map(|balance| balance.stats(game, &hero_input, &equip_inputs))
+                .unwrap_or_else(|| Stats::loadout(game, &hero_input, &equip_inputs));
             ex_attributes.push((hero_input.uid, stats.ex()));
             sp_attributes.push((hero_input.uid, stats.sp()));
 
@@ -354,7 +355,7 @@ impl Attacker {
         ensure!(hero.hero_id == support.hero_id);
         ensure!(hero.ex_skill_level == support.lv);
 
-        let stats = Stats::build(&StatInputs::from_build_input(hero, None));
+        let stats = Stats::configured(tables, &StatInputs::from_build_input(hero, None));
         let attr = stats.base();
         let entity = FightEntityInfo {
             uid: Some(SUPPORT_UID),

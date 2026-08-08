@@ -44,8 +44,12 @@ impl BattleBalance {
             .then_some(balance)
     }
 
-    pub fn apply(self, mut input: StatInputs) -> StatInputs {
-        let max_level = configs::get()
+    pub fn apply(self, input: StatInputs) -> StatInputs {
+        self.configured(configs::get(), input)
+    }
+
+    pub(crate) fn configured(self, game: &config::GameDB, mut input: StatInputs) -> StatInputs {
+        let max_level = game
             .character_level
             .iter()
             .filter(|row| row.hero_id == input.hero_id)
@@ -53,8 +57,8 @@ impl BattleBalance {
             .max()
             .unwrap_or(input.level);
         let level = self.level.min(max_level).max(input.level);
-        let rank = rank_from_level(input.hero_id, level).max(input.rank);
-        let talent = configs::get()
+        let rank = configured_rank(game, input.hero_id, level).max(input.rank);
+        let talent = game
             .character_talent
             .iter()
             .filter(|row| {
@@ -77,11 +81,22 @@ impl BattleBalance {
     }
 
     pub fn stats_for(self, hero: &HeroBuildInput, equips: &[EquipmentBuildInput]) -> Stats {
-        let base = self.apply(StatInputs::from_build_input(hero, None));
-        equips.iter().fold(Stats::build(&base), |stats, equip| {
-            let input = self.apply(StatInputs::from_build_input(hero, Some(equip)));
-            stats + Stats::equipment_bonus(&input)
-        })
+        self.stats(configs::get(), hero, equips)
+    }
+
+    pub(crate) fn stats(
+        self,
+        game: &config::GameDB,
+        hero: &HeroBuildInput,
+        equips: &[EquipmentBuildInput],
+    ) -> Stats {
+        let base = self.configured(game, StatInputs::from_build_input(hero, None));
+        equips
+            .iter()
+            .fold(Stats::configured(game, &base), |stats, equip| {
+                let input = self.configured(game, StatInputs::from_build_input(hero, Some(equip)));
+                stats + Stats::equipment(game, &input)
+            })
     }
 }
 
@@ -159,29 +174,49 @@ impl std::ops::Add for Stats {
 
 impl Stats {
     pub fn build_for_loadout(hero: &HeroBuildInput, equips: &[EquipmentBuildInput]) -> Self {
+        Self::loadout(configs::get(), hero, equips)
+    }
+
+    pub(crate) fn loadout(
+        game: &config::GameDB,
+        hero: &HeroBuildInput,
+        equips: &[EquipmentBuildInput],
+    ) -> Self {
         let base = StatInputs::from_build_input(hero, None);
-        equips.iter().fold(Self::build(&base), |stats, equip| {
-            let input = StatInputs::from_build_input(hero, Some(equip));
-            stats + Self::equipment_bonus(&input)
-        })
+        equips
+            .iter()
+            .fold(Self::configured(game, &base), |stats, equip| {
+                let input = StatInputs::from_build_input(hero, Some(equip));
+                stats + Self::equipment(game, &input)
+            })
     }
 
     pub fn build(input: &StatInputs) -> Self {
-        let level = level_base(input.hero_id, input.level);
-        let rank = rank_bonus(input.hero_id, input.rank);
+        Self::configured(configs::get(), input)
+    }
+
+    pub(crate) fn configured(game: &config::GameDB, input: &StatInputs) -> Self {
+        let level = level_base(game, input.hero_id, input.level);
+        let rank = rank_bonus(game, input.hero_id, input.rank);
         let core = apply_destiny(
             level,
             rank,
-            destiny_bonus(input.hero_id, input.destiny_rank),
+            destiny_bonus(game, input.hero_id, input.destiny_rank),
         );
-        core + talent_bonus(input, level, rank) + Self::equipment_bonus(input)
+        core + talent_bonus(game, input, level, rank) + Self::equipment(game, input)
     }
 
     pub(super) fn equipment_bonus(input: &StatInputs) -> Self {
-        equip_bonus(input)
+        Self::equipment(configs::get(), input)
+    }
+
+    pub(crate) fn equipment(game: &config::GameDB, input: &StatInputs) -> Self {
+        equip_bonus(game, input)
             + equip_break_bonus(
+                game,
                 input,
-                level_base(input.hero_id, input.level) + rank_bonus(input.hero_id, input.rank),
+                level_base(game, input.hero_id, input.level)
+                    + rank_bonus(game, input.hero_id, input.rank),
             )
     }
 
@@ -385,7 +420,11 @@ pub(crate) fn configured_monster_stats(
 }
 
 pub fn rank_from_level(hero_id: i32, level: i32) -> i32 {
-    let mut rows = configs::get()
+    configured_rank(configs::get(), hero_id, level)
+}
+
+pub(crate) fn configured_rank(game: &config::GameDB, hero_id: i32, level: i32) -> i32 {
+    let mut rows = game
         .character_rank
         .iter()
         .filter(|row| row.hero_id == hero_id)
@@ -407,8 +446,7 @@ pub fn rank_from_level(hero_id: i32, level: i32) -> i32 {
         .unwrap_or(1)
 }
 
-fn level_base(hero_id: i32, level: i32) -> Stats {
-    let game = configs::get();
+fn level_base(game: &config::GameDB, hero_id: i32, level: i32) -> Stats {
     let mut rows = game
         .character_level
         .iter()
@@ -452,13 +490,12 @@ fn level_base(hero_id: i32, level: i32) -> Stats {
     }
 }
 
-fn rank_bonus(hero_id: i32, rank: i32) -> Stats {
+fn rank_bonus(game: &config::GameDB, hero_id: i32, rank: i32) -> Stats {
     if rank <= 0 {
         return Stats::default();
     }
-    let base = level_base(hero_id, 1);
-    configs::get()
-        .character_rank
+    let base = level_base(game, hero_id, 1);
+    game.character_rank
         .iter()
         .filter(|row| row.hero_id == hero_id && row.rank <= rank)
         .flat_map(|row| row.effect.split('|'))
@@ -489,8 +526,7 @@ struct DestinyStats {
     percent: Stats,
 }
 
-fn destiny_bonus(hero_id: i32, rank: i32) -> DestinyStats {
-    let game = configs::get();
+fn destiny_bonus(game: &config::GameDB, hero_id: i32, rank: i32) -> DestinyStats {
     let Some(destiny) = game
         .character_destiny
         .iter()
@@ -590,8 +626,7 @@ fn add_attr(stats: &mut Stats, id: i32, value: i32) {
     }
 }
 
-fn equip_bonus(input: &StatInputs) -> Stats {
-    let game = configs::get();
+fn equip_bonus(game: &config::GameDB, input: &StatInputs) -> Stats {
     let Some(equip) = game.equip.get(input.equip_id) else {
         return Stats::default();
     };
@@ -618,8 +653,7 @@ fn equip_bonus(input: &StatInputs) -> Stats {
     }
 }
 
-fn equip_break_bonus(input: &StatInputs, base: Stats) -> Stats {
-    let game = configs::get();
+fn equip_break_bonus(game: &config::GameDB, input: &StatInputs, base: Stats) -> Stats {
     let Some(equip) = game.equip.get(input.equip_id) else {
         return Stats::default();
     };
@@ -661,8 +695,12 @@ fn equip_break_bonus(input: &StatInputs, base: Stats) -> Stats {
     }
 }
 
-fn talent_bonus(input: &StatInputs, actual_base: Stats, actual_rank: Stats) -> Stats {
-    let game = configs::get();
+fn talent_bonus(
+    game: &config::GameDB,
+    input: &StatInputs,
+    actual_base: Stats,
+    actual_rank: Stats,
+) -> Stats {
     let Some(character) = game
         .character_talent
         .iter()
@@ -674,11 +712,11 @@ fn talent_bonus(input: &StatInputs, actual_base: Stats, actual_rank: Stats) -> S
         return Stats::default();
     };
     let placements = if input.talent_placements.is_empty() {
-        default_placements(input.talent, character.talent_mould, star_cube)
+        default_placements(game, input.talent, character.talent_mould, star_cube)
     } else {
         input.talent_placements.clone()
     };
-    let style_cube = replace_cube(star_cube, input.talent_style);
+    let style_cube = replace_cube(game, star_cube, input.talent_style);
     let counts = placements
         .into_iter()
         .map(|id| if id == star_cube { style_cube } else { id })
@@ -691,6 +729,7 @@ fn talent_bonus(input: &StatInputs, actual_base: Stats, actual_rank: Stats) -> S
         .iter()
         .find(|row| row.talent_id == input.talent && row.talent_mould == character.talent_mould);
     let max_base = level_base(
+        game,
         input.hero_id,
         game.character_level
             .iter()
@@ -700,6 +739,7 @@ fn talent_bonus(input: &StatInputs, actual_base: Stats, actual_rank: Stats) -> S
             .unwrap_or(input.level),
     );
     let max_rank = rank_bonus(
+        game,
         input.hero_id,
         game.character_rank
             .iter()
@@ -708,7 +748,7 @@ fn talent_bonus(input: &StatInputs, actual_base: Stats, actual_rank: Stats) -> S
             .max()
             .unwrap_or(input.rank),
     );
-    let damping = parse_damping();
+    let damping = parse_damping(game);
     let mut total = [0.0_f64; 16];
     for (cube_id, count) in counts {
         let max_level = game
@@ -812,9 +852,8 @@ fn parse_pair(raw: &str) -> Option<(i32, i32)> {
     Some((left.parse().ok()?, right.parse().ok()?))
 }
 
-fn default_placements(talent: i32, mould: i32, star_cube: i32) -> Vec<i32> {
-    configs::get()
-        .talent_scheme
+fn default_placements(game: &config::GameDB, talent: i32, mould: i32, star_cube: i32) -> Vec<i32> {
+    game.talent_scheme
         .iter()
         .find(|row| {
             row.talent_id == talent && row.talent_mould == mould && row.star_mould == star_cube
@@ -828,9 +867,8 @@ fn default_placements(talent: i32, mould: i32, star_cube: i32) -> Vec<i32> {
         .unwrap_or_default()
 }
 
-fn replace_cube(star_cube: i32, style: i32) -> i32 {
-    configs::get()
-        .talent_style
+fn replace_cube(game: &config::GameDB, star_cube: i32, style: i32) -> i32 {
+    game.talent_style
         .iter()
         .filter(|row| row.style_id == style)
         .flat_map(|row| row.replace_cube.split('|'))
@@ -858,9 +896,8 @@ fn cube_level(mould: Option<&config::talent_mould::TalentMould>, cube: i32) -> i
     parse_pair(raw).map(|(_, level)| level).unwrap_or_default()
 }
 
-fn parse_damping() -> Vec<(i32, i32)> {
-    configs::get()
-        .fight_const
+fn parse_damping(game: &config::GameDB) -> Vec<(i32, i32)> {
+    game.fight_const
         .get(10)
         .map(|row| row.value.as_str())
         .unwrap_or_default()
