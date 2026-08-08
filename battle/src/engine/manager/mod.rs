@@ -50,6 +50,7 @@ use self::{
 /// mutation and returns semantic changes for events and packet projection.
 #[derive(Debug, Clone, Default)]
 pub struct BattleManagers {
+    catalog_data: Option<crate::catalog::BattleCatalog>,
     fight_version: i32,
     terminal_outcome: Option<crate::engine::round::outcome::BattleOutcome>,
     pub attribute: AttributeManager,
@@ -129,6 +130,16 @@ pub(crate) struct HpExecution {
 }
 
 impl BattleManagers {
+    pub(crate) fn game_data(&self) -> &'static config::GameDB {
+        if let Some(catalog) = self.catalog_data {
+            return catalog.game_data();
+        }
+        #[cfg(test)]
+        return crate::test_support::game_data();
+        #[cfg(not(test))]
+        panic!("battle managers were not constructed with a catalog")
+    }
+
     pub(crate) fn fight_version(&self) -> i32 {
         self.fight_version
     }
@@ -829,11 +840,12 @@ impl BattleManagers {
     }
 
     fn register_entity_state(&mut self, entity: &FightEntityInfo) {
+        let game_data = self.game_data();
         let team_type = entity.team_type.unwrap_or_default();
         self.attribute.register(entity);
         self.hp.register(entity);
-        self.toughness.register(entity);
-        self.ex_point.register(entity);
+        self.toughness.register_with_game_data(game_data, entity);
+        self.ex_point.register_with_game_data(game_data, entity);
         self.eureka.register(entity);
         self.buff.register_entity(entity, team_type);
     }
@@ -970,23 +982,33 @@ impl BattleManagers {
     }
 
     /// Seeds every manager from the initial fight snapshot exactly once.
-    pub fn seeded(fight: &Fight) -> Self {
+    pub fn seeded_with_catalog(catalog: crate::catalog::BattleCatalog, fight: &Fight) -> Self {
+        let game_data = catalog.game_data();
         let mut managers = Self {
+            catalog_data: Some(catalog),
             fight_version: fight.version.unwrap_or_default(),
             ..Self::default()
         };
         managers.attribute.seed(fight);
         managers.battle_rule = battle_rule::BattleRuleManager::seed(fight);
         managers.hp.seed(fight);
-        managers.toughness.seed(fight);
-        managers.ex_point.seed(fight);
+        managers.toughness.seed_with_game_data(game_data, fight);
+        managers.ex_point.seed_with_game_data(game_data, fight);
         managers.eureka.seed(fight);
         managers.buff.seed(fight);
         managers.card.seed(fight);
-        managers.conduit = ConduitManager::seed(fight);
-        managers.entity = entity::EntityManager::seed(fight);
-        managers.wave = wave::WaveManager::seed(fight);
+        managers.conduit = ConduitManager::seed_with_game_data(game_data, fight);
+        managers.entity = entity::EntityManager::seed_with_game_data(game_data, fight);
+        managers.wave = wave::WaveManager::seed_with_game_data(game_data, fight);
         managers
+    }
+
+    #[cfg(test)]
+    pub fn seeded(fight: &Fight) -> Self {
+        Self::seeded_with_catalog(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            fight,
+        )
     }
 
     /// Projects manager-owned entity state into the response `Fight` snapshot.
@@ -1026,7 +1048,8 @@ impl BattleManagers {
         self.project_primary_attributes(entity);
         self.hp.sync_entity(entity);
         self.toughness.sync_entity(entity);
-        self.ex_point.sync_entity(entity);
+        self.ex_point
+            .sync_entity_with_game_data(self.game_data(), entity);
         entity.ex_skill_point_change =
             Some(crate::engine::mechanic::card::CardMechanic.ultimate_cost_offset(self, uid));
         if let Some(progress) = self.ex_point.synchronization_progress(uid) {
@@ -1077,7 +1100,11 @@ impl BattleManagers {
             .filter_map(|entity| {
                 Some(FightHeroSpAttributeInfo {
                     uid: entity.uid,
-                    attribute: Some(monster_sp_attribute(entity.model_id?, fight_version)),
+                    attribute: Some(monster_sp_attribute(
+                        self.game_data(),
+                        entity.model_id?,
+                        fight_version,
+                    )),
                 })
             })
             .collect()
@@ -1092,10 +1119,7 @@ impl BattleManagers {
     }
 }
 
-fn monster_sp_attribute(model_id: i32, fight_version: i32) -> HeroSpAttribute {
-    let Some(db) = config::try_get() else {
-        return base_hero_sp_attribute(fight_version);
-    };
+fn monster_sp_attribute(db: &config::GameDB, model_id: i32, fight_version: i32) -> HeroSpAttribute {
     let Some(monster) = db.monster.get(model_id) else {
         return base_hero_sp_attribute(fight_version);
     };

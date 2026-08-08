@@ -5,22 +5,16 @@ use sonettobuf::{
     RedealCardInfoPush, UseCardStatistics,
 };
 
-use crate::engine::{
-    manager::BattleManagers,
-    round::{outcome::battle_outcome, state::RoundState},
-    skill::effect::SkillEffectCatalog,
+use crate::{
+    catalog::BattleCatalog,
+    engine::{
+        manager::BattleManagers,
+        round::{outcome::battle_outcome, state::RoundState},
+        skill::effect::SkillEffectCatalog,
+    },
 };
 
 use self::determinism::RoundDeterminism;
-
-#[derive(Clone, Copy)]
-struct RuntimeGameData(&'static config::GameDB);
-
-impl std::fmt::Debug for RuntimeGameData {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("RuntimeGameData")
-    }
-}
 
 pub use crate::engine::round::outcome::BattleOutcome;
 
@@ -44,7 +38,7 @@ pub use self::cloth_skill::ClothSkillType;
 /// only at explicit response boundaries.
 #[derive(Debug, Clone, Default)]
 pub struct BattleRuntime {
-    game_data: Option<RuntimeGameData>,
+    catalog_data: Option<BattleCatalog>,
     fight: Fight,
     managers: BattleManagers,
     catalog: SkillEffectCatalog,
@@ -60,9 +54,9 @@ pub struct BattleRuntime {
 
 impl BattleRuntime {
     fn game_data(&self) -> &'static config::GameDB {
-        self.game_data
-            .expect("battle runtime was not constructed with game data")
-            .0
+        self.catalog_data
+            .expect("battle runtime was not constructed with a catalog")
+            .game_data()
     }
 
     /// Plans client auto-battle operations without mutating authoritative state.
@@ -216,26 +210,27 @@ impl BattleRuntime {
     }
 
     /// Builds a runtime by seeding every manager and exact skill catalog from a fight.
-    pub fn new(game_data: &'static config::GameDB, fight: Fight) -> Self {
-        Self::new_with_ex_attributes(game_data, fight, std::iter::empty())
+    pub fn new(catalog: BattleCatalog, fight: Fight) -> Self {
+        Self::new_with_ex_attributes(catalog, fight, std::iter::empty())
     }
 
     pub fn new_with_ex_attributes(
-        game_data: &'static config::GameDB,
+        catalog: BattleCatalog,
         fight: Fight,
         ex_attributes: impl IntoIterator<Item = (i64, HeroExAttribute)>,
     ) -> Self {
-        Self::new_with_attributes(game_data, fight, ex_attributes, std::iter::empty())
+        Self::new_with_attributes(catalog, fight, ex_attributes, std::iter::empty())
     }
 
     /// Builds a runtime and applies persisted extended and special attributes.
     pub fn new_with_attributes(
-        game_data: &'static config::GameDB,
+        catalog: BattleCatalog,
         fight: Fight,
         ex_attributes: impl IntoIterator<Item = (i64, HeroExAttribute)>,
         sp_attributes: impl IntoIterator<Item = (i64, HeroSpAttribute)>,
     ) -> Self {
-        let mut managers = BattleManagers::seeded(&fight);
+        let game_data = catalog.game_data();
+        let mut managers = BattleManagers::seeded_with_catalog(catalog, &fight);
         if let Some(route) = game_data.activity128_battle(
             fight.episode_id.unwrap_or_default(),
             fight.battle_id.unwrap_or_default(),
@@ -265,13 +260,13 @@ impl BattleRuntime {
         let round_state = RoundState::start(&fight);
         let determinism =
             RoundDeterminism::with_seed(fight.battle_id.unwrap_or_default().max(0) as u64);
-        let catalog = SkillEffectCatalog::from_fight(game_data, &fight);
+        let skill_catalog = SkillEffectCatalog::from_fight(game_data, &fight);
 
         Self {
-            game_data: Some(RuntimeGameData(game_data)),
+            catalog_data: Some(catalog),
             fight,
             managers,
-            catalog,
+            catalog: skill_catalog,
             round: None,
             round_state,
             determinism,

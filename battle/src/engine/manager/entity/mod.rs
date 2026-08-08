@@ -87,7 +87,7 @@ pub struct EntityManager {
 }
 
 impl EntityManager {
-    pub fn seed(fight: &Fight) -> Self {
+    pub fn seed_with_game_data(game_data: &config::GameDB, fight: &Fight) -> Self {
         let entities = fight
             .attacker
             .iter()
@@ -145,7 +145,7 @@ impl EntityManager {
             .map(i64::unsigned_abs)
             .max()
             .unwrap_or_default() as usize;
-        let reserved_index = configured_defender_count(fight);
+        let reserved_index = configured_defender_count(game_data, fight);
 
         Self {
             teams,
@@ -156,6 +156,11 @@ impl EntityManager {
             ultimate_kinds: HashMap::new(),
             next_special_uid: -(largest_existing_index.max(reserved_index) as i64 + 1),
         }
+    }
+
+    #[cfg(test)]
+    pub fn seed(fight: &Fight) -> Self {
+        Self::seed_with_game_data(crate::test_support::game_data(), fight)
     }
 
     pub(crate) fn execute_command(
@@ -639,10 +644,7 @@ fn scale_attribute(
     )
 }
 
-fn configured_defender_count(fight: &Fight) -> usize {
-    let Some(db) = config::try_get() else {
-        return 0;
-    };
+fn configured_defender_count(db: &config::GameDB, fight: &Fight) -> usize {
     let Some(battle) = db.battle.get(fight.battle_id.unwrap_or_default()) else {
         return 0;
     };

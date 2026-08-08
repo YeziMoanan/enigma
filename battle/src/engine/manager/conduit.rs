@@ -237,17 +237,22 @@ pub struct ConduitManager {
 }
 
 impl ConduitManager {
-    pub fn seed(fight: &Fight) -> Self {
+    pub fn seed_with_game_data(game_data: &config::GameDB, fight: &Fight) -> Self {
         let mut manager = Self::default();
         for (team, fight_team) in [(1, fight.attacker.as_ref()), (2, fight.defender.as_ref())] {
             let Some(fight_team) = fight_team else {
                 continue;
             };
             for entity in &fight_team.entitys {
-                manager.seed_entity(team, entity);
+                manager.seed_entity(game_data, team, entity);
             }
         }
         manager
+    }
+
+    #[cfg(test)]
+    pub fn seed(fight: &Fight) -> Self {
+        Self::seed_with_game_data(crate::test_support::game_data(), fight)
     }
 
     pub fn initialization_commands(&self) -> Vec<ConduitCommand> {
@@ -748,11 +753,10 @@ impl ConduitManager {
         Ok(team)
     }
 
-    fn seed_entity(&mut self, team: i32, entity: &FightEntityInfo) {
+    fn seed_entity(&mut self, configs: &config::GameDB, team: i32, entity: &FightEntityInfo) {
         let (Some(uid), Some(model_id)) = (entity.uid, entity.model_id) else {
             return;
         };
-        let configs = config::configs::get();
         let Some(character) = configs.character.get(model_id) else {
             return;
         };

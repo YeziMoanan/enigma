@@ -28,10 +28,7 @@ pub struct WaveManager {
 }
 
 impl WaveManager {
-    pub fn seed(fight: &Fight) -> Self {
-        let Some(db) = config::try_get() else {
-            return Self::default();
-        };
+    pub fn seed_with_game_data(db: &config::GameDB, fight: &Fight) -> Self {
         let Some(battle) = db.battle.get(fight.battle_id.unwrap_or_default()) else {
             return Self::default();
         };
@@ -54,6 +51,11 @@ impl WaveManager {
             monster_max: battle.monster_max.max(0) as usize,
             next_uid_offset: configured_offset.max(occupied_offset),
         }
+    }
+
+    #[cfg(test)]
+    pub fn seed(fight: &Fight) -> Self {
+        Self::seed_with_game_data(crate::test_support::game_data(), fight)
     }
 
     pub(crate) fn advance(&mut self) -> anyhow::Result<Option<WaveRoster>> {

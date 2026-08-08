@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod dungeon;
 pub mod engine;
 pub mod tower;

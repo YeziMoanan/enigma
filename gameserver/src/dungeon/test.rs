@@ -1,7 +1,10 @@
 use super::*;
 
 fn runtime(fight: sonettobuf::Fight) -> battle::engine::runtime::BattleRuntime {
-    battle::engine::runtime::BattleRuntime::new(config::configs::get(), fight)
+    battle::engine::runtime::BattleRuntime::new(
+        battle::catalog::BattleCatalog::new(config::configs::get()),
+        fight,
+    )
 }
 
 #[tokio::test]

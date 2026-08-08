@@ -56,19 +56,28 @@ pub struct ToughnessManager {
 }
 
 impl ToughnessManager {
-    pub fn seed(&mut self, fight: &Fight) {
+    pub fn seed_with_game_data(&mut self, game_data: &config::GameDB, fight: &Fight) {
         self.states.clear();
         self.recovery_penalties.clear();
         for entity in entities(fight) {
-            self.register(entity);
+            self.register_with_game_data(game_data, entity);
         }
     }
 
-    pub fn register(&mut self, entity: &FightEntityInfo) {
+    #[cfg(test)]
+    pub fn seed(&mut self, fight: &Fight) {
+        self.seed_with_game_data(crate::test_support::game_data(), fight);
+    }
+
+    pub fn register_with_game_data(
+        &mut self,
+        game_data: &config::GameDB,
+        entity: &FightEntityInfo,
+    ) {
         let Some(uid) = entity.uid else { return };
         let value = entity.toughness_value.unwrap_or_default().max(0);
         let point = entity.toughness_point.unwrap_or_default().max(0);
-        let configured = configured_values(entity);
+        let configured = configured_values(game_data, entity);
         let segment_value = configured.map_or(value, |values| values.0);
         let max_point = configured.map_or(point, |values| values.1);
         if segment_value <= 0 {
@@ -212,8 +221,7 @@ pub(crate) fn initial_values(raw: &str, max_hp: i32) -> Option<(i32, i32)> {
     (segment > 0 && points > 0).then_some((segment, points))
 }
 
-fn configured_values(entity: &FightEntityInfo) -> Option<(i32, i32)> {
-    let db = config::try_get()?;
+fn configured_values(db: &config::GameDB, entity: &FightEntityInfo) -> Option<(i32, i32)> {
     let monster = db.monster.get(entity.model_id?)?;
     let max_hp = entity.attr.as_ref()?.hp?;
     initial_values(&monster.toughness, max_hp)

@@ -44,7 +44,7 @@ fn captured_twins_selection_has_a_committed_runtime_source() {
     let fight: Fight = serde_json::from_value(value["fight"].clone()).unwrap();
     let (ex_attributes, sp_attributes) = preview_attributes(&fight, &path).unwrap();
     let mut runtime = BattleRuntime::new_with_attributes(
-        config::configs::get(),
+        battle::catalog::BattleCatalog::new(config::configs::get()),
         fight,
         ex_attributes,
         sp_attributes,

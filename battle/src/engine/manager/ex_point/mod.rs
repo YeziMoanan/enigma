@@ -395,7 +395,7 @@ impl ExPointManager {
         })
     }
 
-    pub fn seed(&mut self, fight: &Fight) {
+    pub fn seed_with_game_data(&mut self, game_data: &config::GameDB, fight: &Fight) {
         self.states.clear();
         self.synchronization.clear();
         self.synchronization_progress.clear();
@@ -406,14 +406,23 @@ impl ExPointManager {
                 .chain(fight.defender.iter())
                 .filter_map(|team| team.assist_boss.as_ref()),
         ) {
-            self.register(entity);
+            self.register_with_game_data(game_data, entity);
         }
     }
 
-    pub fn register(&mut self, entity: &FightEntityInfo) {
+    #[cfg(test)]
+    pub fn seed(&mut self, fight: &Fight) {
+        self.seed_with_game_data(crate::test_support::game_data(), fight);
+    }
+
+    pub fn register_with_game_data(
+        &mut self,
+        game_data: &config::GameDB,
+        entity: &FightEntityInfo,
+    ) {
         let Some(uid) = entity.uid else { return };
         let kind = ExPointKind::from_wire(entity.ex_point_type.unwrap_or_default());
-        let base_max = configured_max(entity).unwrap_or_else(|| kind.default_max());
+        let base_max = configured_max(game_data, entity).unwrap_or_else(|| kind.default_max());
         self.states.insert(
             uid,
             Self::normalize(ExPointState {
@@ -423,6 +432,11 @@ impl ExPointManager {
                 recent_decrement: 0,
             }),
         );
+    }
+
+    #[cfg(test)]
+    pub fn register(&mut self, entity: &FightEntityInfo) {
+        self.register_with_game_data(crate::test_support::game_data(), entity);
     }
 
     pub fn get(&self, uid: i64) -> i32 {
@@ -488,14 +502,23 @@ impl ExPointManager {
         state.current = Self::clamp_value(state.current, state.max);
     }
 
-    pub fn sync_entity(&self, entity: &mut FightEntityInfo) {
+    pub fn sync_entity_with_game_data(
+        &self,
+        game_data: &config::GameDB,
+        entity: &mut FightEntityInfo,
+    ) {
         let Some(uid) = entity.uid else { return };
         let state = self.states.get(&uid).copied().unwrap_or_default();
         entity.ex_point = Some(state.current);
-        let base_max = configured_max(entity)
+        let base_max = configured_max(game_data, entity)
             .unwrap_or_else(|| ExPointKind::from_wire(state.kind).default_max());
         entity.expoint_max_add = Some((self.cap_for(state) - base_max).max(0));
         entity.ex_point_type = Some(state.kind);
+    }
+
+    #[cfg(test)]
+    pub fn sync_entity(&self, entity: &mut FightEntityInfo) {
+        self.sync_entity_with_game_data(crate::test_support::game_data(), entity);
     }
 
     fn apply(
@@ -569,12 +592,11 @@ impl ExPointManager {
     }
 }
 
-fn configured_max(entity: &FightEntityInfo) -> Option<i32> {
+fn configured_max(db: &config::GameDB, entity: &FightEntityInfo) -> Option<i32> {
     if let Some(max) = entity.ex_point_max.filter(|max| *max > 0) {
         return Some(max);
     }
 
-    let db = config::try_get()?;
     let hero_id = entity.model_id?;
     let rank = crate::engine::entity::stats::rank_from_level(hero_id, entity.level.unwrap_or(1));
     let spec = if rank > 2 {
