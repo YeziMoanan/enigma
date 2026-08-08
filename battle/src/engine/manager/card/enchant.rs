@@ -49,7 +49,10 @@ pub struct RoundEndCurrentHpLoss {
     pub permille: i32,
 }
 
-pub fn round_end_current_hp_losses(cards: &[CardInfo]) -> Vec<RoundEndCurrentHpLoss> {
+pub fn round_end_current_hp_losses(
+    game_data: &config::GameDB,
+    cards: &[CardInfo],
+) -> Vec<RoundEndCurrentHpLoss> {
     let mut losses = Vec::<RoundEndCurrentHpLoss>::new();
     for card in cards {
         let Some(owner_uid) = card.uid else { continue };
@@ -57,7 +60,7 @@ pub fn round_end_current_hp_losses(cards: &[CardInfo]) -> Vec<RoundEndCurrentHpL
             .enchants
             .iter()
             .filter_map(|enchant| enchant.enchant_id)
-            .find_map(current_hp_loss_permille)
+            .find_map(|enchant_id| current_hp_loss_permille(game_data, enchant_id))
         else {
             continue;
         };
@@ -73,8 +76,8 @@ pub fn round_end_current_hp_losses(cards: &[CardInfo]) -> Vec<RoundEndCurrentHpL
     losses
 }
 
-fn current_hp_loss_permille(enchant_id: i32) -> Option<i32> {
-    let feature = &config::configs::get().card_enchant.get(enchant_id)?.feature;
+fn current_hp_loss_permille(game_data: &config::GameDB, enchant_id: i32) -> Option<i32> {
+    let feature = &game_data.card_enchant.get(enchant_id)?.feature;
     let parts = feature.split('#').collect::<Vec<_>>();
     let [kind, attacker_rate, defender_rate] = parts.as_slice() else {
         return None;
@@ -116,11 +119,14 @@ mod tests {
         };
 
         assert_eq!(
-            round_end_current_hp_losses(&[
-                card(10, EnchantedType::Burn),
-                card(11, EnchantedType::Lorenz),
-                card(10, EnchantedType::Burn),
-            ]),
+            round_end_current_hp_losses(
+                crate::test_support::game_data(),
+                &[
+                    card(10, EnchantedType::Burn),
+                    card(11, EnchantedType::Lorenz),
+                    card(10, EnchantedType::Burn),
+                ]
+            ),
             vec![RoundEndCurrentHpLoss {
                 owner_uid: 10,
                 permille: 200,

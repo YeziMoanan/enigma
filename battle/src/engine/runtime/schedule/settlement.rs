@@ -1,4 +1,5 @@
 use super::*;
+use crate::engine::manager::card::enchant::round_end_current_hp_losses;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettlementSide {
     Attacker,
@@ -136,7 +137,7 @@ fn run_card_enchant_round_end(
     context: TargetContext,
 ) -> Result<DrainResult, DrainError> {
     let commands =
-        crate::engine::manager::card::enchant::round_end_current_hp_losses(managers.card.hand())
+        round_end_current_hp_losses(managers.game_data(), managers.card.hand())
             .into_iter()
             .filter_map(|loss| {
                 let current_hp = managers.hp.current(loss.owner_uid);
