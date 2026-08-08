@@ -38,6 +38,7 @@ pub fn build_fight(
     attacker.team.sp_entitys = defender.attacker_sp_entitys;
     attacker.team.sp_fight_entities = defender.attacker_sp_fight_entities;
     apply_battle_rules(
+        catalog,
         episode_id,
         battle_id,
         &mut attacker.team,
@@ -70,6 +71,7 @@ pub fn build_fight(
 }
 
 fn apply_battle_rules(
+    catalog: crate::catalog::BattleCatalog,
     episode_id: i32,
     battle_id: i32,
     attacker: &mut sonettobuf::FightTeam,
@@ -82,7 +84,7 @@ fn apply_battle_rules(
     };
     let mut attacker_rules = Vec::new();
     let mut defender_rules = Vec::new();
-    for rule in crate::engine::fight::rules::configured(&fight) {
+    for rule in catalog.battle_rules(&fight) {
         if rule.rule_type == crate::engine::fight::rules::AdditionRuleType::FightSkill {
             continue;
         }
@@ -143,7 +145,14 @@ mod tests {
             ..Default::default()
         };
 
-        apply_battle_rules(90002501, 9000303, &mut attacker, &mut defender).unwrap();
+        apply_battle_rules(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            90002501,
+            9000303,
+            &mut attacker,
+            &mut defender,
+        )
+        .unwrap();
 
         assert_eq!(
             attacker.entitys[0].passive_skill,

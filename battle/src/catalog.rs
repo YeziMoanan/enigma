@@ -454,17 +454,49 @@ impl BattleCatalog {
             .unwrap_or_default()
     }
 
+    pub(crate) fn battle_rules(
+        self,
+        fight: &sonettobuf::Fight,
+    ) -> Vec<crate::engine::fight::rules::ConfiguredBattleRule> {
+        let Some(battle) = self.configured_battle(fight) else {
+            return Vec::new();
+        };
+        battle
+            .addition_rule
+            .split('|')
+            .chain(battle.hidden_rule.split('|'))
+            .filter_map(|entry| {
+                let (side, rule_id) = entry.split_once('#')?;
+                let side =
+                    crate::engine::fight::rules::BattleRuleSide::from_id(side.parse().ok()?)?;
+                let rule_id = rule_id.parse().ok()?;
+                let rule = self.game_data.rule.get(rule_id)?;
+                let rule_type =
+                    crate::engine::fight::rules::AdditionRuleType::from_id(rule.r#type)?;
+                Some((side, rule_id, rule_type, rule.effect.as_str()))
+            })
+            .flat_map(|(side, rule_id, rule_type, effects)| {
+                effects
+                    .split(['#', '|'])
+                    .filter_map(|skill_id| skill_id.parse::<i32>().ok())
+                    .filter(|skill_id| self.game_data.skill.get(*skill_id).is_some())
+                    .map(
+                        move |skill_id| crate::engine::fight::rules::ConfiguredBattleRule {
+                            rule_id,
+                            skill_id,
+                            side,
+                            rule_type,
+                        },
+                    )
+            })
+            .collect()
+    }
+
     fn configured_battle(
         self,
         fight: &sonettobuf::Fight,
     ) -> Option<&'static config::battle::Battle> {
-        match fight.battle_id {
-            Some(battle_id) => self.game_data.battle.get(battle_id),
-            None => fight
-                .episode_id
-                .and_then(|episode_id| self.game_data.episode.get(episode_id))
-                .and_then(|episode| self.game_data.battle.get(episode.battle_id)),
-        }
+        crate::engine::fight::configured_battle_with_game_data(self.game_data, fight)
     }
 
     fn skill_effect(self, skill_id: i32) -> Option<&'static config::skill_effect::SkillEffect> {

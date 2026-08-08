@@ -64,7 +64,7 @@ impl SkillEffectCatalog {
                     .filter_map(|skill| skill.skill_id),
             );
         }
-        if let Some(battle) = crate::engine::fight::configured_battle(fight) {
+        if let Some(battle) = crate::engine::fight::configured_battle_with_game_data(db, fight) {
             for rule_id in
                 numeric_ids(&battle.addition_rule).chain(numeric_ids(&battle.hidden_rule))
             {

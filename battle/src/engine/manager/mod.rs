@@ -995,7 +995,7 @@ impl BattleManagers {
             ..Self::default()
         };
         managers.attribute.seed_with_catalog(catalog, fight);
-        managers.battle_rule = battle_rule::BattleRuleManager::seed(fight);
+        managers.battle_rule = battle_rule::BattleRuleManager::seed_with_catalog(catalog, fight);
         managers.hp.seed(fight);
         managers.toughness.seed_with_game_data(game_data, fight);
         managers.ex_point.seed_with_game_data(game_data, fight);
