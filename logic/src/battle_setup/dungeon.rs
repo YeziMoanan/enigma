@@ -19,7 +19,9 @@ pub async fn build_fight(
     options: FightOptions,
     params: Option<&str>,
 ) -> Result<BuiltFight> {
-    let plan = battle::dungeon::plan_roster(
+    let catalog = battle::catalog::BattleCatalog::new(config::configs::get());
+    let plan = BattleRosterPlan::configured(
+        catalog,
         episode_id,
         battle_id,
         options.is_balance,
@@ -28,7 +30,7 @@ pub async fn build_fight(
     )?;
     let roster = load_roster(db, player_id, &plan, fight_group).await?;
     battle::dungeon::build_fight(
-        battle::catalog::BattleCatalog::new(config::configs::get()),
+        catalog,
         &roster,
         episode_id,
         battle_id,

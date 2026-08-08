@@ -77,6 +77,37 @@ pub struct BattleRosterPlan {
 }
 
 impl BattleRosterPlan {
+    pub fn configured(
+        catalog: crate::catalog::BattleCatalog,
+        episode_id: i32,
+        battle_id: i32,
+        is_balance: bool,
+        fight_group: &sonettobuf::FightGroup,
+        params: Option<&str>,
+    ) -> Result<Self> {
+        let setup = attacker_setup(
+            catalog,
+            episode_id,
+            battle_id,
+            is_balance,
+            fight_group,
+            params,
+        )?;
+        Ok(Self {
+            hero_uids: fight_group
+                .hero_list
+                .iter()
+                .chain(&fight_group.sub_hero_list)
+                .copied()
+                .filter(|uid| *uid > 0)
+                .collect(),
+            compose_support: setup.compose_support.map(|plan| ComposeSupportLookup {
+                hero_id: plan.hero_id,
+                hero_uid: plan.assist.map(|assist| assist.hero_uid),
+            }),
+        })
+    }
+
     pub fn hero_uids(&self) -> &[i64] {
         &self.hero_uids
     }
@@ -108,20 +139,14 @@ pub fn plan_roster(
     fight_group: &sonettobuf::FightGroup,
     params: Option<&str>,
 ) -> Result<BattleRosterPlan> {
-    let setup = attacker_setup(episode_id, battle_id, is_balance, fight_group, params)?;
-    Ok(BattleRosterPlan {
-        hero_uids: fight_group
-            .hero_list
-            .iter()
-            .chain(&fight_group.sub_hero_list)
-            .copied()
-            .filter(|uid| *uid > 0)
-            .collect(),
-        compose_support: setup.compose_support.map(|plan| ComposeSupportLookup {
-            hero_id: plan.hero_id,
-            hero_uid: plan.assist.map(|assist| assist.hero_uid),
-        }),
-    })
+    BattleRosterPlan::configured(
+        crate::catalog::BattleCatalog::new(config::configs::get()),
+        episode_id,
+        battle_id,
+        is_balance,
+        fight_group,
+        params,
+    )
 }
 
 impl BattleRoster {
@@ -150,7 +175,14 @@ impl Attacker {
         fight_group: &sonettobuf::FightGroup,
         params: Option<&str>,
     ) -> Result<BuiltAttacker> {
-        let setup = attacker_setup(episode_id, battle_id, is_balance, fight_group, params)?;
+        let setup = attacker_setup(
+            catalog,
+            episode_id,
+            battle_id,
+            is_balance,
+            fight_group,
+            params,
+        )?;
         let balance = setup.balance;
         let aid_ids = setup.aid_ids;
         let selected_trials = setup.selected_trials;
@@ -257,7 +289,7 @@ impl Attacker {
             skill_infos,
         );
         if let Some((support, info, ex, sp)) =
-            Self::compose_support(roster, setup.compose_support.as_ref())?
+            Self::compose_support(catalog, roster, setup.compose_support.as_ref())?
         {
             team.assist_boss = Some(support);
             team.assist_boss_info = Some(info);
@@ -283,6 +315,7 @@ impl Attacker {
     }
 
     fn compose_support(
+        catalog: crate::catalog::BattleCatalog,
         roster: &BattleRoster,
         plan: Option<&ComposeSupportPlan>,
     ) -> Result<
@@ -296,7 +329,7 @@ impl Attacker {
         let Some(plan) = plan else {
             return Ok(None);
         };
-        let tables = config::configs::get();
+        let tables = catalog.game_data();
         let support = tables
             .tower_compose_support
             .get(plan.support_id)
@@ -378,13 +411,15 @@ impl Attacker {
 }
 
 fn attacker_setup(
+    catalog: crate::catalog::BattleCatalog,
     episode_id: i32,
     battle_id: i32,
     is_balance: bool,
     fight_group: &sonettobuf::FightGroup,
     params: Option<&str>,
 ) -> Result<AttackerSetup> {
-    let battle = config::configs::get()
+    let battle = catalog
+        .game_data()
         .battle
         .get(battle_id)
         .ok_or_else(|| anyhow::anyhow!("unknown battle {battle_id}"))?;
@@ -430,16 +465,17 @@ fn attacker_setup(
         aid_ids,
         selected_trials,
         use_configured_aids,
-        compose_support: compose_support_plan(episode_id, fight_group, params)?,
+        compose_support: compose_support_plan(catalog, episode_id, fight_group, params)?,
     })
 }
 
 fn compose_support_plan(
+    catalog: crate::catalog::BattleCatalog,
     episode_id: i32,
     fight_group: &sonettobuf::FightGroup,
     params: Option<&str>,
 ) -> Result<Option<ComposeSupportPlan>> {
-    let tables = config::configs::get();
+    let tables = catalog.game_data();
     if !tables
         .tower_compose_episode
         .iter()
@@ -680,8 +716,8 @@ fn active_skills(raw: &str) -> Vec<AssistBossSkillInfo> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BattleFighter, BattleRoster, configured_aid_ids, reserved_uid_offset, selected_support,
-        validate_composition,
+        BattleFighter, BattleRoster, BattleRosterPlan, configured_aid_ids, plan_roster,
+        reserved_uid_offset, selected_support, validate_composition,
     };
     use crate::dungeon::FightOptions;
     use crate::engine::entity::input::{EquipmentBuildInput, HeroBuildInput};
@@ -690,6 +726,25 @@ mod tests {
     fn selects_support_from_the_active_compose_plane() {
         assert_eq!(selected_support("30#40#50", 0), Some(30));
         assert_eq!(selected_support("31#41#51|32#42#52", 2), Some(32));
+    }
+
+    #[test]
+    fn explicit_roster_plan_matches_the_legacy_entry_point() {
+        crate::test_support::init_config();
+        let group = sonettobuf::FightGroup::default();
+        let legacy = plan_roster(10101, 10101, false, &group, None).unwrap();
+        let explicit = BattleRosterPlan::configured(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            10101,
+            10101,
+            false,
+            &group,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(explicit.hero_uids(), legacy.hero_uids());
+        assert_eq!(explicit.compose_support(), legacy.compose_support());
     }
 
     #[test]
