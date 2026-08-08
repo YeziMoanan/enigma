@@ -216,6 +216,13 @@ impl BattleCatalog {
             .unwrap_or(skill_id)
     }
 
+    pub(crate) fn skill_hero_id(self, skill_id: i32) -> Option<i32> {
+        self.game_data
+            .skill
+            .get(skill_id)
+            .map(|skill| skill.hero_id)
+    }
+
     pub(crate) fn skill_big_skill_point(self, skill_id: i32) -> i32 {
         self.skill_effect(skill_id)
             .map(|effect| effect.big_skill_point)

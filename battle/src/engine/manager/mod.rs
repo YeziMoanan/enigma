@@ -130,8 +130,12 @@ pub(crate) struct HpExecution {
 }
 
 impl BattleManagers {
+    pub(crate) fn try_catalog(&self) -> Option<crate::catalog::BattleCatalog> {
+        self.catalog_data
+    }
+
     pub(crate) fn catalog(&self) -> crate::catalog::BattleCatalog {
-        if let Some(catalog) = self.catalog_data {
+        if let Some(catalog) = self.try_catalog() {
             return catalog;
         }
         #[cfg(test)]
