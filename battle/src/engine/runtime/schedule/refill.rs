@@ -142,8 +142,18 @@ fn run_card_refill(
     );
     append_round_phase(&mut result, composition);
     loop {
-        let ready_normal =
-            crate::engine::mechanic::card::CardMechanic.normal_ultimate_cards(pool, managers);
+        let needs_normal_card = match stage {
+            RefillStage::Opening => managers.card.hand().len() < hand_size,
+            RefillStage::AfterActions | RefillStage::RoundStart => {
+                crate::engine::mechanic::card::CardMechanic.refill_hand_len(managers, pool)
+                    < hand_size
+            }
+        };
+        let ready_normal = if stage == RefillStage::Opening || needs_normal_card {
+            crate::engine::mechanic::card::CardMechanic.normal_ultimate_cards(pool, managers)
+        } else {
+            Vec::new()
+        };
         let ready_special = if stage == RefillStage::AfterActions {
             crate::engine::mechanic::card::CardMechanic
                 .special_team_cards(pool, managers, managers.card.hand())
@@ -156,13 +166,6 @@ fn run_card_refill(
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
-        };
-        let needs_normal_card = match stage {
-            RefillStage::Opening => managers.card.hand().len() < hand_size,
-            RefillStage::AfterActions | RefillStage::RoundStart => {
-                crate::engine::mechanic::card::CardMechanic.refill_hand_len(managers, pool)
-                    < hand_size
-            }
         };
         if !needs_normal_card
             && ready_normal.is_empty()
