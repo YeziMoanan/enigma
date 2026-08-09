@@ -16,18 +16,11 @@ impl TargetRequest {
 }
 
 pub fn target_count(db: &config::GameDB, code: i32) -> i32 {
-    db.ai_monster_target
-        .get(code)
-        .map(|row| row.target_number)
-        .unwrap_or_default()
+    crate::catalog::target_count(db, code)
 }
 
 pub fn damage_target_count_kind(db: &config::GameDB, code: i32) -> i32 {
-    match target_count(db, code) {
-        1 => 1,
-        count if count > 1 => 2,
-        _ => 0,
-    }
+    crate::catalog::damage_target_count_kind(db, code)
 }
 
 #[cfg(test)]
@@ -39,9 +32,15 @@ mod tests {
         crate::test_support::init_config();
 
         let db = crate::test_support::game_data();
+        let catalog = crate::catalog::BattleCatalog::new(db);
         assert_eq!(damage_target_count_kind(db, 1), 1);
         assert_eq!(damage_target_count_kind(db, 201), 2);
         assert_eq!(damage_target_count_kind(db, 202), 2);
         assert_eq!(damage_target_count_kind(db, i32::MAX), 0);
+        assert_eq!(
+            damage_target_count_kind(db, 1),
+            catalog.damage_target_count_kind(1)
+        );
+        assert_eq!(target_count(db, 201), catalog.target_count(201));
     }
 }

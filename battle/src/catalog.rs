@@ -227,6 +227,14 @@ impl BattleCatalog {
             .ok()
     }
 
+    pub(crate) fn target_count(self, code: i32) -> i32 {
+        target_count(self.game_data, code)
+    }
+
+    pub(crate) fn damage_target_count_kind(self, code: i32) -> i32 {
+        damage_target_count_kind(self.game_data, code)
+    }
+
     pub(crate) fn buff_status(
         self,
         buff_id: i32,
@@ -749,6 +757,22 @@ fn parse_integers(raw: &str) -> Vec<i32> {
         .collect()
 }
 
+pub(crate) fn target_count(game_data: &config::GameDB, code: i32) -> i32 {
+    game_data
+        .ai_monster_target
+        .get(code)
+        .map(|row| row.target_number)
+        .unwrap_or_default()
+}
+
+pub(crate) fn damage_target_count_kind(game_data: &config::GameDB, code: i32) -> i32 {
+    match target_count(game_data, code) {
+        1 => 1,
+        count if count > 1 => 2,
+        _ => 0,
+    }
+}
+
 fn configured_fight_version(raw: Option<&str>) -> ConfiguredFightVersion {
     let Some(raw) = raw else {
         return ConfiguredFightVersion::Missing;
@@ -823,6 +847,19 @@ mod tests {
             BattleCatalog::new(crate::test_support::game_data()).burn_buff_type_id(),
             Some(4_150_001)
         );
+    }
+
+    #[test]
+    fn normalizes_target_counts() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.target_count(1), 1);
+        assert_eq!(catalog.damage_target_count_kind(1), 1);
+        assert_eq!(catalog.damage_target_count_kind(201), 2);
+        assert_eq!(catalog.damage_target_count_kind(202), 2);
+        assert_eq!(catalog.target_count(i32::MAX), 0);
+        assert_eq!(catalog.damage_target_count_kind(i32::MAX), 0);
     }
 
     #[test]

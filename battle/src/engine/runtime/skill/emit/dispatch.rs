@@ -123,11 +123,9 @@ pub(in crate::engine::runtime) fn emit_ops(
         SkillTarget::LogicRule(code) => code,
         _ => catalog.logic_target(effect_skill_id),
     };
-    execution.context.damage_target_count_kind =
-        crate::engine::skill::target::request::damage_target_count_kind(
-            managers.game_data(),
-            execution.context.logic_target,
-        );
+    execution.context.damage_target_count_kind = managers
+        .catalog()
+        .damage_target_count_kind(execution.context.logic_target);
     execution.context.extra_skill_kind = invocation
         .extra_skill_kind
         .map(|kind| kind.id())

@@ -860,10 +860,7 @@ fn damage_targets(
     };
     let base_count = catalog
         .target_limit(effect_skill_id)
-        .max(
-            crate::engine::skill::target::request::target_count(managers.game_data(), request.code)
-                .max(0) as usize,
-        )
+        .max(managers.catalog().target_count(request.code).max(0) as usize)
         .max(1);
     let behavior_extra_count = execution.context.additional_skill_target_count.max(0) as usize;
     let extra_count =

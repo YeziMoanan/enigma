@@ -390,10 +390,7 @@ fn target_options(
             .unwrap_or_default(),
         active_skill_type: catalog.skill_type(skill_id),
         active_skill_effect_tag: catalog.effect_tag(skill_id),
-        damage_target_count_kind: crate::engine::skill::target::request::damage_target_count_kind(
-            managers.game_data(),
-            code,
-        ),
+        damage_target_count_kind: managers.catalog().damage_target_count_kind(code),
         ..Default::default()
     };
     TargetResolver::resolve_primary_candidates(
