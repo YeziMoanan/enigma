@@ -325,7 +325,7 @@ fn round_start_keeps_precast_above_normal_hand_capacity() {
         .join("../battle_preview/fixtures/battles/battle6/StartDungeonReply.json");
     let mut value: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(fixture).unwrap()).unwrap();
-    crate::preview::normalize_live_json(&mut value);
+    sonettobuf::normalize::normalize_live_json(&mut value);
     let fight: Fight = serde_json::from_value(value["fight"].clone()).unwrap();
     let mut runtime = runtime(fight);
 
@@ -348,7 +348,7 @@ fn round_start_keeps_precast_above_normal_hand_capacity() {
         .unwrap(),
     )
     .unwrap();
-    crate::preview::normalize_live_json(&mut request_value);
+    sonettobuf::normalize::normalize_live_json(&mut request_value);
     let request: BeginRoundRequest = serde_json::from_value(request_value).unwrap();
     let round = runtime.build_begin_round_from_schedule(&request).unwrap();
     let normal = runtime.managers.card.normal_hand_len();
@@ -394,7 +394,7 @@ fn rank_three_emanation_updates_lingering_glow() {
         &std::fs::read_to_string(battle.join("StartDungeonReply.json")).unwrap(),
     )
     .unwrap();
-    crate::preview::normalize_live_json(&mut value);
+    sonettobuf::normalize::normalize_live_json(&mut value);
     let fight: Fight = serde_json::from_value(value["fight"].clone()).unwrap();
     let mut runtime = runtime(fight);
     runtime.start_round().unwrap();
@@ -415,7 +415,7 @@ fn rank_three_emanation_updates_lingering_glow() {
                 .unwrap(),
         )
         .unwrap();
-        crate::preview::normalize_live_json(&mut value);
+        sonettobuf::normalize::normalize_live_json(&mut value);
         serde_json::from_value::<BeginRoundRequest>(value).unwrap()
     };
     runtime

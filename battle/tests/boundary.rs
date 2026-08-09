@@ -65,6 +65,23 @@ fn runtime_uses_the_catalog_instead_of_raw_config() {
 }
 
 #[test]
+fn battle_does_not_include_sources_from_consumer_crates() {
+    let root = workspace_root().join("battle/src");
+    let mut violations = Vec::new();
+    for path in rust_files(&root) {
+        let source = fs::read_to_string(&path).unwrap();
+        if source.contains("battle_preview/src") {
+            violations.push(path.display().to_string());
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "battle must not include source files from consumer crates:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn dependency_parser_includes_target_and_dotted_tables() {
     let manifest = r#"
 [dependencies]
@@ -157,23 +174,34 @@ fn table_header(line: &str) -> Option<&str> {
 }
 
 fn production_rust_files(root: &Path) -> Vec<PathBuf> {
+    rust_files_filtered(root, true)
+}
+
+fn rust_files(root: &Path) -> Vec<PathBuf> {
+    rust_files_filtered(root, false)
+}
+
+fn rust_files_filtered(root: &Path, production_only: bool) -> Vec<PathBuf> {
     let mut pending = vec![root.to_owned()];
     let mut files = Vec::new();
     while let Some(path) = pending.pop() {
         for entry in fs::read_dir(path).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                if !matches!(
-                    path.file_name().and_then(|name| name.to_str()),
-                    Some("test" | "tests")
-                ) {
+                if !production_only
+                    || !matches!(
+                        path.file_name().and_then(|name| name.to_str()),
+                        Some("test" | "tests")
+                    )
+                {
                     pending.push(path);
                 }
             } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs")
-                && !matches!(
-                    path.file_name().and_then(|name| name.to_str()),
-                    Some("test.rs" | "tests.rs")
-                )
+                && (!production_only
+                    || !matches!(
+                        path.file_name().and_then(|name| name.to_str()),
+                        Some("test.rs" | "tests.rs")
+                    ))
             {
                 files.push(path);
             }
