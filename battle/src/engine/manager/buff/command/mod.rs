@@ -9,7 +9,7 @@ use crate::engine::{
 use super::{
     ActiveBuff, BuffActInfoMarkerResult, BuffAddArgs, BuffDefinition, BuffDeleteReason,
     BuffManager, BuffMarkerResult, BuffPolicy, BuffReplaceResult, BuffRoute,
-    BuffShieldRemoveResult, BuffStatus, count_or_layer,
+    BuffShieldRemoveResult, BuffStatus, count_or_layer_from,
     grant_plan::{GrantAction, LayerRefreshPlan, PlannedFanout, PlannedFanoutRefresh},
     typed_count_repeat,
     uid_policy::{self, UidAllocationPlan},

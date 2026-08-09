@@ -311,7 +311,9 @@ impl BuffManager {
         let mut specs = Vec::new();
         for carrier in halo::carriers(self.catalog(), buff_id) {
             let fanout_buff_id = carrier.linked_buff_id.unwrap_or(buff_id);
-            let Some(definition) = BuffDefinition::get(fanout_buff_id) else {
+            let Some(definition) =
+                BuffDefinition::configured(self.catalog().game_data(), fanout_buff_id)
+            else {
                 continue;
             };
             let include_owner =
@@ -367,7 +369,9 @@ impl BuffManager {
             .filter(|carrier| matches!(carrier.kind, HaloKind::Base | HaloKind::LayerMaster))
         {
             let fanout_buff_id = carrier.linked_buff_id.unwrap_or(carrier_buff_id);
-            let Some(definition) = BuffDefinition::get(fanout_buff_id) else {
+            let Some(definition) =
+                BuffDefinition::configured(self.catalog().game_data(), fanout_buff_id)
+            else {
                 continue;
             };
             let rule =

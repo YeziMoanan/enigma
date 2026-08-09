@@ -275,7 +275,12 @@ fn fallback_type_id(buff: &BuffInfo) -> i32 {
 }
 
 fn count_or_layer(buff: &BuffInfo) -> i32 {
-    match buff.buff_id.and_then(BuffDefinition::get) {
+    let definition = buff.buff_id.and_then(BuffDefinition::get);
+    count_or_layer_from(buff, definition.as_ref())
+}
+
+fn count_or_layer_from(buff: &BuffInfo, definition: Option<&BuffDefinition>) -> i32 {
+    match definition {
         Some(definition) if definition.uses_stack_layer() => buff.layer.unwrap_or_default().max(0),
         Some(definition) if definition.uses_typed_count() => buff.count.unwrap_or_default().max(0),
         _ => buff

@@ -172,7 +172,11 @@ impl BuffManager {
             definition: Some(definition.clone()),
             buff: buff.clone(),
         });
-        self.record_added(target_uid, buff_id, count_or_layer(&buff));
+        self.record_added(
+            target_uid,
+            buff_id,
+            count_or_layer_from(&buff, Some(definition)),
+        );
         let markers = marker::add_markers(buff_id)
             .into_iter()
             .map(|marker| BuffMarkerResult {
