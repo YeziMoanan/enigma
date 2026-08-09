@@ -235,7 +235,7 @@ impl BattleRuntime {
     ) -> Self {
         let game_data = catalog.game_data();
         let mut managers = BattleManagers::seeded_with_catalog(catalog, &fight);
-        if let Some(route) = game_data.activity128_battle(
+        if let Some(target_model_ids) = catalog.boss_rush_target_models(
             fight.episode_id.unwrap_or_default(),
             fight.battle_id.unwrap_or_default(),
         ) && let Some(target_uid) = fight.defender.as_ref().and_then(|team| {
@@ -245,7 +245,7 @@ impl BattleRuntime {
                 .find(|entity| {
                     entity
                         .model_id
-                        .is_some_and(|model_id| route.target_model_ids.contains(&model_id))
+                        .is_some_and(|model_id| target_model_ids.contains(&model_id))
                 })
                 .and_then(|entity| entity.uid)
         }) {

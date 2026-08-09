@@ -583,6 +583,16 @@ impl BattleCatalog {
         configured_conduit_device(self.game_data, model_id)
     }
 
+    pub(crate) fn boss_rush_target_models(
+        self,
+        episode_id: i32,
+        battle_id: i32,
+    ) -> Option<Vec<i32>> {
+        self.game_data
+            .activity128_battle(episode_id, battle_id)
+            .map(|route| route.target_model_ids)
+    }
+
     pub(crate) fn careers(self, career: i32) -> Vec<i32> {
         self.game_data
             .fight_effect_group
@@ -1702,6 +1712,19 @@ mod tests {
             }),
             0
         );
+    }
+
+    #[test]
+    fn normalizes_boss_rush_target_models() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.boss_rush_target_models(12_800_101, 1_014_201),
+            Some(vec![10_142_011])
+        );
+        assert_eq!(catalog.boss_rush_target_models(12_800_101, 1_014_202), None);
+        assert_eq!(catalog.boss_rush_target_models(-1, -1), None);
     }
 
     #[test]
