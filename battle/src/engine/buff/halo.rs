@@ -85,6 +85,9 @@ pub fn fanout_markers(catalog: crate::catalog::BattleCatalog, buff_id: i32) -> V
         .filter_map(|token| {
             let opcode = token.split('#').next()?.parse().ok()?;
             let effect_type = match catalog.buff_act_definition(opcode)?.kind {
+                crate::engine::skill::buff_act::registry::BuffActKind::HaloBase => {
+                    EffectType::Haloslave
+                }
                 crate::engine::skill::buff_act::registry::BuffActKind::MasterHalo
                 | crate::engine::skill::buff_act::registry::BuffActKind::LayerMasterHalo => {
                     EffectType::Layerslavehalo
@@ -135,6 +138,11 @@ mod tests {
                 linked_buff_id: None,
             }]
         );
-        assert!(fanout_markers(catalog, 109320111).is_empty());
+        assert_eq!(
+            fanout_markers(catalog, 109320111),
+            vec![HaloMarker {
+                effect_type: EffectType::Haloslave,
+            }]
+        );
     }
 }
