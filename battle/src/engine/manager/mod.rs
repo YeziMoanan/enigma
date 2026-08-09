@@ -708,8 +708,7 @@ impl BattleManagers {
         &mut self,
         command: upgrade::UpgradeCommand,
     ) -> Result<upgrade::UpgradeChange, upgrade::UpgradeCommandError> {
-        let game_data = self.game_data();
-        self.upgrade.execute_command(game_data, command)
+        self.upgrade.execute_command(self.catalog(), command)
     }
 
     pub fn select_upgrade(

@@ -279,6 +279,42 @@ impl BattleCatalog {
         summoned_unique_skills(self.game_data, summoned_id)
     }
 
+    pub(crate) fn upgrade_selection(
+        self,
+        upgrade_id: i32,
+        option_id: i32,
+    ) -> Option<crate::engine::manager::upgrade::UpgradeSelection> {
+        let upgrade = self.game_data.hero_upgrade.get(upgrade_id)?;
+        parse_upgrade_ids(&upgrade.options)
+            .contains(&option_id)
+            .then_some(())?;
+        let option = self.game_data.hero_upgrade_options.get(option_id)?;
+        Some(crate::engine::manager::upgrade::UpgradeSelection {
+            upgrade_id,
+            option_id,
+            add_buff_ids: parse_upgrade_ids(&option.add_buff),
+            del_buff_ids: parse_upgrade_ids(&option.del_buff),
+            replace_skill_group1: parse_upgrade_ids(&option.replace_skill_group1),
+            replace_skill_group2: parse_upgrade_ids(&option.replace_skill_group2),
+            replace_big_skill: option.replace_big_skill,
+            replace_passive_skills: parse_upgrade_pairs(&option.replace_passive_skill),
+            add_passive_skill_ids: parse_upgrade_ids(&option.add_passive_skill),
+        })
+    }
+
+    pub(crate) fn upgrade_has_available_option(
+        self,
+        upgrade_id: i32,
+        selected: &[i32],
+    ) -> Option<bool> {
+        let upgrade = self.game_data.hero_upgrade.get(upgrade_id)?;
+        Some(
+            parse_upgrade_ids(&upgrade.options)
+                .into_iter()
+                .any(|option_id| !selected.contains(&option_id)),
+        )
+    }
+
     pub(crate) fn buff_status(
         self,
         buff_id: i32,
@@ -827,6 +863,22 @@ fn parse_positive_ids(raw: &str) -> Vec<i32> {
         .collect()
 }
 
+fn parse_upgrade_ids(raw: &str) -> Vec<i32> {
+    raw.split(['|', '#', ','])
+        .filter_map(|value| value.trim().parse().ok())
+        .filter(|value| *value > 0)
+        .collect()
+}
+
+fn parse_upgrade_pairs(raw: &str) -> Vec<(i32, i32)> {
+    raw.split('|')
+        .filter_map(|pair| {
+            let mut values = pair.split('#').filter_map(|value| value.parse().ok());
+            Some((values.next()?, values.next()?))
+        })
+        .collect()
+}
+
 fn parse_integers(raw: &str) -> Vec<i32> {
     raw.split(['|', '#'])
         .filter_map(|value| value.trim().parse().ok())
@@ -1016,6 +1068,37 @@ mod tests {
 
         assert_eq!(catalog.summoned_unique_skills(15_001), vec![30_740_171]);
         assert!(catalog.summoned_unique_skills(-1).is_empty());
+    }
+
+    #[test]
+    fn normalizes_hero_upgrade_options() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.upgrade_selection(308_664, 3_086_524),
+            Some(crate::engine::manager::upgrade::UpgradeSelection {
+                upgrade_id: 308_664,
+                option_id: 3_086_524,
+                add_buff_ids: vec![30_860_132, 30_860_191, 30_860_172, 30_860_112],
+                del_buff_ids: vec![30_860_131],
+                replace_skill_group1: Vec::new(),
+                replace_skill_group2: vec![30_865_127, 30_865_128, 30_865_129],
+                replace_big_skill: 0,
+                replace_passive_skills: Vec::new(),
+                add_passive_skill_ids: Vec::new(),
+            })
+        );
+        assert_eq!(catalog.upgrade_selection(308_664, 3_086_525), None);
+        assert_eq!(
+            catalog.upgrade_has_available_option(308_664, &[]),
+            Some(true)
+        );
+        assert_eq!(
+            catalog.upgrade_has_available_option(308_664, &[3_086_514, 3_086_524, 3_086_534]),
+            Some(false)
+        );
+        assert_eq!(catalog.upgrade_has_available_option(-1, &[]), None);
     }
 
     #[test]

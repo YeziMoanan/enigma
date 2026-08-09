@@ -93,7 +93,7 @@ fn upgrade_offer_projects_without_loading_the_selected_entity() {
     let mut upgrades = UpgradeManager::default();
     let change = upgrades
         .execute_command(
-            crate::test_support::game_data(),
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             UpgradeCommand {
                 owner_uid: 10,
                 operation: UpgradeOperation::Offer {
