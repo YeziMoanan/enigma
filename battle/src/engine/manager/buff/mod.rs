@@ -59,19 +59,6 @@ pub(crate) fn wire_markers(
         .unwrap_or_default()
 }
 
-pub(crate) fn state_snapshot_wire(
-    buff_id: i32,
-    params: Option<&str>,
-) -> Vec<(i32, Option<String>)> {
-    BuffDefinition::get(buff_id)
-        .map(|definition| definition.state_snapshot_wire(params))
-        .unwrap_or_default()
-}
-
-pub(crate) fn refreshes_unchanged(buff_id: i32) -> bool {
-    BuffDefinition::get(buff_id).is_some_and(|definition| definition.refreshes_unchanged())
-}
-
 #[derive(Debug, Clone)]
 /// Owns active buff instances, storage policy, private act state, and buff UID allocation.
 /// Callers submit `BuffCommand`s rather than choosing stacking, exclusion, or UID policy.
