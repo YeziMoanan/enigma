@@ -11,7 +11,7 @@ fn ally_action_context_preserves_assassination_identity() {
     });
 
     super::super::invoke::apply_event_context(
-        crate::test_support::game_data(),
+        crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
         &mut context,
         &event,
     );
@@ -41,7 +41,11 @@ fn hit_context_uses_the_explicit_skill_catalog_rank() {
         ignore_riposte: false,
     });
 
-    super::super::invoke::apply_event_context(db, &mut context, &event);
+    super::super::invoke::apply_event_context(
+        crate::catalog::BattleCatalog::new(db),
+        &mut context,
+        &event,
+    );
 
     assert_eq!(
         context.active_skill_rank,
