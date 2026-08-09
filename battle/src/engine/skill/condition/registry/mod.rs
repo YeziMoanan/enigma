@@ -587,7 +587,7 @@ condition_definitions! {
     [564203] "BurnOverflow" => buff::burn_overflow, event_trigger(EventKind::SkillAction, Some(SkillPhase::Immediate));
     [25212] "UseExSkill" => trigger::parse_target_use_ex_skill, event_trigger(EventKind::AllyAction, None);
     [720212] "TeammateUseExSkill" => trigger::parse_teammate_use_ex_skill, event_trigger(EventKind::AllyAction, None);
-    [502212] "ActiveUseSkill" => active_skill::active_use, normal_buff_grant(event_trigger(EventKind::AllyAction, None));
+    [502212] "ActiveUseSkill" => active_skill::active_ally_use, normal_buff_grant(event_trigger(EventKind::AllyAction, None));
     [620212] "CurrSkillLevel" => active_skill::rank, event_trigger(EventKind::AllyAction, None);
     [502203] "ActiveUseSkill" => active_skill::active_use, event_trigger(EventKind::SkillAction, Some(SkillPhase::Immediate));
     [502208] "ActiveUseSkill" => active_skill::active_use, event_trigger(EventKind::SkillAction, Some(SkillPhase::AfterDamage));
