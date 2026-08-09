@@ -181,10 +181,10 @@ impl BuffDefinition {
             exclude_status_ids: parse_exclude_status_ids(exclude_types),
             include_entries: include_entries.unwrap_or_default(),
             include_types_valid,
-            attribute_deltas: parse_attribute_deltas(features),
+            attribute_deltas: parse_attribute_deltas(game, features),
             features: super::feature::resolve_features_from(Some(game), features),
             has_features: !features.trim().is_empty(),
-            act_common_params: initial_act_common_params(features),
+            act_common_params: initial_act_common_params(game, features),
             take_stage: buff_type.map(|row| row.take_stage).unwrap_or_default(),
             take_act: buff_type
                 .map(|row| row.take_act.clone())
@@ -813,7 +813,7 @@ fn parse_exclude_values(raw: &str, expected_prefix: &str) -> Vec<i32> {
         .collect()
 }
 
-fn parse_attribute_deltas(features: &str) -> Vec<(AttrId, i32)> {
+fn parse_attribute_deltas(game: &config::GameDB, features: &str) -> Vec<(AttrId, i32)> {
     features
         .split('|')
         .filter_map(|feature| {
@@ -823,8 +823,9 @@ fn parse_attribute_deltas(features: &str) -> Vec<(AttrId, i32)> {
                 .collect::<Vec<i32>>();
             match values.as_slice() {
                 [act_id, attr_id, value]
-                    if config::try_get()
-                        .and_then(|db| db.buff_act.get(*act_id))
+                    if game
+                        .buff_act
+                        .get(*act_id)
                         .and_then(|act| {
                             crate::engine::skill::buff_act::registry::kind(*act_id, &act.r#type)
                         })
@@ -833,8 +834,9 @@ fn parse_attribute_deltas(features: &str) -> Vec<(AttrId, i32)> {
                     Some((AttrId::from_raw(*attr_id)?, *value))
                 }
                 [act_id, value]
-                    if config::try_get()
-                        .and_then(|db| db.buff_act.get(*act_id))
+                    if game
+                        .buff_act
+                        .get(*act_id)
                         .and_then(|act| {
                             crate::engine::skill::buff_act::registry::kind(*act_id, &act.r#type)
                         })
@@ -884,14 +886,14 @@ fn has_include_value(include_type: i32) -> bool {
     matches!(include_type, 7 | 10 | 11 | 12 | 13 | 14 | 15 | 17)
 }
 
-fn initial_act_common_params(features: &str) -> String {
+fn initial_act_common_params(game: &config::GameDB, features: &str) -> String {
     features
         .split('|')
         .map(str::trim)
         .filter(|raw| !raw.is_empty())
         .filter_map(|raw| raw.split('#').next()?.trim().parse::<i32>().ok())
         .find_map(|act_id| {
-            let act = config::try_get()?.buff_act.get(act_id)?;
+            let act = game.buff_act.get(act_id)?;
             match crate::engine::skill::buff_act::registry::kind(act_id, &act.r#type)? {
                 crate::engine::skill::buff_act::registry::BuffActKind::EzioBigSkill => {
                     Some(format!("{act_id}#1,0,0"))
