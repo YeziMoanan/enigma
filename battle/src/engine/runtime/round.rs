@@ -582,22 +582,17 @@ fn apply_cloth_power(
     let Some(power) = managers.catalog().cloth_power(fight) else {
         return;
     };
-    let mut moved_card = false;
     for outcome in &result.outcomes {
         let executor::RuleOutcome::Card(changes) = outcome else {
             continue;
         };
-        let composition_from_move =
-            changes.kind == crate::engine::manager::card::CardChangeKind::Composed && moved_card;
         state.power = cloth_power_after_card_change(
             &power,
             state.power,
             changes.kind,
             changes.played.is_some(),
             eligible_composition_count(managers, &changes.composed_owners),
-            composition_from_move,
         );
-        moved_card = changes.kind == crate::engine::manager::card::CardChangeKind::Moved;
     }
 }
 
@@ -617,17 +612,16 @@ pub(super) fn cloth_power_after_card_change(
     kind: crate::engine::manager::card::CardChangeKind,
     has_played: bool,
     composed_count: usize,
-    composition_from_move: bool,
 ) -> i32 {
     match kind {
         crate::engine::manager::card::CardChangeKind::Moved => power.card_moved(current),
         crate::engine::manager::card::CardChangeKind::Played if has_played => {
             power.card_used(current)
         }
-        crate::engine::manager::card::CardChangeKind::Refilled if composed_count > 0 => {
-            power.cards_composed(current, composed_count)
-        }
-        crate::engine::manager::card::CardChangeKind::Composed if composition_from_move => {
+        crate::engine::manager::card::CardChangeKind::Refilled
+        | crate::engine::manager::card::CardChangeKind::Composed
+            if composed_count > 0 =>
+        {
             power.cards_composed(current, composed_count)
         }
         _ => current,
