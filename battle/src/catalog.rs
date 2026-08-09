@@ -289,6 +289,15 @@ impl BattleCatalog {
         configured_monster_toughness(self.game_data, model_id, max_hp)
     }
 
+    pub(crate) fn entity_ex_point_max(
+        self,
+        explicit_max: Option<i32>,
+        model_id: Option<i32>,
+        level: i32,
+    ) -> Option<i32> {
+        configured_ex_point_max(self.game_data, explicit_max, model_id, level)
+    }
+
     pub(crate) fn upgrade_selection(
         self,
         upgrade_id: i32,

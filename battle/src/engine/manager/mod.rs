@@ -146,10 +146,6 @@ impl BattleManagers {
         panic!("battle managers were not constructed with a catalog")
     }
 
-    pub(crate) fn game_data(&self) -> &'static config::GameDB {
-        self.catalog().game_data()
-    }
-
     pub(crate) fn fight_version(&self) -> i32 {
         self.fight_version
     }
@@ -851,12 +847,12 @@ impl BattleManagers {
     }
 
     fn register_entity_state(&mut self, entity: &FightEntityInfo) {
-        let game_data = self.game_data();
+        let catalog = self.catalog();
         let team_type = entity.team_type.unwrap_or_default();
-        self.attribute.register_with_catalog(self.catalog(), entity);
+        self.attribute.register_with_catalog(catalog, entity);
         self.hp.register(entity);
-        self.toughness.register_with_game_data(game_data, entity);
-        self.ex_point.register_with_game_data(game_data, entity);
+        self.toughness.register_configured(catalog, entity);
+        self.ex_point.register_configured(catalog, entity);
         self.eureka.register(entity);
         self.buff.register_entity(entity, team_type);
     }
@@ -995,7 +991,6 @@ impl BattleManagers {
 
     /// Seeds every manager from the initial fight snapshot exactly once.
     pub fn seeded_with_catalog(catalog: crate::catalog::BattleCatalog, fight: &Fight) -> Self {
-        let game_data = catalog.game_data();
         let mut managers = Self {
             catalog_data: Some(catalog),
             fight_version: fight.version.unwrap_or_default(),
@@ -1004,8 +999,8 @@ impl BattleManagers {
         managers.attribute.seed_with_catalog(catalog, fight);
         managers.battle_rule = battle_rule::BattleRuleManager::seed_with_catalog(catalog, fight);
         managers.hp.seed(fight);
-        managers.toughness.seed_with_game_data(game_data, fight);
-        managers.ex_point.seed_with_game_data(game_data, fight);
+        managers.toughness.seed_configured(catalog, fight);
+        managers.ex_point.seed_configured(catalog, fight);
         managers.eureka.seed(fight);
         managers.buff.set_catalog(catalog);
         managers.buff.seed(fight);
@@ -1062,8 +1057,7 @@ impl BattleManagers {
         self.project_primary_attributes(entity);
         self.hp.sync_entity(entity);
         self.toughness.sync_entity(entity);
-        self.ex_point
-            .sync_entity_with_game_data(self.game_data(), entity);
+        self.ex_point.sync_entity_configured(self.catalog(), entity);
         entity.ex_skill_point_change =
             Some(crate::engine::mechanic::card::CardMechanic.ultimate_cost_offset(self, uid));
         if let Some(progress) = self.ex_point.synchronization_progress(uid) {

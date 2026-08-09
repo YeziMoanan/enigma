@@ -57,10 +57,39 @@ pub struct ToughnessManager {
 
 impl ToughnessManager {
     pub fn seed_with_game_data(&mut self, game_data: &config::GameDB, fight: &Fight) {
+        self.seed_from(fight, |entity| {
+            entity
+                .model_id
+                .zip(entity.attr.as_ref().and_then(|attr| attr.hp))
+                .and_then(|(model_id, max_hp)| {
+                    crate::catalog::configured_monster_toughness(game_data, model_id, max_hp)
+                })
+        });
+    }
+
+    pub(crate) fn seed_configured(
+        &mut self,
+        catalog: crate::catalog::BattleCatalog,
+        fight: &Fight,
+    ) {
+        self.seed_from(fight, |entity| {
+            entity
+                .model_id
+                .zip(entity.attr.as_ref().and_then(|attr| attr.hp))
+                .and_then(|(model_id, max_hp)| catalog.monster_toughness(model_id, max_hp))
+        });
+    }
+
+    fn seed_from(
+        &mut self,
+        fight: &Fight,
+        mut configured: impl FnMut(&FightEntityInfo) -> Option<(i32, i32)>,
+    ) {
         self.states.clear();
         self.recovery_penalties.clear();
         for entity in entities(fight) {
-            self.register_with_game_data(game_data, entity);
+            let values = configured(entity);
+            self.register_from(entity, values);
         }
     }
 
@@ -74,15 +103,31 @@ impl ToughnessManager {
         game_data: &config::GameDB,
         entity: &FightEntityInfo,
     ) {
-        let Some(uid) = entity.uid else { return };
-        let value = entity.toughness_value.unwrap_or_default().max(0);
-        let point = entity.toughness_point.unwrap_or_default().max(0);
         let configured = entity
             .model_id
             .zip(entity.attr.as_ref().and_then(|attr| attr.hp))
             .and_then(|(model_id, max_hp)| {
                 crate::catalog::configured_monster_toughness(game_data, model_id, max_hp)
             });
+        self.register_from(entity, configured);
+    }
+
+    pub(crate) fn register_configured(
+        &mut self,
+        catalog: crate::catalog::BattleCatalog,
+        entity: &FightEntityInfo,
+    ) {
+        let configured = entity
+            .model_id
+            .zip(entity.attr.as_ref().and_then(|attr| attr.hp))
+            .and_then(|(model_id, max_hp)| catalog.monster_toughness(model_id, max_hp));
+        self.register_from(entity, configured);
+    }
+
+    fn register_from(&mut self, entity: &FightEntityInfo, configured: Option<(i32, i32)>) {
+        let Some(uid) = entity.uid else { return };
+        let value = entity.toughness_value.unwrap_or_default().max(0);
+        let point = entity.toughness_point.unwrap_or_default().max(0);
         let segment_value = configured.map_or(value, |values| values.0);
         let max_point = configured.map_or(point, |values| values.1);
         if segment_value <= 0 {
