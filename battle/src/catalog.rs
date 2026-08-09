@@ -569,6 +569,10 @@ impl BattleCatalog {
             .collect()
     }
 
+    pub(crate) fn defender_reservation_count(self, fight: &sonettobuf::Fight) -> usize {
+        configured_defender_reservation_count(self.game_data, fight)
+    }
+
     pub(crate) fn careers(self, career: i32) -> Vec<i32> {
         self.game_data
             .fight_effect_group
@@ -991,6 +995,22 @@ pub(crate) fn configured_monster_toughness(
         _ => return None,
     };
     (segment > 0 && points > 0).then_some((segment, points))
+}
+
+pub(crate) fn configured_defender_reservation_count(
+    game_data: &config::GameDB,
+    fight: &sonettobuf::Fight,
+) -> usize {
+    let Some(battle) = game_data.battle.get(fight.battle_id.unwrap_or_default()) else {
+        return 0;
+    };
+    battle
+        .monster_group_ids
+        .split('#')
+        .filter_map(|id| id.parse::<i32>().ok())
+        .filter_map(|id| game_data.monster_group.get(id))
+        .map(|group| group.monster.split('#').filter(|id| !id.is_empty()).count())
+        .sum()
 }
 
 fn mapped_contract_buff(
@@ -1574,6 +1594,34 @@ mod tests {
                     ..Default::default()
                 })
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn normalizes_defender_uid_reservations() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.defender_reservation_count(&sonettobuf::Fight {
+                battle_id: Some(9_000_161),
+                ..Default::default()
+            }),
+            2
+        );
+        assert_eq!(
+            catalog.defender_reservation_count(&sonettobuf::Fight {
+                episode_id: Some(90_001_601),
+                ..Default::default()
+            }),
+            0
+        );
+        assert_eq!(
+            catalog.defender_reservation_count(&sonettobuf::Fight {
+                battle_id: Some(i32::MAX),
+                ..Default::default()
+            }),
+            0
         );
     }
 

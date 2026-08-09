@@ -87,7 +87,18 @@ pub struct EntityManager {
 }
 
 impl EntityManager {
+    pub(crate) fn configured(catalog: crate::catalog::BattleCatalog, fight: &Fight) -> Self {
+        Self::from_fight(fight, catalog.defender_reservation_count(fight))
+    }
+
     pub fn seed_with_game_data(game_data: &config::GameDB, fight: &Fight) -> Self {
+        Self::from_fight(
+            fight,
+            crate::catalog::configured_defender_reservation_count(game_data, fight),
+        )
+    }
+
+    fn from_fight(fight: &Fight, reserved_index: usize) -> Self {
         let entities = fight
             .attacker
             .iter()
@@ -145,8 +156,6 @@ impl EntityManager {
             .map(i64::unsigned_abs)
             .max()
             .unwrap_or_default() as usize;
-        let reserved_index = configured_defender_count(game_data, fight);
-
         Self {
             teams,
             identities,
@@ -645,19 +654,6 @@ fn scale_attribute(
         (i64::from(replacement) * i64::from(current) / i64::from(intrinsic))
             .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
     )
-}
-
-fn configured_defender_count(db: &config::GameDB, fight: &Fight) -> usize {
-    let Some(battle) = db.battle.get(fight.battle_id.unwrap_or_default()) else {
-        return 0;
-    };
-    battle
-        .monster_group_ids
-        .split('#')
-        .filter_map(|id| id.parse::<i32>().ok())
-        .filter_map(|id| db.monster_group.get(id))
-        .map(|group| group.monster.split('#').filter(|id| !id.is_empty()).count())
-        .sum()
 }
 
 #[cfg(test)]

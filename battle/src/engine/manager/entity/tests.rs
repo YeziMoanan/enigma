@@ -8,6 +8,20 @@ fn catalog() -> crate::catalog::BattleCatalog {
 }
 
 #[test]
+fn configured_seed_preserves_defender_uid_reservations() {
+    let fight = Fight {
+        battle_id: Some(9_000_161),
+        ..Default::default()
+    };
+
+    let configured = EntityManager::configured(catalog(), &fight);
+    let legacy = EntityManager::seed_with_game_data(crate::test_support::game_data(), &fight);
+
+    assert_eq!(configured.next_special_uid, -3);
+    assert_eq!(configured.next_special_uid, legacy.next_special_uid);
+}
+
+#[test]
 fn configured_ultimate_kind_applies_only_to_the_current_ultimate() {
     let fight = Fight {
         attacker: Some(FightTeam {
