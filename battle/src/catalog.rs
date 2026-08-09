@@ -573,6 +573,16 @@ impl BattleCatalog {
         configured_defender_reservation_count(self.game_data, fight)
     }
 
+    pub(crate) fn conduit_device(
+        self,
+        model_id: i32,
+    ) -> Result<
+        Option<Vec<Vec<crate::engine::manager::conduit::ConduitSkill>>>,
+        crate::engine::manager::conduit::ConduitError,
+    > {
+        configured_conduit_device(self.game_data, model_id)
+    }
+
     pub(crate) fn careers(self, career: i32) -> Vec<i32> {
         self.game_data
             .fight_effect_group
@@ -1011,6 +1021,75 @@ pub(crate) fn configured_defender_reservation_count(
         .filter_map(|id| game_data.monster_group.get(id))
         .map(|group| group.monster.split('#').filter(|id| !id.is_empty()).count())
         .sum()
+}
+
+pub(crate) fn configured_conduit_device(
+    game_data: &config::GameDB,
+    model_id: i32,
+) -> Result<
+    Option<Vec<Vec<crate::engine::manager::conduit::ConduitSkill>>>,
+    crate::engine::manager::conduit::ConduitError,
+> {
+    use crate::engine::manager::conduit::{ConduitError, ConduitSkill, ConduitSkillGroup};
+
+    let Some(character) = game_data.character.get(model_id) else {
+        return Ok(None);
+    };
+    if character.device_id == 0 {
+        return Ok(None);
+    }
+    let Some(definition) = game_data.fight_device.get(character.device_id) else {
+        return Err(ConduitError::MissingDefinition(character.device_id));
+    };
+    let parse_group = |group, value: &str| {
+        value
+            .split('|')
+            .map(|entry| {
+                let parts = entry.split('#').collect::<Vec<_>>();
+                if parts.len() != 3 {
+                    return Err(ConduitError::InvalidSkill {
+                        device_id: character.device_id,
+                        group,
+                    });
+                }
+                let parse = |part: &str| {
+                    part.parse().map_err(|_| ConduitError::InvalidSkill {
+                        device_id: character.device_id,
+                        group,
+                    })
+                };
+                Ok(ConduitSkill {
+                    skill_id: parse(parts[0])?,
+                    cost_type: parse(parts[1])?,
+                    cost_value: parse(parts[2])?,
+                    is_stopped: false,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let parse_unique = || {
+        definition
+            .unique_skill
+            .parse()
+            .map(|skill_id| {
+                vec![ConduitSkill {
+                    skill_id,
+                    cost_type: 999,
+                    cost_value: 0,
+                    is_stopped: false,
+                }]
+            })
+            .map_err(|_| ConduitError::InvalidSkill {
+                device_id: character.device_id,
+                group: ConduitSkillGroup::Unique,
+            })
+    };
+
+    Ok(Some(vec![
+        parse_group(ConduitSkillGroup::Primary, &definition.skill1)?,
+        parse_group(ConduitSkillGroup::Secondary, &definition.skill2)?,
+        parse_unique()?,
+    ]))
 }
 
 fn mapped_contract_buff(

@@ -1011,7 +1011,7 @@ impl BattleManagers {
         managers.buff.seed(fight);
         managers.card.set_catalog(catalog);
         managers.card.seed(fight);
-        managers.conduit = ConduitManager::seed_with_game_data(game_data, fight);
+        managers.conduit = ConduitManager::configured(catalog, fight);
         managers.entity = entity::EntityManager::configured(catalog, fight);
         managers.wave = wave::WaveManager::seed_with_catalog(catalog, fight);
         managers
