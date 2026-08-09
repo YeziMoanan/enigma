@@ -97,7 +97,7 @@ fn third_wave_entity_info_uses_the_latest_authoritative_roster() {
 }
 
 #[test]
-fn refill_and_player_move_compositions_grant_cloth_power() {
+fn refill_and_all_compositions_grant_cloth_power() {
     crate::test_support::init_config();
     let fight = Fight {
         attacker: Some(FightTeam {
@@ -125,7 +125,6 @@ fn refill_and_player_move_compositions_grant_cloth_power() {
             crate::engine::manager::card::CardChangeKind::Refilled,
             false,
             1,
-            false,
         ),
         17
     );
@@ -136,18 +135,6 @@ fn refill_and_player_move_compositions_grant_cloth_power() {
             crate::engine::manager::card::CardChangeKind::Composed,
             false,
             1,
-            false,
-        ),
-        15
-    );
-    assert_eq!(
-        round::cloth_power_after_card_change(
-            &power,
-            15,
-            crate::engine::manager::card::CardChangeKind::Composed,
-            false,
-            1,
-            true,
         ),
         17
     );
