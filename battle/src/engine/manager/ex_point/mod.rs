@@ -422,7 +422,13 @@ impl ExPointManager {
     ) {
         let Some(uid) = entity.uid else { return };
         let kind = ExPointKind::from_wire(entity.ex_point_type.unwrap_or_default());
-        let base_max = configured_max(game_data, entity).unwrap_or_else(|| kind.default_max());
+        let base_max = crate::catalog::configured_ex_point_max(
+            game_data,
+            entity.ex_point_max,
+            entity.model_id,
+            entity.level.unwrap_or(1),
+        )
+        .unwrap_or_else(|| kind.default_max());
         self.states.insert(
             uid,
             Self::normalize(ExPointState {
@@ -510,8 +516,13 @@ impl ExPointManager {
         let Some(uid) = entity.uid else { return };
         let state = self.states.get(&uid).copied().unwrap_or_default();
         entity.ex_point = Some(state.current);
-        let base_max = configured_max(game_data, entity)
-            .unwrap_or_else(|| ExPointKind::from_wire(state.kind).default_max());
+        let base_max = crate::catalog::configured_ex_point_max(
+            game_data,
+            entity.ex_point_max,
+            entity.model_id,
+            entity.level.unwrap_or(1),
+        )
+        .unwrap_or_else(|| ExPointKind::from_wire(state.kind).default_max());
         entity.expoint_max_add = Some((self.cap_for(state) - base_max).max(0));
         entity.ex_point_type = Some(state.kind);
     }
@@ -590,29 +601,6 @@ impl ExPointManager {
             value.max(0)
         }
     }
-}
-
-fn configured_max(db: &config::GameDB, entity: &FightEntityInfo) -> Option<i32> {
-    if let Some(max) = entity.ex_point_max.filter(|max| *max > 0) {
-        return Some(max);
-    }
-
-    let hero_id = entity.model_id?;
-    let rank = crate::engine::entity::stats::rank_from_level(hero_id, entity.level.unwrap_or(1));
-    let spec = if rank > 2 {
-        db.character_rank_replace
-            .get(hero_id)
-            .map(|row| row.unique_skill_point.as_str())
-    } else {
-        None
-    }
-    .or_else(|| {
-        db.character
-            .get(hero_id)
-            .map(|row| row.unique_skill_point.as_str())
-    })?;
-
-    spec.split('#').nth(1)?.trim().parse().ok()
 }
 
 #[cfg(test)]

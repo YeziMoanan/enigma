@@ -940,6 +940,36 @@ pub(crate) fn summoned_unique_skills(game_data: &config::GameDB, summoned_id: i3
         .collect()
 }
 
+pub(crate) fn configured_ex_point_max(
+    game_data: &config::GameDB,
+    explicit_max: Option<i32>,
+    hero_id: Option<i32>,
+    level: i32,
+) -> Option<i32> {
+    if let Some(max) = explicit_max.filter(|max| *max > 0) {
+        return Some(max);
+    }
+
+    let hero_id = hero_id?;
+    let rank = crate::engine::entity::stats::configured_rank(game_data, hero_id, level);
+    let spec = if rank > 2 {
+        game_data
+            .character_rank_replace
+            .get(hero_id)
+            .map(|row| row.unique_skill_point.as_str())
+    } else {
+        None
+    }
+    .or_else(|| {
+        game_data
+            .character
+            .get(hero_id)
+            .map(|row| row.unique_skill_point.as_str())
+    })?;
+
+    spec.split('#').nth(1)?.trim().parse().ok()
+}
+
 fn mapped_contract_buff(
     game_data: &config::GameDB,
     config_id: i32,
@@ -1099,6 +1129,22 @@ mod tests {
             Some(false)
         );
         assert_eq!(catalog.upgrade_has_available_option(-1, &[]), None);
+    }
+
+    #[test]
+    fn normalizes_entity_ex_point_max() {
+        crate::test_support::init_config();
+        let game_data = crate::test_support::game_data();
+
+        assert_eq!(
+            configured_ex_point_max(game_data, None, Some(3120), 180),
+            Some(8)
+        );
+        assert_eq!(
+            configured_ex_point_max(game_data, Some(17), Some(3120), 180),
+            Some(17)
+        );
+        assert_eq!(configured_ex_point_max(game_data, None, None, 1), None);
     }
 
     #[test]
