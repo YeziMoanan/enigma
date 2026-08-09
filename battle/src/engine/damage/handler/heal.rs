@@ -8,7 +8,6 @@ use crate::engine::{
     },
 };
 
-const BURN_BUFF_FIGHT_CONST: i32 = 29;
 const BURN_HEALING_TAKEN: i32 = -150;
 
 pub(super) fn attribute_amount(
@@ -86,7 +85,9 @@ pub(crate) fn modified(
             )
         })
         .sum::<i32>()
-        + burn_type_id(managers.game_data())
+        + managers
+            .catalog()
+            .burn_buff_type_id()
             .filter(|type_id| {
                 managers
                     .buff
@@ -99,14 +100,6 @@ pub(crate) fn modified(
         1000_i32.saturating_add(healing_taken),
     )
     .max(1)
-}
-
-pub(super) fn burn_type_id(db: &config::GameDB) -> Option<i32> {
-    db.fight_const
-        .get(BURN_BUFF_FIGHT_CONST)?
-        .value
-        .parse()
-        .ok()
 }
 
 pub(super) fn amount(

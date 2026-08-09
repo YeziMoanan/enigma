@@ -3,6 +3,8 @@ use crate::engine::mechanic::impromptu::ImpromptuDefinition;
 use crate::engine::round::power::ClothPower;
 use crate::engine::skill::rule::{CommandOrigin, RuleDomain};
 
+const BURN_BUFF_FIGHT_CONST: i32 = 29;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MagicCircleDefinition {
     pub duration: i32,
@@ -214,6 +216,15 @@ impl BattleCatalog {
             .get(buff_id)
             .map(|row| row.type_id)
             .unwrap_or_default()
+    }
+
+    pub(crate) fn burn_buff_type_id(self) -> Option<i32> {
+        self.game_data
+            .fight_const
+            .get(BURN_BUFF_FIGHT_CONST)?
+            .value
+            .parse()
+            .ok()
     }
 
     pub(crate) fn buff_status(
@@ -803,6 +814,16 @@ impl std::fmt::Debug for BattleCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalizes_burn_buff_type() {
+        crate::test_support::init_config();
+
+        assert_eq!(
+            BattleCatalog::new(crate::test_support::game_data()).burn_buff_type_id(),
+            Some(4_150_001)
+        );
+    }
 
     #[test]
     fn normalizes_lingering_glow_attribute_buff() {
