@@ -4,6 +4,8 @@ use crate::engine::round::power::ClothPower;
 use crate::engine::skill::rule::{CommandOrigin, RuleDomain};
 
 const BURN_BUFF_FIGHT_CONST: i32 = 29;
+const CONTRACT_OWNER_BUFF_MAP: i32 = 30;
+const CONTRACT_BOUND_BUFF_MAP: i32 = 31;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MagicCircleDefinition {
@@ -245,6 +247,14 @@ impl BattleCatalog {
 
     pub(crate) fn damage_target_count_kind(self, code: i32) -> i32 {
         damage_target_count_kind(self.game_data, code)
+    }
+
+    pub(crate) fn contract_binding_buffs(
+        self,
+        ex_skill_level: i32,
+        career: i32,
+    ) -> Option<(i32, i32)> {
+        contract_binding_buffs(self.game_data, ex_skill_level, career)
     }
 
     pub(crate) fn buff_status(
@@ -783,6 +793,49 @@ pub(crate) fn damage_target_count_kind(game_data: &config::GameDB, code: i32) ->
         count if count > 1 => 2,
         _ => 0,
     }
+}
+
+pub(crate) fn contract_binding_buffs(
+    game_data: &config::GameDB,
+    ex_skill_level: i32,
+    career: i32,
+) -> Option<(i32, i32)> {
+    Some((
+        mapped_contract_buff(game_data, CONTRACT_OWNER_BUFF_MAP, ex_skill_level, career)?,
+        mapped_contract_buff(game_data, CONTRACT_BOUND_BUFF_MAP, ex_skill_level, career)?,
+    ))
+}
+
+fn mapped_contract_buff(
+    game_data: &config::GameDB,
+    config_id: i32,
+    ex_skill_level: i32,
+    career: i32,
+) -> Option<i32> {
+    let value = &game_data.fight_const.get(config_id)?.value;
+    let levels = value
+        .split('|')
+        .find_map(|entry| {
+            entry
+                .split_once('%')
+                .filter(|(key, _)| key.parse() == Ok(career))
+        })?
+        .1;
+    levels
+        .split(',')
+        .find_map(|entry| {
+            entry
+                .split_once(':')
+                .filter(|(key, _)| key.parse() == Ok(ex_skill_level))
+        })
+        .or_else(|| {
+            levels
+                .split(',')
+                .find_map(|entry| entry.split_once(':').filter(|(key, _)| *key == "0"))
+        })?
+        .1
+        .parse()
+        .ok()
 }
 
 fn configured_fight_version(raw: Option<&str>) -> ConfiguredFightVersion {

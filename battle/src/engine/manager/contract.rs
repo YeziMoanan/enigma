@@ -1,8 +1,5 @@
 use crate::engine::skill::rule::CommandOrigin;
 
-const OWNER_BUFF_MAP: i32 = 30;
-const BOUND_BUFF_MAP: i32 = 31;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContractCommand {
     Offer {
@@ -143,42 +140,7 @@ pub fn binding_buffs(
     ex_skill_level: i32,
     career: i32,
 ) -> Option<(i32, i32)> {
-    Some((
-        mapped_buff(game_data, OWNER_BUFF_MAP, ex_skill_level, career)?,
-        mapped_buff(game_data, BOUND_BUFF_MAP, ex_skill_level, career)?,
-    ))
-}
-
-fn mapped_buff(
-    game_data: &config::GameDB,
-    config_id: i32,
-    ex_skill_level: i32,
-    career: i32,
-) -> Option<i32> {
-    let value = &game_data.fight_const.get(config_id)?.value;
-    let levels = value
-        .split('|')
-        .find_map(|entry| {
-            entry
-                .split_once('%')
-                .filter(|(key, _)| key.parse() == Ok(career))
-        })?
-        .1;
-    levels
-        .split(',')
-        .find_map(|entry| {
-            entry
-                .split_once(':')
-                .filter(|(key, _)| key.parse() == Ok(ex_skill_level))
-        })
-        .or_else(|| {
-            levels
-                .split(',')
-                .find_map(|entry| entry.split_once(':').filter(|(key, _)| *key == "0"))
-        })?
-        .1
-        .parse()
-        .ok()
+    crate::catalog::contract_binding_buffs(game_data, ex_skill_level, career)
 }
 
 #[cfg(test)]
@@ -279,6 +241,15 @@ mod tests {
         );
         assert_eq!(
             binding_buffs(crate::test_support::game_data(), 4, 1),
+            Some((31000222, 31000192))
+        );
+        let catalog = crate::catalog::BattleCatalog::new(crate::test_support::game_data());
+        assert_eq!(
+            catalog.contract_binding_buffs(0, 1),
+            Some((31000221, 31000191))
+        );
+        assert_eq!(
+            catalog.contract_binding_buffs(4, 1),
             Some((31000222, 31000192))
         );
     }
