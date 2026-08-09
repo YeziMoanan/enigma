@@ -839,7 +839,13 @@ impl BuffManager {
     }
 
     pub(crate) fn definition_features(&self, buff_id: i32) -> Vec<ActiveBuffFeature> {
-        let game = self.catalog().game_data();
+        let Some(catalog) = self
+            .try_catalog()
+            .or_else(crate::catalog::BattleCatalog::try_global)
+        else {
+            return Vec::new();
+        };
+        let game = catalog.game_data();
         let definition = BuffDefinition::configured(game, buff_id);
         configured_features(Some(game), buff_id, definition.as_ref())
     }
