@@ -18,6 +18,7 @@ enum TargetRule {
     BossAllies,
     MainAllies,
     OtherAllies,
+    BoundAlly,
     RandomAllyByRng,
     RandomOtherAllyByRng,
     LowestHpPercentageAlly,
@@ -193,6 +194,10 @@ impl TargetResolver {
             TargetRule::BossAllies => pool.boss_allies(source_uid),
             TargetRule::MainAllies => uids(pool.main_allies(source_uid)),
             TargetRule::OtherAllies => other_allies(pool, source_uid, context),
+            TargetRule::BoundAlly => managers
+                .and_then(|managers| managers.contract.bound_uid(source_uid))
+                .into_iter()
+                .collect(),
             TargetRule::RandomAllyByRng => random_ally_by_rng(pool.allies(source_uid), determinism),
             TargetRule::RandomOtherAllyByRng => random_ally_by_rng(
                 &pool
@@ -494,6 +499,7 @@ pub fn targets_enemy(code: i32) -> Option<bool> {
         | TargetRule::BossAllies
         | TargetRule::MainAllies
         | TargetRule::OtherAllies
+        | TargetRule::BoundAlly
         | TargetRule::RandomAllyByRng
         | TargetRule::RandomOtherAllyByRng
         | TargetRule::LowestHpPercentageAlly
@@ -548,6 +554,7 @@ fn target_rule(code: i32) -> Option<TargetRule> {
         1005 => TargetRule::BossAllies,
         101 => TargetRule::MainAllies,
         102 => TargetRule::OtherAllies,
+        309 => TargetRule::BoundAlly,
         106 => TargetRule::RandomAllyByRng,
         131 => TargetRule::RandomOtherAllyByRng,
         107 => TargetRule::LowestHpPercentageAlly,

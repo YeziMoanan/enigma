@@ -150,6 +150,70 @@ fn highest_ex_point_uses_current_main_ally_moxie() {
 }
 
 #[test]
+fn bound_ally_target_requires_the_sources_completed_contract() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![entity_at(10, 1), entity_at(11, 2), entity_at(12, 3)],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let request = TargetRequest {
+        code: 309,
+        raw: Vec::new(),
+    };
+    let resolve = |source_uid, managers: &BattleManagers| {
+        TargetResolver::resolve_with_managers_and_context(
+            &request,
+            433611,
+            source_uid,
+            &pool,
+            &mut RoundDeterminism::default(),
+            Some(managers),
+            TargetContext::default(),
+        )
+    };
+
+    assert!(resolve(10, &managers).is_empty());
+    let origin = crate::engine::skill::rule::CommandOrigin {
+        domain: crate::engine::skill::rule::RuleDomain::Behavior,
+        key: crate::engine::skill::rule::DefinitionKey::new(60092, "NotifyHeroContract"),
+    };
+    managers
+        .contract
+        .execute(crate::engine::manager::contract::ContractCommand::Offer {
+            origin,
+            owner_uid: 10,
+            candidates: vec![11, 12],
+        })
+        .unwrap();
+    managers
+        .contract
+        .execute(
+            crate::engine::manager::contract::ContractCommand::SelectOwner {
+                owner_uid: 10,
+                bound_uid: 11,
+            },
+        )
+        .unwrap();
+    managers
+        .contract
+        .execute(
+            crate::engine::manager::contract::ContractCommand::SelectBound {
+                owner_uid: 10,
+                bound_uid: 11,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(resolve(10, &managers), vec![11]);
+    assert!(resolve(12, &managers).is_empty());
+}
+
+#[test]
 fn random_target_codes_validate_captured_choice() {
     let fight = Fight {
         attacker: Some(FightTeam {
