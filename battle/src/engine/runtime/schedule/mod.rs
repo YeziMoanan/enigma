@@ -364,6 +364,28 @@ pub fn run_ai_actions(
             );
             continue;
         }
+        if let Some(entity) = pool.entity(choice.source_uid)
+            && crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+                managers,
+                choice.skill_id,
+                entity,
+            )
+            && !crate::engine::mechanic::card::CardMechanic.ultimate_ready(managers, entity)
+        {
+            push_attributed_cue(
+                &mut result.frames,
+                choice.source_uid,
+                RoundCue::CardInvalid {
+                    card_index,
+                    team_type: managers
+                        .buff
+                        .team_type(choice.source_uid)
+                        .unwrap_or_default(),
+                    reason: CardInvalidReason::Default,
+                },
+            );
+            continue;
+        }
         let mut invocation: crate::engine::skill::action::SkillInvocation =
             crate::engine::skill::action::SkillRequest {
                 source_uid: choice.source_uid,
