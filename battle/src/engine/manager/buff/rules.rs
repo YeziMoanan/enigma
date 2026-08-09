@@ -105,7 +105,9 @@ impl BuffPolicy {
     pub fn try_for_buff_id(buff_id: i32) -> Result<Self, BuffPolicyError> {
         static POLICIES: OnceLock<HashMap<i32, Result<BuffPolicy, BuffPolicyError>>> =
             OnceLock::new();
-        let db = config::try_get().ok_or(BuffPolicyError::MissingDefinition(buff_id))?;
+        let db = crate::catalog::BattleCatalog::try_global()
+            .map(crate::catalog::BattleCatalog::game_data)
+            .ok_or(BuffPolicyError::MissingDefinition(buff_id))?;
         POLICIES
             .get_or_init(|| {
                 db.skill_buff

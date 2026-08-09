@@ -12,8 +12,10 @@ mod test;
 pub(crate) fn configured_battle(
     fight: &sonettobuf::Fight,
 ) -> Option<&'static config::battle::Battle> {
-    let db = config::try_get()?;
-    configured_battle_with_game_data(db, fight)
+    configured_battle_with_game_data(
+        crate::catalog::BattleCatalog::try_global()?.game_data(),
+        fight,
+    )
 }
 
 pub(crate) fn configured_battle_with_game_data<'a>(

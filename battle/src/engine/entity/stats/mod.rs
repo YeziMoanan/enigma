@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use config::configs;
 use sonettobuf::{HeroAttribute, HeroExAttribute, HeroSpAttribute};
 
 use super::{
@@ -45,7 +44,7 @@ impl BattleBalance {
     }
 
     pub fn apply(self, input: StatInputs) -> StatInputs {
-        self.configured(configs::get(), input)
+        self.configured(crate::catalog::BattleCatalog::global().game_data(), input)
     }
 
     pub(crate) fn configured(self, game: &config::GameDB, mut input: StatInputs) -> StatInputs {
@@ -81,7 +80,11 @@ impl BattleBalance {
     }
 
     pub fn stats_for(self, hero: &HeroBuildInput, equips: &[EquipmentBuildInput]) -> Stats {
-        self.stats(configs::get(), hero, equips)
+        self.stats(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero,
+            equips,
+        )
     }
 
     pub(crate) fn stats(
@@ -174,7 +177,11 @@ impl std::ops::Add for Stats {
 
 impl Stats {
     pub fn build_for_loadout(hero: &HeroBuildInput, equips: &[EquipmentBuildInput]) -> Self {
-        Self::loadout(configs::get(), hero, equips)
+        Self::loadout(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero,
+            equips,
+        )
     }
 
     pub(crate) fn loadout(
@@ -192,7 +199,7 @@ impl Stats {
     }
 
     pub fn build(input: &StatInputs) -> Self {
-        Self::configured(configs::get(), input)
+        Self::configured(crate::catalog::BattleCatalog::global().game_data(), input)
     }
 
     pub(crate) fn configured(game: &config::GameDB, input: &StatInputs) -> Self {
@@ -256,7 +263,11 @@ impl Stats {
 }
 
 pub fn monster_instance_ex_stats(model_id: i32, level: i32) -> Option<Stats> {
-    monster_instance_ex_stats_with_game_data(configs::get(), model_id, level)
+    monster_instance_ex_stats_with_game_data(
+        crate::catalog::BattleCatalog::global().game_data(),
+        model_id,
+        level,
+    )
 }
 
 pub(crate) fn monster_instance_ex_stats_with_game_data(
@@ -313,7 +324,11 @@ pub(crate) fn monster_instance_ex_stats_with_game_data(
 }
 
 pub fn monster_stats(model_id: i32, level: i32) -> Option<Stats> {
-    configured_monster_stats(configs::get(), model_id, level)
+    configured_monster_stats(
+        crate::catalog::BattleCatalog::global().game_data(),
+        model_id,
+        level,
+    )
 }
 
 pub(crate) fn configured_monster_stats(
@@ -416,7 +431,11 @@ pub(crate) fn configured_monster_stats(
 }
 
 pub fn rank_from_level(hero_id: i32, level: i32) -> i32 {
-    configured_rank(configs::get(), hero_id, level)
+    configured_rank(
+        crate::catalog::BattleCatalog::global().game_data(),
+        hero_id,
+        level,
+    )
 }
 
 pub(crate) fn configured_rank(game: &config::GameDB, hero_id: i32, level: i32) -> i32 {
@@ -553,7 +572,9 @@ fn destiny_bonus(game: &config::GameDB, hero_id: i32, rank: i32) -> DestinyStats
 }
 
 pub(crate) fn destiny_poison_add_rate(hero_id: i32, rank: i32) -> i32 {
-    let Some(game) = configs::try_get() else {
+    let Some(game) =
+        crate::catalog::BattleCatalog::try_global().map(crate::catalog::BattleCatalog::game_data)
+    else {
         return 0;
     };
     let Some(destiny) = game

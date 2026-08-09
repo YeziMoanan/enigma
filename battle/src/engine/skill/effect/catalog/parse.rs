@@ -78,7 +78,9 @@ pub(super) fn rule_issue(db: &GameDB, effect_id: i32, slot: u8, raw: &str) -> Ru
 pub fn global() -> &'static SkillEffectCatalog {
     use std::sync::OnceLock;
     static CATALOG: OnceLock<SkillEffectCatalog> = OnceLock::new();
-    CATALOG.get_or_init(|| SkillEffectCatalog::from_game_db(config::configs::get()))
+    CATALOG.get_or_init(|| {
+        SkillEffectCatalog::from_game_db(crate::catalog::BattleCatalog::global().game_data())
+    })
 }
 
 pub(super) struct RawSlot<'a> {

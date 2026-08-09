@@ -835,7 +835,12 @@ impl BuffManager {
 
     pub fn configured_features(buff_id: i32) -> Vec<ActiveBuffFeature> {
         let definition = BuffDefinition::get(buff_id);
-        configured_features(config::try_get(), buff_id, definition.as_ref())
+        configured_features(
+            crate::catalog::BattleCatalog::try_global()
+                .map(crate::catalog::BattleCatalog::game_data),
+            buff_id,
+            definition.as_ref(),
+        )
     }
 
     pub(crate) fn definition_features(&self, buff_id: i32) -> Vec<ActiveBuffFeature> {

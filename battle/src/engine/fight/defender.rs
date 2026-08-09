@@ -16,7 +16,7 @@ pub struct DefenderSetup {
 impl Defender {
     pub fn get(battle_id: i32, uid_offset: usize) -> Result<DefenderSetup> {
         Self::configured(
-            crate::catalog::BattleCatalog::new(config::configs::get()),
+            crate::catalog::BattleCatalog::global(),
             battle_id,
             uid_offset,
         )

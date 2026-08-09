@@ -11,7 +11,12 @@ impl Skill {
         is_sub: bool,
         destiny: Option<&HashMap<i32, i32>>,
     ) -> (Vec<i32>, Vec<i32>) {
-        Self::groups(config::configs::get(), hero, is_sub, destiny)
+        Self::groups(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero,
+            is_sub,
+            destiny,
+        )
     }
 
     pub(crate) fn loadout(
@@ -49,7 +54,11 @@ impl Skill {
     }
 
     pub fn get_ex(hero: &HeroBuildInput, destiny: Option<&HashMap<i32, i32>>) -> i32 {
-        Self::ex(config::configs::get(), hero, destiny)
+        Self::ex(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero,
+            destiny,
+        )
     }
 
     fn ex(
@@ -66,7 +75,7 @@ impl Skill {
         ex_level: i32,
         destiny: Option<&HashMap<i32, i32>>,
     ) -> (Vec<i32>, Vec<i32>) {
-        let game = config::configs::get();
+        let game = crate::catalog::BattleCatalog::global().game_data();
         let (mut sg1, mut sg2, _) = Self::active_skills(game, hero_id, ex_level);
 
         if let Some(map) = destiny {
@@ -78,7 +87,11 @@ impl Skill {
     }
 
     pub fn for_loadout(hero_id: i32, ex_level: i32) -> (Vec<i32>, Vec<i32>, i32) {
-        Self::active_skills(config::configs::get(), hero_id, ex_level)
+        Self::active_skills(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero_id,
+            ex_level,
+        )
     }
 
     fn get_from_character(game: &config::GameDB, hero_id: i32, group: i32) -> Vec<i32> {

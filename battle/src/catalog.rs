@@ -935,6 +935,10 @@ impl BattleCatalog {
             .find(|cloth| cloth.id == cloth_id && cloth.level == 1)
     }
 
+    pub(crate) fn global() -> Self {
+        Self::new(config::configs::get())
+    }
+
     pub(crate) fn try_global() -> Option<Self> {
         config::try_get().map(Self::new)
     }

@@ -132,7 +132,7 @@ impl BuffDefinition {
 
     pub fn get(buff_id: i32) -> Option<Self> {
         static DEFINITIONS: OnceLock<HashMap<i32, BuffDefinition>> = OnceLock::new();
-        let db = config::try_get()?;
+        let db = crate::catalog::BattleCatalog::try_global()?.game_data();
         DEFINITIONS
             .get_or_init(|| {
                 db.skill_buff

@@ -140,7 +140,7 @@ pub fn plan_roster(
     params: Option<&str>,
 ) -> Result<BattleRosterPlan> {
     BattleRosterPlan::configured(
-        crate::catalog::BattleCatalog::new(config::configs::get()),
+        crate::catalog::BattleCatalog::global(),
         episode_id,
         battle_id,
         is_balance,

@@ -1,4 +1,3 @@
-use config::configs;
 use std::{collections::HashMap, sync::OnceLock};
 
 pub struct Destiny;
@@ -22,7 +21,7 @@ impl Destiny {
     }
 
     pub fn stones_for_hero(hero_id: i32) -> Vec<i32> {
-        Self::stones(configs::get(), hero_id)
+        Self::stones(crate::catalog::BattleCatalog::global().game_data(), hero_id)
     }
 
     pub fn rank_limit(game: &config::GameDB, facets_id: i32) -> i32 {
@@ -35,7 +34,10 @@ impl Destiny {
     }
 
     pub fn max_rank(facets_id: i32) -> i32 {
-        Self::rank_limit(configs::get(), facets_id)
+        Self::rank_limit(
+            crate::catalog::BattleCatalog::global().game_data(),
+            facets_id,
+        )
     }
 
     pub fn exchanges(
@@ -88,7 +90,8 @@ impl Destiny {
             return None;
         }
 
-        configs::get()
+        crate::catalog::BattleCatalog::global()
+            .game_data()
             .character_destiny_facets_consume
             .iter()
             .find(|row| row.facets_id == facets_id)
@@ -114,7 +117,7 @@ impl Destiny {
 }
 
 fn build_cache() -> DestinyCache {
-    let game = configs::get();
+    let game = crate::catalog::BattleCatalog::global().game_data();
     let mut grouped: HashMap<i32, Vec<(i32, &str)>> = HashMap::new();
 
     for row in game.character_destiny_facets.iter() {

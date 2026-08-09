@@ -54,7 +54,7 @@ impl EntityBuilder {
         let game = self
             .catalog
             .map(crate::catalog::BattleCatalog::game_data)
-            .unwrap_or_else(config::configs::get);
+            .unwrap_or_else(|| crate::catalog::BattleCatalog::global().game_data());
         let inputs = balance.configured(game, StatInputs::from_build_input(&self.hero, None));
         self.hero.level = inputs.level;
         self.hero.rank = inputs.rank;
@@ -73,7 +73,7 @@ impl EntityBuilder {
         let game = self
             .catalog
             .map(crate::catalog::BattleCatalog::game_data)
-            .unwrap_or_else(config::configs::get);
+            .unwrap_or_else(|| crate::catalog::BattleCatalog::global().game_data());
         let destiny = Destiny::exchanges(game, hero.destiny_stone, hero.destiny_rank);
         let attr = self
             .stats
@@ -155,7 +155,7 @@ impl EntityBuilder {
         team_type: i32,
     ) -> Result<(FightEntityInfo, Stats)> {
         Self::configured_trial(
-            crate::catalog::BattleCatalog::new(config::configs::get()),
+            crate::catalog::BattleCatalog::global(),
             trial_id,
             uid,
             position,

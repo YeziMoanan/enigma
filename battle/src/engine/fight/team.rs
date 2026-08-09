@@ -41,10 +41,7 @@ impl Team {
     }
 
     pub fn get_player_skills(cloth_id: Option<i32>) -> Vec<PlayerSkillInfo> {
-        Self::player_skills(
-            crate::catalog::BattleCatalog::new(config::configs::get()),
-            cloth_id,
-        )
+        Self::player_skills(crate::catalog::BattleCatalog::global(), cloth_id)
     }
 
     pub(crate) fn player_skills(

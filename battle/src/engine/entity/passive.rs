@@ -1,4 +1,3 @@
-use config::configs;
 use std::collections::HashMap;
 
 use super::{
@@ -50,7 +49,12 @@ impl Passive {
         equips: &[EquipmentBuildInput],
         destiny: Option<&HashMap<i32, i32>>,
     ) -> Vec<PassiveSkill> {
-        Self::for_build(configs::get(), hero, equips, destiny)
+        Self::for_build(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero,
+            equips,
+            destiny,
+        )
     }
 
     pub(crate) fn for_build(
@@ -84,7 +88,12 @@ impl Passive {
         psychube: Option<(i32, i32)>,
         destiny: Option<(i32, i32)>,
     ) -> Vec<PassiveSkill> {
-        Self::configured(configs::get(), hero_id, psychube, destiny)
+        Self::configured(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero_id,
+            psychube,
+            destiny,
+        )
     }
 
     pub fn configured(
@@ -109,7 +118,13 @@ impl Passive {
         psychube: Option<(i32, i32)>,
         destiny: Option<(i32, i32)>,
     ) -> Vec<PassiveSkill> {
-        Self::loadout(configs::get(), hero_id, ex_level, psychube, destiny)
+        Self::loadout(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero_id,
+            ex_level,
+            psychube,
+            destiny,
+        )
     }
 
     fn loadout(
@@ -144,7 +159,14 @@ impl Passive {
         psychube: Option<(i32, i32)>,
         destiny: Option<(i32, i32)>,
     ) -> Vec<PassiveSkill> {
-        Self::ranked(configs::get(), hero_id, rank, ex_level, psychube, destiny)
+        Self::ranked(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero_id,
+            rank,
+            ex_level,
+            psychube,
+            destiny,
+        )
     }
 
     pub(crate) fn ranked(
