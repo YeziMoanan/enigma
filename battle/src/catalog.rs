@@ -42,6 +42,24 @@ pub(crate) struct EntityExAttributes {
     pub drop_dmg: i32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct MonsterResistances {
+    pub dizzy: i32,
+    pub sleep: i32,
+    pub petrified: i32,
+    pub frozen: i32,
+    pub disarm: i32,
+    pub forbid: i32,
+    pub seal: i32,
+    pub cant_get_exskill: i32,
+    pub del_ex_point: i32,
+    pub stress_up: i32,
+    pub control_resilience: i32,
+    pub del_ex_point_resilience: i32,
+    pub stress_up_resilience: i32,
+    pub charm: i32,
+}
+
 impl Default for EntityExAttributes {
     fn default() -> Self {
         Self {
@@ -545,6 +563,34 @@ impl BattleCatalog {
             })
             .map(|row| row.dmg_type)
             .unwrap_or_default()
+    }
+
+    pub(crate) fn monster_resistances(self, model_id: i32) -> Option<MonsterResistances> {
+        let monster = self.game_data.monster.get(model_id)?;
+        let template = self
+            .game_data
+            .monster_skill_template
+            .get(monster.skill_template)?;
+        let resistance = self
+            .game_data
+            .resistances_attribute
+            .get(template.resistance)?;
+        Some(MonsterResistances {
+            dizzy: resistance.dizzy,
+            sleep: resistance.sleep,
+            petrified: resistance.petrified,
+            frozen: resistance.frozen,
+            disarm: resistance.disarm,
+            forbid: resistance.forbid,
+            seal: resistance.seal,
+            cant_get_exskill: resistance.cant_get_exskill,
+            del_ex_point: resistance.del_ex_point,
+            stress_up: resistance.stress_up,
+            control_resilience: resistance.control_resilience,
+            del_ex_point_resilience: resistance.del_ex_point_resilience,
+            stress_up_resilience: resistance.stress_up_resilience,
+            charm: resistance.charm,
+        })
     }
 
     pub(crate) fn entity_base_technic(
@@ -1344,6 +1390,26 @@ mod tests {
         assert_eq!(catalog.entity_damage_type(900016101, Some(2)), 1);
         assert_eq!(catalog.entity_damage_type(-1, Some(1)), 0);
         assert_eq!(catalog.entity_damage_type(-1, Some(2)), 0);
+    }
+
+    #[test]
+    fn normalizes_monster_resistances() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.monster_resistances(10_212_111),
+            Some(MonsterResistances {
+                dizzy: 1000,
+                frozen: 2000,
+                seal: 1000,
+                cant_get_exskill: 1000,
+                control_resilience: 2000,
+                ..Default::default()
+            })
+        );
+        assert_eq!(catalog.monster_resistances(-1), None);
+        assert_eq!(catalog.monster_resistances(900_016_101), None);
     }
 
     #[test]

@@ -27,6 +27,8 @@ use sonettobuf::{
 };
 use std::collections::HashMap;
 
+use crate::catalog::MonsterResistances;
+
 use self::{
     attribute::AttributeManager,
     buff::{
@@ -1114,8 +1116,7 @@ impl BattleManagers {
                 Some(FightHeroSpAttributeInfo {
                     uid: entity.uid,
                     attribute: Some(monster_sp_attribute(
-                        self.game_data(),
-                        entity.model_id?,
+                        self.catalog().monster_resistances(entity.model_id?),
                         fight_version,
                     )),
                 })
@@ -1132,14 +1133,11 @@ impl BattleManagers {
     }
 }
 
-fn monster_sp_attribute(db: &config::GameDB, model_id: i32, fight_version: i32) -> HeroSpAttribute {
-    let Some(monster) = db.monster.get(model_id) else {
-        return base_hero_sp_attribute(fight_version);
-    };
-    let Some(template) = db.monster_skill_template.get(monster.skill_template) else {
-        return base_hero_sp_attribute(fight_version);
-    };
-    let Some(resistance) = db.resistances_attribute.get(template.resistance) else {
+fn monster_sp_attribute(
+    resistance: Option<MonsterResistances>,
+    fight_version: i32,
+) -> HeroSpAttribute {
+    let Some(resistance) = resistance else {
         return base_hero_sp_attribute(fight_version);
     };
 
