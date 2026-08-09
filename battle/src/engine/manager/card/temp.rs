@@ -6,7 +6,7 @@ pub fn temp_card(skill_id: i32) -> CardInfo {
     CardInfo {
         uid: Some(0),
         skill_id: Some(skill_id),
-        card_effect: Some(0),
+        card_effect: None,
         temp_card: Some(true),
         enchants: Vec::new(),
         card_type: Some(0),

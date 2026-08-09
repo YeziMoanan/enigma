@@ -372,6 +372,8 @@ fn rewritten_choice_keeps_consumed_card_and_resolved_caster_distinct() {
 fn wire_temp_card_uid_does_not_erase_its_manager_owned_caster() {
     let source = precast_card(10, 900);
     let wire = temp_card(900);
+    assert_eq!(source.card_effect, None);
+    assert_eq!(wire.card_effect, None);
     let mut cards = CardManager::new(vec![source.clone()]);
 
     let played = cards
