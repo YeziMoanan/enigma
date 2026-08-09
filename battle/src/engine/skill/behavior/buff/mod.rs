@@ -3,9 +3,9 @@ use crate::engine::{
         BattleManagers,
         buff::{
             BuffAmount, BuffChangeDuration, BuffChildUidReservation, BuffCommand, BuffConsume,
-            BuffConvert, BuffDispel, BuffGrant, BuffGrantChild, BuffRemove, BuffRemoveSelector,
-            BuffReplace, BuffSelector, BuffSetAmount, BuffSetState, BuffStatus, CommandOrigin,
-            DepletedBuff,
+            BuffConvert, BuffDispel, BuffGrant, BuffGrantChild, BuffRefreshDurationBySelector,
+            BuffRemove, BuffRemoveSelector, BuffReplace, BuffSelector, BuffSetAmount, BuffSetState,
+            BuffStatus, CommandOrigin, DepletedBuff,
         },
         card::{CardCommand, CardConsumeForEffect},
         eureka::{EUREKA_RESOURCE_ID, EurekaChange, EurekaCommand},
@@ -197,14 +197,10 @@ impl BehaviorHandler for Handler {
                 consume_buff_command(context.target_uid, behavior)
                     .map(|command| vec![RuleOp::Command(BattleCommand::Buff(command))])
             }
-            BehaviorKind::AddBuffDuration => {
-                change_duration_command(context.target_uid, behavior, BuffSelector::ExactId)
-                    .map(|command| vec![RuleOp::Command(BattleCommand::Buff(command))])
-            }
-            BehaviorKind::AddBuffRound => {
-                change_duration_command(context.target_uid, behavior, BuffSelector::IdOrType)
-                    .map(|command| vec![RuleOp::Command(BattleCommand::Buff(command))])
-            }
+            BehaviorKind::AddBuffDuration => refresh_duration_command(context.target_uid, behavior)
+                .map(|command| vec![RuleOp::Command(BattleCommand::Buff(command))]),
+            BehaviorKind::AddBuffRound => change_duration_command(context.target_uid, behavior)
+                .map(|command| vec![RuleOp::Command(BattleCommand::Buff(command))]),
             BehaviorKind::ReduceCastChannelCount => {
                 reduce_channel_count_command(context.managers, context.target_uid, behavior)
                     .map(|command| vec![RuleOp::Command(BattleCommand::Buff(command))])
