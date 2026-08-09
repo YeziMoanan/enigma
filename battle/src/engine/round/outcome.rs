@@ -88,12 +88,9 @@ pub(crate) fn battle_outcome(
         return BattleOutcome::Defeat;
     }
     let out_of_rounds = managers
-        .game_data()
-        .battle
-        .get(fight.battle_id.unwrap_or_default())
-        .is_some_and(|battle| {
-            battle.max_round > 0 && fight.cur_round.unwrap_or_default() >= battle.max_round
-        });
+        .catalog()
+        .battle_max_round(fight.battle_id.unwrap_or_default())
+        .is_some_and(|max_round| max_round > 0 && fight.cur_round.unwrap_or_default() >= max_round);
     if out_of_rounds {
         BattleOutcome::OutOfRounds
     } else {
@@ -115,17 +112,7 @@ pub(crate) fn finish_if_battle_ended(
 }
 
 fn configured_win_target_defeated(battle_id: i32, managers: &BattleManagers) -> Option<bool> {
-    let condition = managers
-        .game_data()
-        .battle
-        .get(battle_id)?
-        .win_condition
-        .as_str();
-    let mut parts = condition.split('#');
-    if parts.next().and_then(|value| value.parse::<i32>().ok()) != Some(3) {
-        return None;
-    }
-    let model_id = parts.next().and_then(|value| value.parse::<i32>().ok())?;
+    let model_id = managers.catalog().battle_win_target_model(battle_id)?;
     Some(managers.entity.ordered_uids().any(|uid| {
         managers.entity.model_id(uid) == Some(model_id) && managers.hp.current(uid) <= 0
     }))

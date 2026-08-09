@@ -593,6 +593,26 @@ impl BattleCatalog {
             .map(|route| route.target_model_ids)
     }
 
+    pub(crate) fn battle_max_round(self, battle_id: i32) -> Option<i32> {
+        self.game_data
+            .battle
+            .get(battle_id)
+            .map(|battle| battle.max_round)
+    }
+
+    pub(crate) fn battle_win_target_model(self, battle_id: i32) -> Option<i32> {
+        let mut parts = self
+            .game_data
+            .battle
+            .get(battle_id)?
+            .win_condition
+            .split('#');
+        if parts.next().and_then(|value| value.parse::<i32>().ok()) != Some(3) {
+            return None;
+        }
+        parts.next().and_then(|value| value.parse::<i32>().ok())
+    }
+
     pub(crate) fn careers(self, career: i32) -> Vec<i32> {
         self.game_data
             .fight_effect_group
@@ -1725,6 +1745,18 @@ mod tests {
         );
         assert_eq!(catalog.boss_rush_target_models(12_800_101, 1_014_202), None);
         assert_eq!(catalog.boss_rush_target_models(-1, -1), None);
+    }
+
+    #[test]
+    fn normalizes_battle_outcome_rules() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.battle_max_round(1_211), Some(20));
+        assert_eq!(catalog.battle_win_target_model(1_211), Some(121_103));
+        assert_eq!(catalog.battle_win_target_model(1_001), None);
+        assert_eq!(catalog.battle_max_round(-1), None);
+        assert_eq!(catalog.battle_win_target_model(-1), None);
     }
 
     #[test]
