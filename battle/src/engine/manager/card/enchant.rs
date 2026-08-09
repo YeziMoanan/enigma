@@ -53,6 +53,15 @@ pub fn round_end_current_hp_losses(
     game_data: &config::GameDB,
     cards: &[CardInfo],
 ) -> Vec<RoundEndCurrentHpLoss> {
+    collect_round_end_current_hp_losses(cards, |enchant_id| {
+        crate::catalog::card_enchant_current_hp_loss_permille(game_data, enchant_id)
+    })
+}
+
+pub(crate) fn collect_round_end_current_hp_losses(
+    cards: &[CardInfo],
+    mut current_hp_loss_permille: impl FnMut(i32) -> Option<i32>,
+) -> Vec<RoundEndCurrentHpLoss> {
     let mut losses = Vec::<RoundEndCurrentHpLoss>::new();
     for card in cards {
         let Some(owner_uid) = card.uid else { continue };
@@ -60,7 +69,7 @@ pub fn round_end_current_hp_losses(
             .enchants
             .iter()
             .filter_map(|enchant| enchant.enchant_id)
-            .find_map(|enchant_id| current_hp_loss_permille(game_data, enchant_id))
+            .find_map(&mut current_hp_loss_permille)
         else {
             continue;
         };
@@ -74,20 +83,6 @@ pub fn round_end_current_hp_losses(
         }
     }
     losses
-}
-
-fn current_hp_loss_permille(game_data: &config::GameDB, enchant_id: i32) -> Option<i32> {
-    let feature = &game_data.card_enchant.get(enchant_id)?.feature;
-    let parts = feature.split('#').collect::<Vec<_>>();
-    let [kind, attacker_rate, defender_rate] = parts.as_slice() else {
-        return None;
-    };
-    if *kind != "burn" {
-        return None;
-    }
-    let attacker_rate = attacker_rate.parse::<i32>().ok()?;
-    let defender_rate = defender_rate.parse::<i32>().ok()?;
-    (attacker_rate > 0 && attacker_rate == defender_rate).then_some(attacker_rate)
 }
 
 #[cfg(test)]

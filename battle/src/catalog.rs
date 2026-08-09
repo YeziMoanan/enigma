@@ -438,6 +438,10 @@ impl BattleCatalog {
         self.card_enchant_ids(enchant_id, |row| &row.reject_types)
     }
 
+    pub(crate) fn card_enchant_current_hp_loss_permille(self, enchant_id: i32) -> Option<i32> {
+        card_enchant_current_hp_loss_permille(self.game_data, enchant_id)
+    }
+
     pub(crate) fn skill_rank(self, skill_id: i32) -> i32 {
         self.game_data
             .skill
@@ -839,6 +843,23 @@ pub(crate) fn damage_target_count_kind(game_data: &config::GameDB, code: i32) ->
         count if count > 1 => 2,
         _ => 0,
     }
+}
+
+pub(crate) fn card_enchant_current_hp_loss_permille(
+    game_data: &config::GameDB,
+    enchant_id: i32,
+) -> Option<i32> {
+    let feature = &game_data.card_enchant.get(enchant_id)?.feature;
+    let parts = feature.split('#').collect::<Vec<_>>();
+    let [kind, attacker_rate, defender_rate] = parts.as_slice() else {
+        return None;
+    };
+    if *kind != "burn" {
+        return None;
+    }
+    let attacker_rate = attacker_rate.parse::<i32>().ok()?;
+    let defender_rate = defender_rate.parse::<i32>().ok()?;
+    (attacker_rate > 0 && attacker_rate == defender_rate).then_some(attacker_rate)
 }
 
 pub(crate) fn contract_binding_buffs(
@@ -1489,6 +1510,12 @@ mod tests {
         );
         assert_eq!(catalog.card_enchant_rejected_ids(10_006), vec![10_003]);
         assert!(catalog.card_enchant_rejected_ids(-1).is_empty());
+        assert_eq!(
+            catalog.card_enchant_current_hp_loss_permille(10_002),
+            Some(100)
+        );
+        assert_eq!(catalog.card_enchant_current_hp_loss_permille(10_010), None);
+        assert_eq!(catalog.card_enchant_current_hp_loss_permille(-1), None);
     }
 
     #[test]
