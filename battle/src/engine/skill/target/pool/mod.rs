@@ -67,6 +67,7 @@ pub struct TargetEntity {
 struct TargetBuff {
     id: i32,
     type_id: i32,
+    status: Option<crate::engine::manager::buff::BuffStatus>,
     source_uid: i64,
     features: Vec<String>,
     act_kinds: Vec<crate::engine::skill::buff_act::registry::BuffActKind>,
@@ -551,9 +552,7 @@ impl TargetEntity {
     }
 
     pub(super) fn has_buff_status(&self, status: crate::engine::manager::buff::BuffStatus) -> bool {
-        self.buffs
-            .iter()
-            .any(|buff| crate::engine::manager::buff::configured_status(buff.id) == Some(status))
+        self.buffs.iter().any(|buff| buff.status == Some(status))
     }
 
     pub(super) fn has_buff_act_kind(
@@ -596,6 +595,7 @@ impl TargetBuff {
         Self {
             id,
             type_id: buff.r#type.unwrap_or_else(|| catalog.buff_type_id(id)),
+            status: catalog.buff_status(id),
             source_uid: buff.from_uid.unwrap_or_default(),
             features: features.clone(),
             act_kinds: features

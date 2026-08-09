@@ -15,6 +15,10 @@ fn target_buff_metadata_uses_configured_type_and_exact_feature_identities() {
     );
 
     assert_eq!(buff.type_id, 31320113);
+    assert_eq!(
+        buff.status,
+        Some(crate::engine::manager::buff::BuffStatus::NegativeStatus)
+    );
     assert_eq!(buff.source_uid, 42);
     assert_eq!(
         buff.features,
@@ -44,6 +48,7 @@ fn target_buff_metadata_uses_configured_type_and_exact_feature_identities() {
         },
     );
     assert_eq!(missing.type_id, 0);
+    assert_eq!(missing.status, None);
     assert!(missing.act_kinds.is_empty());
     assert!(missing.monster_labels.is_empty());
 }

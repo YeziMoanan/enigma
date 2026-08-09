@@ -216,6 +216,25 @@ impl BattleCatalog {
             .unwrap_or_default()
     }
 
+    pub(crate) fn buff_status(
+        self,
+        buff_id: i32,
+    ) -> Option<crate::engine::manager::buff::BuffStatus> {
+        let buff = self.game_data.skill_buff.get(buff_id)?;
+        let type_id = if buff.type_id == 0 {
+            buff.id
+        } else {
+            buff.type_id
+        };
+        let status_id = self
+            .game_data
+            .skill_bufftype
+            .get(type_id)
+            .map(|buff_type| buff_type.r#type)
+            .unwrap_or(buff.is_good_buff);
+        Some(crate::engine::manager::buff::BuffStatus::from_id(status_id))
+    }
+
     pub(crate) fn buff_act_definition(
         self,
         opcode: i32,

@@ -296,7 +296,7 @@ impl BattleManagers {
                             return None;
                         }
                         let buff_id = removed.buff.buff_id?;
-                        (buff::configured_status(buff_id)? == buff::BuffStatus::Shield)
+                        (self.catalog().buff_status(buff_id)? == buff::BuffStatus::Shield)
                             .then_some(removed.buff.uid)
                             .flatten()
                     })

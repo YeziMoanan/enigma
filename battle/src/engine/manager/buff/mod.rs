@@ -50,10 +50,6 @@ pub use rules::{
 pub use status::BuffStatus;
 use uid::{ATTACKER_BUFF_UID_START, BuffUidAllocator, DEFENDER_BUFF_UID_START};
 
-pub(crate) fn configured_status(buff_id: i32) -> Option<BuffStatus> {
-    BuffDefinition::get(buff_id).map(|definition| definition.status)
-}
-
 pub(crate) fn wire_markers(
     buff_id: i32,
     phase: crate::engine::skill::buff_act::wire::WirePhase,
