@@ -86,6 +86,7 @@ fn resolves_lowest_highest_and_position_targets() {
                 entity_stats(10, 1, 80, 100, 1),
                 entity_stats(11, 2, 30, 100, 5),
                 entity_stats(12, 3, 50, 100, 2),
+                entity_stats(13, 4, 60, 100, 3),
             ],
             ..Default::default()
         }),
@@ -112,8 +113,8 @@ fn resolves_lowest_highest_and_position_targets() {
     assert_eq!(resolve_code(118, 11, &pool, &mut determinism), vec![12]);
     assert_eq!(resolve_code(128, 11, &pool, &mut determinism), vec![10]);
     assert_eq!(resolve_code(120, 11, &pool, &mut determinism), vec![11, 10]);
-    assert_eq!(resolve_code(123, 11, &pool, &mut determinism), vec![12]);
-    assert_eq!(resolve_code(127, 11, &pool, &mut determinism), vec![10, 12]);
+    assert_eq!(resolve_code(123, 11, &pool, &mut determinism), vec![12, 13]);
+    assert_eq!(resolve_code(127, 11, &pool, &mut determinism), vec![13]);
 }
 
 #[test]
