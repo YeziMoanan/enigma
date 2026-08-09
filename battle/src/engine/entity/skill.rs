@@ -11,15 +11,40 @@ impl Skill {
         is_sub: bool,
         destiny: Option<&HashMap<i32, i32>>,
     ) -> (Vec<i32>, Vec<i32>) {
+        Self::groups(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero,
+            is_sub,
+            destiny,
+        )
+    }
+
+    pub(crate) fn loadout(
+        game: &config::GameDB,
+        hero: &HeroBuildInput,
+        is_sub: bool,
+        destiny: Option<&HashMap<i32, i32>>,
+    ) -> (Vec<i32>, Vec<i32>, i32) {
+        let (group1, group2) = Self::groups(game, hero, is_sub, destiny);
+        let ex_skill = Self::ex(game, hero, destiny);
+        (group1, group2, ex_skill)
+    }
+
+    fn groups(
+        game: &config::GameDB,
+        hero: &HeroBuildInput,
+        is_sub: bool,
+        destiny: Option<&HashMap<i32, i32>>,
+    ) -> (Vec<i32>, Vec<i32>) {
         let (mut sg1, mut sg2) = if is_sub {
             (
-                Self::get_from_character(hero.hero_id, 1),
-                Self::get_from_character(hero.hero_id, 2),
+                Self::get_from_character(game, hero.hero_id, 1),
+                Self::get_from_character(game, hero.hero_id, 2),
             )
         } else {
-            Self::get_skill_groups_with_destiny(hero.hero_id, hero.ex_skill_level, None)
+            let (group1, group2, _) = Self::active_skills(game, hero.hero_id, hero.ex_skill_level);
+            (group1, group2)
         };
-
         if let Some(map) = destiny {
             Self::apply_exchange(&mut sg1, map);
             Self::apply_exchange(&mut sg2, map);
@@ -29,8 +54,19 @@ impl Skill {
     }
 
     pub fn get_ex(hero: &HeroBuildInput, destiny: Option<&HashMap<i32, i32>>) -> i32 {
-        let ex = Self::active_skills(hero.hero_id, hero.ex_skill_level).2;
+        Self::ex(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero,
+            destiny,
+        )
+    }
 
+    fn ex(
+        game: &config::GameDB,
+        hero: &HeroBuildInput,
+        destiny: Option<&HashMap<i32, i32>>,
+    ) -> i32 {
+        let ex = Self::active_skills(game, hero.hero_id, hero.ex_skill_level).2;
         destiny.and_then(|map| map.get(&ex).copied()).unwrap_or(ex)
     }
 
@@ -39,7 +75,8 @@ impl Skill {
         ex_level: i32,
         destiny: Option<&HashMap<i32, i32>>,
     ) -> (Vec<i32>, Vec<i32>) {
-        let (mut sg1, mut sg2, _) = Self::for_loadout(hero_id, ex_level);
+        let game = crate::catalog::BattleCatalog::global().game_data();
+        let (mut sg1, mut sg2, _) = Self::active_skills(game, hero_id, ex_level);
 
         if let Some(map) = destiny {
             Self::apply_exchange(&mut sg1, map);
@@ -50,11 +87,14 @@ impl Skill {
     }
 
     pub fn for_loadout(hero_id: i32, ex_level: i32) -> (Vec<i32>, Vec<i32>, i32) {
-        Self::active_skills(hero_id, ex_level)
+        Self::active_skills(
+            crate::catalog::BattleCatalog::global().game_data(),
+            hero_id,
+            ex_level,
+        )
     }
 
-    fn get_from_character(hero_id: i32, group: i32) -> Vec<i32> {
-        let game = config::configs::get();
+    fn get_from_character(game: &config::GameDB, hero_id: i32, group: i32) -> Vec<i32> {
         let Some(character) = game.character.get(hero_id) else {
             tracing::warn!("Character {} not found", hero_id);
             return vec![];
@@ -62,8 +102,11 @@ impl Skill {
         parse_skill_group(&character.skill, group)
     }
 
-    fn active_skills(hero_id: i32, ex_level: i32) -> (Vec<i32>, Vec<i32>, i32) {
-        let game = config::configs::get();
+    pub(crate) fn active_skills(
+        game: &config::GameDB,
+        hero_id: i32,
+        ex_level: i32,
+    ) -> (Vec<i32>, Vec<i32>, i32) {
         let Some(character) = game.character.get(hero_id) else {
             tracing::warn!(hero_id, "character not found while resolving active skills");
             return Default::default();
@@ -79,10 +122,10 @@ impl Skill {
         upgrades.sort_by_key(|row| row.skill_level);
         for upgrade in upgrades {
             if !upgrade.skill_group1.trim().is_empty() {
-                group1 = configured_skill_ids(&upgrade.skill_group1);
+                group1 = configured_skill_ids(game, &upgrade.skill_group1);
             }
             if !upgrade.skill_group2.trim().is_empty() {
-                group2 = configured_skill_ids(&upgrade.skill_group2);
+                group2 = configured_skill_ids(game, &upgrade.skill_group2);
             }
             if upgrade.skill_ex != 0 {
                 ex_skill = upgrade.skill_ex;
@@ -100,10 +143,10 @@ impl Skill {
     }
 }
 
-fn configured_skill_ids(raw: &str) -> Vec<i32> {
+fn configured_skill_ids(game: &config::GameDB, raw: &str) -> Vec<i32> {
     raw.split(|character: char| !character.is_ascii_digit() && character != '-')
         .filter_map(|part| part.parse().ok())
-        .filter(|skill_id| config::configs::get().skill.get(*skill_id).is_some())
+        .filter(|skill_id| game.skill.get(*skill_id).is_some())
         .collect()
 }
 
@@ -130,16 +173,14 @@ pub fn split_ids(value: &str) -> Vec<i32> {
 }
 
 pub fn skill_rank(skill_id: i32) -> i32 {
-    config::try_get()
-        .and_then(|db| db.skill.get(skill_id))
-        .map(|row| row.skill_rank)
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.skill_rank(skill_id))
         .unwrap_or_default()
 }
 
 pub fn card_skill_rank(card: &CardInfo) -> i32 {
-    card.skill_id
-        .and_then(|skill_id| config::try_get().and_then(|db| db.skill.get(skill_id)))
-        .map(|row| row.skill_rank)
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.card_skill_rank(card))
         .unwrap_or_else(|| card.card_effect.unwrap_or_default())
 }
 
@@ -158,7 +199,7 @@ mod tests {
         init_config();
 
         assert_eq!(
-            Skill::active_skills(3134, 5),
+            Skill::active_skills(crate::test_support::game_data(), 3134, 5),
             (
                 vec![31345111, 31345112, 31345113],
                 vec![31344121, 31344122, 31344123],

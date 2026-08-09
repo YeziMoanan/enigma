@@ -353,10 +353,7 @@ impl BuffManager {
                 (update.origin, BuffPlanAction::ChangeDuration(plans))
             }
             BuffCommand::RefreshDuration(update) => {
-                if update.target_uid == 0
-                    || update.buff_uid == 0
-                    || update.minimum_duration <= 0
-                {
+                if update.target_uid == 0 || update.buff_uid == 0 || update.minimum_duration <= 0 {
                     return Err(BuffCommandError::InvalidDurationChange);
                 }
                 let active = self
@@ -417,7 +414,7 @@ impl BuffManager {
                 if reservation.target_uid == 0 || reservation.buff_id <= 0 {
                     return Err(BuffCommandError::InvalidUidReservation);
                 }
-                BuffDefinition::get(reservation.buff_id)
+                BuffDefinition::configured(self.catalog().game_data(), reservation.buff_id)
                     .ok_or(BuffCommandError::MissingDefinition(reservation.buff_id))?;
                 let uid = super::uid_policy::children(self, reservation.target_uid, 1)[0];
                 (
@@ -494,8 +491,9 @@ impl BuffManager {
         {
             return Err(BuffCommandError::InvalidGrant);
         }
-        let mut definition = BuffDefinition::get(request.buff_id)
-            .ok_or(BuffCommandError::MissingDefinition(request.buff_id))?;
+        let mut definition =
+            BuffDefinition::configured(self.catalog().game_data(), request.buff_id)
+                .ok_or(BuffCommandError::MissingDefinition(request.buff_id))?;
         let duration_delta = self.grant_duration_delta(hp, request.target_uid, definition.status)
             + self.grant_type_duration_delta(
                 hp,
@@ -560,7 +558,7 @@ impl BuffManager {
             }
         };
         let route = BuffRoute::new(request.source_uid, request.target_uid, request.buff_id);
-        let mut policy = BuffPolicy::try_for_buff_id(request.buff_id)
+        let mut policy = BuffPolicy::configured(self.catalog().game_data(), request.buff_id)
             .map_err(BuffCommandError::InvalidPolicy)?;
         policy.lifetime.duration = definition.duration;
         let unconditional = matches!(
@@ -1005,7 +1003,10 @@ impl BuffManager {
                     active.owner_uid == route.target_uid
                         && active.buff.buff_id == Some(route.buff_id)
                 })
-                .is_some_and(|active| super::count_or_layer(&active.buff) >= threshold);
+                .is_some_and(|active| {
+                    super::count_or_layer_from(&active.buff, active.definition.as_ref())
+                        >= threshold
+                });
             if reached {
                 plan.transition = Some(Box::new(projected.plan_replace_ids(
                     hp,
@@ -1048,7 +1049,9 @@ impl BuffManager {
                     if remaining <= 0 {
                         return None;
                     }
-                    let consumed = remaining.min(super::count_or_layer(&active.buff).max(0));
+                    let consumed = remaining.min(
+                        super::count_or_layer_from(&active.buff, active.definition.as_ref()).max(0),
+                    );
                     if consumed <= 0 {
                         return None;
                     }

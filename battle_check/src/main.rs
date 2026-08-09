@@ -17,10 +17,12 @@ fn main() -> Result<()> {
     let options = options::parse_args(env::args().skip(1))?;
     init_config()?;
     let db = config::configs::get();
+    let battle_catalog = battle::catalog::BattleCatalog::new(db);
     if options.coverage_plan || options.include_plan {
         let mut catalog = SkillEffectCatalog::from_game_db(db);
         return coverage::print_coverage_plan(
             db,
+            battle_catalog,
             &mut catalog,
             &options.hero_ids,
             options.include_plan.then_some("buff-include"),
@@ -43,12 +45,19 @@ fn main() -> Result<()> {
         scan::collect_episode_roots(episode_id, db, &mut skills, &mut report)?;
         println!("episode={episode_id}");
         if options.simulate_opening {
-            opening::print(episode_id)?;
+            opening::print(db, episode_id)?;
         }
     }
 
     let mut catalog = SkillEffectCatalog::from_roots(db, skills.iter().map(|skill| skill.id), []);
-    scan::scan_closure(db, &mut catalog, &mut skills, &mut buffs, &mut report);
+    scan::scan_closure(
+        db,
+        battle_catalog,
+        &mut catalog,
+        &mut skills,
+        &mut buffs,
+        &mut report,
+    );
     report.print();
     if !report.is_ready() {
         std::process::exit(1);

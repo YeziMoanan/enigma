@@ -77,6 +77,37 @@ pub struct BattleRosterPlan {
 }
 
 impl BattleRosterPlan {
+    pub fn configured(
+        catalog: crate::catalog::BattleCatalog,
+        episode_id: i32,
+        battle_id: i32,
+        is_balance: bool,
+        fight_group: &sonettobuf::FightGroup,
+        params: Option<&str>,
+    ) -> Result<Self> {
+        let setup = attacker_setup(
+            catalog,
+            episode_id,
+            battle_id,
+            is_balance,
+            fight_group,
+            params,
+        )?;
+        Ok(Self {
+            hero_uids: fight_group
+                .hero_list
+                .iter()
+                .chain(&fight_group.sub_hero_list)
+                .copied()
+                .filter(|uid| *uid > 0)
+                .collect(),
+            compose_support: setup.compose_support.map(|plan| ComposeSupportLookup {
+                hero_id: plan.hero_id,
+                hero_uid: plan.assist.map(|assist| assist.hero_uid),
+            }),
+        })
+    }
+
     pub fn hero_uids(&self) -> &[i64] {
         &self.hero_uids
     }
@@ -108,20 +139,14 @@ pub fn plan_roster(
     fight_group: &sonettobuf::FightGroup,
     params: Option<&str>,
 ) -> Result<BattleRosterPlan> {
-    let setup = attacker_setup(episode_id, battle_id, is_balance, fight_group, params)?;
-    Ok(BattleRosterPlan {
-        hero_uids: fight_group
-            .hero_list
-            .iter()
-            .chain(&fight_group.sub_hero_list)
-            .copied()
-            .filter(|uid| *uid > 0)
-            .collect(),
-        compose_support: setup.compose_support.map(|plan| ComposeSupportLookup {
-            hero_id: plan.hero_id,
-            hero_uid: plan.assist.map(|assist| assist.hero_uid),
-        }),
-    })
+    BattleRosterPlan::configured(
+        crate::catalog::BattleCatalog::global(),
+        episode_id,
+        battle_id,
+        is_balance,
+        fight_group,
+        params,
+    )
 }
 
 impl BattleRoster {
@@ -142,6 +167,7 @@ pub struct BuiltAttacker {
 
 impl Attacker {
     pub fn get(
+        catalog: crate::catalog::BattleCatalog,
         roster: &BattleRoster,
         episode_id: i32,
         battle_id: i32,
@@ -149,11 +175,19 @@ impl Attacker {
         fight_group: &sonettobuf::FightGroup,
         params: Option<&str>,
     ) -> Result<BuiltAttacker> {
-        let setup = attacker_setup(episode_id, battle_id, is_balance, fight_group, params)?;
+        let setup = attacker_setup(
+            catalog,
+            episode_id,
+            battle_id,
+            is_balance,
+            fight_group,
+            params,
+        )?;
         let balance = setup.balance;
         let aid_ids = setup.aid_ids;
         let selected_trials = setup.selected_trials;
         let use_configured_aids = setup.use_configured_aids;
+        let game = catalog.game_data();
 
         let mut entitys = Vec::new();
         let mut sub_entitys = Vec::new();
@@ -162,7 +196,8 @@ impl Attacker {
         if use_configured_aids {
             for (index, monster_id) in aid_ids.iter().copied().enumerate() {
                 let uid = -i64::try_from(index + 1)?;
-                entitys.push(Defender::build_monster_with_uid(
+                entitys.push(Defender::build_monster(
+                    catalog,
                     monster_id,
                     uid,
                     (index + 1) as i32,
@@ -173,7 +208,8 @@ impl Attacker {
 
         for (index, (trial_id, position)) in selected_trials.iter().copied().enumerate() {
             let uid = -i64::try_from(aid_ids.len() + index + 1)?;
-            let (entity, stats) = EntityBuilder::trial(trial_id, uid, position, 1)?;
+            let (entity, stats) =
+                EntityBuilder::configured_trial(catalog, trial_id, uid, position, 1)?;
             ex_attributes.push((uid, stats.ex()));
             sp_attributes.push((uid, stats.sp()));
             if position > 0 {
@@ -196,7 +232,7 @@ impl Attacker {
             if *hero_uid == 0 {
                 continue;
             }
-            if let Some(entity) = configured_aid(&aid_ids, *hero_uid, position)? {
+            if let Some(entity) = configured_aid(catalog, &aid_ids, *hero_uid, position)? {
                 entitys.push(entity);
                 continue;
             }
@@ -205,13 +241,15 @@ impl Attacker {
             let hero_input = fighter.hero.clone();
             let equip_inputs = fighter.equips.clone();
             let stats = balance
-                .map(|balance| balance.stats_for(&hero_input, &equip_inputs))
-                .unwrap_or_else(|| Stats::build_for_loadout(&hero_input, &equip_inputs));
+                .map(|balance| balance.stats(game, &hero_input, &equip_inputs))
+                .unwrap_or_else(|| Stats::loadout(game, &hero_input, &equip_inputs));
             ex_attributes.push((hero_input.uid, stats.ex()));
             sp_attributes.push((hero_input.uid, stats.sp()));
 
-            let mut builder =
-                EntityBuilder::new(hero_input, position, 1, false).with_equips(equip_inputs);
+            let mut builder = EntityBuilder::new(hero_input, position, 1, false)
+                .with_catalog(catalog)
+                .with_equips(equip_inputs)
+                .with_stats(stats);
             if let Some(balance) = balance {
                 builder = builder.with_balance(balance, stats);
             }
@@ -222,7 +260,7 @@ impl Attacker {
             if *hero_uid == 0 {
                 continue;
             }
-            if let Some(entity) = configured_aid(&aid_ids, *hero_uid, -1)? {
+            if let Some(entity) = configured_aid(catalog, &aid_ids, *hero_uid, -1)? {
                 sub_entitys.push(entity);
                 continue;
             }
@@ -231,12 +269,15 @@ impl Attacker {
             let hero_input = fighter.hero.clone();
             let equip_inputs = fighter.equips.clone();
             let stats = balance
-                .map(|balance| balance.stats_for(&hero_input, &equip_inputs))
-                .unwrap_or_else(|| Stats::build_for_loadout(&hero_input, &equip_inputs));
+                .map(|balance| balance.stats(game, &hero_input, &equip_inputs))
+                .unwrap_or_else(|| Stats::loadout(game, &hero_input, &equip_inputs));
             ex_attributes.push((hero_input.uid, stats.ex()));
             sp_attributes.push((hero_input.uid, stats.sp()));
 
-            let mut builder = EntityBuilder::new(hero_input, -1, 1, true).with_equips(equip_inputs);
+            let mut builder = EntityBuilder::new(hero_input, -1, 1, true)
+                .with_catalog(catalog)
+                .with_equips(equip_inputs)
+                .with_stats(stats);
             if let Some(balance) = balance {
                 builder = builder.with_balance(balance, stats);
             }
@@ -244,7 +285,7 @@ impl Attacker {
         }
 
         let player_entity = EntityBuilder::player(roster.user_id, 1);
-        let skill_infos = Team::get_player_skills(fight_group.cloth_id);
+        let skill_infos = Team::player_skills(catalog, fight_group.cloth_id);
 
         let mut team = Team::build(
             entitys,
@@ -255,7 +296,7 @@ impl Attacker {
             skill_infos,
         );
         if let Some((support, info, ex, sp)) =
-            Self::compose_support(roster, setup.compose_support.as_ref())?
+            Self::compose_support(catalog, roster, setup.compose_support.as_ref())?
         {
             team.assist_boss = Some(support);
             team.assist_boss_info = Some(info);
@@ -281,6 +322,7 @@ impl Attacker {
     }
 
     fn compose_support(
+        catalog: crate::catalog::BattleCatalog,
         roster: &BattleRoster,
         plan: Option<&ComposeSupportPlan>,
     ) -> Result<
@@ -294,7 +336,7 @@ impl Attacker {
         let Some(plan) = plan else {
             return Ok(None);
         };
-        let tables = config::configs::get();
+        let tables = catalog.game_data();
         let support = tables
             .tower_compose_support
             .get(plan.support_id)
@@ -314,7 +356,7 @@ impl Attacker {
         ensure!(hero.hero_id == support.hero_id);
         ensure!(hero.ex_skill_level == support.lv);
 
-        let stats = Stats::build(&StatInputs::from_build_input(hero, None));
+        let stats = Stats::configured(tables, &StatInputs::from_build_input(hero, None));
         let attr = stats.base();
         let entity = FightEntityInfo {
             uid: Some(SUPPORT_UID),
@@ -376,13 +418,15 @@ impl Attacker {
 }
 
 fn attacker_setup(
+    catalog: crate::catalog::BattleCatalog,
     episode_id: i32,
     battle_id: i32,
     is_balance: bool,
     fight_group: &sonettobuf::FightGroup,
     params: Option<&str>,
 ) -> Result<AttackerSetup> {
-    let battle = config::configs::get()
+    let battle = catalog
+        .game_data()
         .battle
         .get(battle_id)
         .ok_or_else(|| anyhow::anyhow!("unknown battle {battle_id}"))?;
@@ -428,16 +472,17 @@ fn attacker_setup(
         aid_ids,
         selected_trials,
         use_configured_aids,
-        compose_support: compose_support_plan(episode_id, fight_group, params)?,
+        compose_support: compose_support_plan(catalog, episode_id, fight_group, params)?,
     })
 }
 
 fn compose_support_plan(
+    catalog: crate::catalog::BattleCatalog,
     episode_id: i32,
     fight_group: &sonettobuf::FightGroup,
     params: Option<&str>,
 ) -> Result<Option<ComposeSupportPlan>> {
-    let tables = config::configs::get();
+    let tables = catalog.game_data();
     if !tables
         .tower_compose_episode
         .iter()
@@ -542,7 +587,12 @@ fn validate_composition(
     Ok(())
 }
 
-fn configured_aid(aid_ids: &[i32], uid: i64, position: i32) -> Result<Option<FightEntityInfo>> {
+fn configured_aid(
+    catalog: crate::catalog::BattleCatalog,
+    aid_ids: &[i32],
+    uid: i64,
+    position: i32,
+) -> Result<Option<FightEntityInfo>> {
     if uid >= 0 {
         return Ok(None);
     }
@@ -551,8 +601,8 @@ fn configured_aid(aid_ids: &[i32], uid: i64, position: i32) -> Result<Option<Fig
     let monster_id = *aid_ids
         .get(index)
         .ok_or_else(|| anyhow::anyhow!("configured aid uid {uid} is not declared by the battle"))?;
-    Ok(Some(Defender::build_monster_with_uid(
-        monster_id, uid, position, 1,
+    Ok(Some(Defender::build_monster(
+        catalog, monster_id, uid, position, 1,
     )?))
 }
 
@@ -673,8 +723,8 @@ fn active_skills(raw: &str) -> Vec<AssistBossSkillInfo> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BattleFighter, BattleRoster, configured_aid_ids, reserved_uid_offset, selected_support,
-        validate_composition,
+        BattleFighter, BattleRoster, BattleRosterPlan, configured_aid_ids, plan_roster,
+        reserved_uid_offset, selected_support, validate_composition,
     };
     use crate::dungeon::FightOptions;
     use crate::engine::entity::input::{EquipmentBuildInput, HeroBuildInput};
@@ -683,6 +733,25 @@ mod tests {
     fn selects_support_from_the_active_compose_plane() {
         assert_eq!(selected_support("30#40#50", 0), Some(30));
         assert_eq!(selected_support("31#41#51|32#42#52", 2), Some(32));
+    }
+
+    #[test]
+    fn explicit_roster_plan_matches_the_legacy_entry_point() {
+        crate::test_support::init_config();
+        let group = sonettobuf::FightGroup::default();
+        let legacy = plan_roster(10101, 10101, false, &group, None).unwrap();
+        let explicit = BattleRosterPlan::configured(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            10101,
+            10101,
+            false,
+            &group,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(explicit.hero_uids(), legacy.hero_uids());
+        assert_eq!(explicit.compose_support(), legacy.compose_support());
     }
 
     #[test]
@@ -755,6 +824,7 @@ mod tests {
         };
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &BattleRoster {
                 user_id: 1,
                 ..Default::default()
@@ -798,6 +868,7 @@ mod tests {
         };
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &BattleRoster {
                 user_id: 1,
                 ..Default::default()
@@ -867,6 +938,7 @@ mod tests {
         };
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &roster,
             10002,
             1002,
@@ -875,7 +947,10 @@ mod tests {
             None,
         )
         .unwrap();
-        let mut runtime = crate::engine::runtime::BattleRuntime::new(built.fight.clone());
+        let mut runtime = crate::engine::runtime::BattleRuntime::new(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            built.fight.clone(),
+        );
         let round = runtime.start_round().unwrap();
         let cards = runtime.card_info_push();
         let deal = round
@@ -943,6 +1018,7 @@ mod tests {
         );
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &roster,
             10003,
             1003,
@@ -988,9 +1064,16 @@ mod tests {
             ..Default::default()
         };
 
-        let built =
-            super::super::build_fight(&roster, 10101, 10101, &group, FightOptions::default(), None)
-                .unwrap();
+        let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            &roster,
+            10101,
+            10101,
+            &group,
+            FightOptions::default(),
+            None,
+        )
+        .unwrap();
         let entity = &built.fight.attacker.unwrap().entitys[0];
 
         assert_eq!(entity.equip_uid, Some(0));
@@ -1043,9 +1126,16 @@ mod tests {
             ..Default::default()
         };
 
-        let built =
-            super::super::build_fight(&roster, 10101, 10101, &group, FightOptions::default(), None)
-                .unwrap();
+        let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            &roster,
+            10101,
+            10101,
+            &group,
+            FightOptions::default(),
+            None,
+        )
+        .unwrap();
         let entity = &built.fight.attacker.unwrap().entitys[0];
 
         assert_eq!(entity.equip_uid, Some(primary_uid));
@@ -1109,6 +1199,7 @@ mod tests {
         };
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &roster,
             38510113,
             116385108,
@@ -1151,6 +1242,7 @@ mod tests {
         crate::test_support::init_config();
 
         let error = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &BattleRoster {
                 user_id: 1,
                 ..Default::default()
@@ -1200,6 +1292,7 @@ mod tests {
         );
 
         let built = super::super::build_fight(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
             &BattleRoster {
                 user_id: 1,
                 compose_support: Some(hero),
