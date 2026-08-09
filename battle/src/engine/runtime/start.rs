@@ -128,11 +128,13 @@ impl BattleRuntime {
             battle_id,
             self.determinism.take_start_decks(),
         );
-        self.catalog.extend_roots_and_warn(
-            self.game_data(),
-            ai_deck.iter().filter_map(|card| card.skill_id),
-            std::iter::empty(),
-        );
+        self.catalog_data
+            .expect("battle runtime was not constructed with a catalog")
+            .extend_skill_roots(
+                &mut self.catalog,
+                ai_deck.iter().filter_map(|card| card.skill_id),
+                std::iter::empty(),
+            );
         let opening_hand_size = player_deck
             .iter()
             .filter(|card| !card.temp_card.unwrap_or_default())

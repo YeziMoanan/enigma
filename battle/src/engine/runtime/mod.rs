@@ -53,12 +53,6 @@ pub struct BattleRuntime {
 }
 
 impl BattleRuntime {
-    fn game_data(&self) -> &'static config::GameDB {
-        self.catalog_data
-            .expect("battle runtime was not constructed with a catalog")
-            .game_data()
-    }
-
     /// Plans client auto-battle operations without mutating authoritative state.
     pub fn plan_auto_round(
         &self,
@@ -205,11 +199,13 @@ impl BattleRuntime {
         skills: impl IntoIterator<Item = crate::engine::fight::rules::OwnedBattleSkill>,
     ) {
         let skills = skills.into_iter().collect::<Vec<_>>();
-        self.catalog.extend_roots_and_warn(
-            self.game_data(),
-            skills.iter().map(|skill| skill.skill_id),
-            std::iter::empty(),
-        );
+        self.catalog_data
+            .expect("battle runtime was not constructed with a catalog")
+            .extend_skill_roots(
+                &mut self.catalog,
+                skills.iter().map(|skill| skill.skill_id),
+                std::iter::empty(),
+            );
         self.managers.battle_rule.extend_owned_skills(skills);
     }
 
@@ -233,7 +229,6 @@ impl BattleRuntime {
         ex_attributes: impl IntoIterator<Item = (i64, HeroExAttribute)>,
         sp_attributes: impl IntoIterator<Item = (i64, HeroSpAttribute)>,
     ) -> Self {
-        let game_data = catalog.game_data();
         let mut managers = BattleManagers::seeded_with_catalog(catalog, &fight);
         if let Some(target_model_ids) = catalog.boss_rush_target_models(
             fight.episode_id.unwrap_or_default(),
@@ -264,7 +259,7 @@ impl BattleRuntime {
         let round_state = RoundState::seeded(catalog, &fight);
         let determinism =
             RoundDeterminism::with_seed(fight.battle_id.unwrap_or_default().max(0) as u64);
-        let skill_catalog = SkillEffectCatalog::from_fight(game_data, &fight);
+        let skill_catalog = catalog.skill_effects_for_fight(&fight);
 
         Self {
             catalog_data: Some(catalog),

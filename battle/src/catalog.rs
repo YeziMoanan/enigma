@@ -592,6 +592,30 @@ impl BattleCatalog {
         configured_device_card_weights(self.game_data, model_id)
     }
 
+    pub(crate) fn skill_effects_for_fight(
+        self,
+        fight: &sonettobuf::Fight,
+    ) -> crate::engine::skill::effect::SkillEffectCatalog {
+        crate::engine::skill::effect::SkillEffectCatalog::from_fight(self.game_data, fight)
+    }
+
+    pub(crate) fn extend_skill_roots(
+        self,
+        catalog: &mut crate::engine::skill::effect::SkillEffectCatalog,
+        skill_ids: impl IntoIterator<Item = i32>,
+        buff_ids: impl IntoIterator<Item = i32>,
+    ) {
+        catalog.extend_roots_and_warn(self.game_data, skill_ids, buff_ids);
+    }
+
+    pub(crate) fn extend_skill_entities<'a>(
+        self,
+        catalog: &mut crate::engine::skill::effect::SkillEffectCatalog,
+        entities: impl IntoIterator<Item = &'a sonettobuf::FightEntityInfo>,
+    ) {
+        catalog.extend_entities_and_warn(self.game_data, entities);
+    }
+
     pub(crate) fn defender_reservation_count(self, fight: &sonettobuf::Fight) -> usize {
         configured_defender_reservation_count(self.game_data, fight)
     }

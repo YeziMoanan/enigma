@@ -52,7 +52,9 @@ impl BattleRuntime {
         &mut self,
         request: &BeginRoundRequest,
     ) -> Result<FightRound, String> {
-        let game_data = self.game_data();
+        let battle_catalog = self
+            .catalog_data
+            .expect("battle runtime was not constructed with a catalog");
         let active_round = self.round_state.cur_round;
         self.round_state.begin_round();
         self.fight.cur_round = Some(self.round_state.cur_round);
@@ -75,8 +77,8 @@ impl BattleRuntime {
             .filter(|skill_id| *skill_id > 0)
             .chain(self.determinism.card_play_skill_ids())
             .collect::<Vec<_>>();
-        self.catalog.extend_roots_and_warn(
-            game_data,
+        battle_catalog.extend_skill_roots(
+            &mut self.catalog,
             request
                 .opers
                 .iter()
@@ -87,8 +89,8 @@ impl BattleRuntime {
         );
         let captured_ai_choices = self.determinism.take_ai_skills();
         if let Some(choices) = &captured_ai_choices {
-            self.catalog.extend_roots_and_warn(
-                game_data,
+            battle_catalog.extend_skill_roots(
+                &mut self.catalog,
                 choices.iter().map(|choice| choice.skill_id),
                 std::iter::empty(),
             );
@@ -159,7 +161,7 @@ impl BattleRuntime {
             Default::default()
         } else {
             schedule::run_conduit_phase(
-                game_data,
+                battle_catalog,
                 &self.fight,
                 &mut self.managers,
                 &pool,
@@ -349,8 +351,8 @@ impl BattleRuntime {
                 .map_err(|error| error.to_string())?
         {
             wave_entering_uids = change.entering_uids.clone();
-            catalog.extend_entities_and_warn(
-                game_data,
+            battle_catalog.extend_skill_entities(
+                catalog,
                 crate::engine::manager::wave::entering_entities(&change),
             );
             pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
@@ -385,8 +387,8 @@ impl BattleRuntime {
                 self.fight.battle_id.unwrap_or_default(),
                 None,
             );
-            catalog.extend_roots_and_warn(
-                game_data,
+            battle_catalog.extend_skill_roots(
+                catalog,
                 next_ai.iter().filter_map(|card| card.skill_id),
                 std::iter::empty(),
             );
@@ -483,8 +485,8 @@ impl BattleRuntime {
                     .map(|cards| (cards, Vec::new())),
             )
             .0;
-            catalog.extend_roots_and_warn(
-                game_data,
+            battle_catalog.extend_skill_roots(
+                catalog,
                 cards.iter().filter_map(|card| card.skill_id),
                 std::iter::empty(),
             );
