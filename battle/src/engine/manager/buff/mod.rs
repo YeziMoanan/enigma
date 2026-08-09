@@ -27,9 +27,9 @@ pub use command::{
     BuffAccumulateActValue, BuffAmount, BuffChangeDuration, BuffChanges, BuffChildUidReservation,
     BuffCommand, BuffCommandError, BuffConsume, BuffConvert, BuffDispel, BuffDurationAdvance,
     BuffGrant, BuffGrantChild, BuffGrantRelation, BuffGrantUidReservation, BuffLifecycleTransition,
-    BuffRefreshDuration, BuffRefreshWire, BuffRemove, BuffRemoveSelector, BuffReplace,
-    BuffRoundStartDurationSync, BuffSelector, BuffSetAmount, BuffSetState, BuffSpecialCount,
-    BuffStateSnapshotWire, DepletedBuff, RelatedBuffGrant,
+    BuffRefreshDuration, BuffRefreshDurationBySelector, BuffRefreshWire, BuffRemove,
+    BuffRemoveSelector, BuffReplace, BuffRoundStartDurationSync, BuffSelector, BuffSetAmount,
+    BuffSetState, BuffSpecialCount, BuffStateSnapshotWire, DepletedBuff, RelatedBuffGrant,
 };
 use definition::BuffDefinition;
 pub use feature::BuffPassiveSkillLink;

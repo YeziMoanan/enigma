@@ -378,6 +378,37 @@ impl BuffManager {
                     }]),
                 )
             }
+            BuffCommand::RefreshDurationBySelector(update) => {
+                let selector_valid = match update.selector {
+                    BuffSelector::IdOrType(value)
+                    | BuffSelector::ExactId(value)
+                    | BuffSelector::TypeId(value) => value > 0,
+                    BuffSelector::Uid(value) => value > 0,
+                };
+                if update.target_uid == 0 || !selector_valid || update.minimum_duration <= 0 {
+                    return Err(BuffCommandError::InvalidDurationChange);
+                }
+                let plans = self
+                    .buffs
+                    .iter()
+                    .filter(|active| {
+                        active.owner_uid == update.target_uid
+                            && Self::matches_selector(active, update.selector)
+                    })
+                    .filter_map(|active| {
+                        let duration = active.buff.duration.unwrap_or_default();
+                        if duration <= 0 {
+                            return None;
+                        }
+                        Some(DurationChangePlan {
+                            target_uid: update.target_uid,
+                            buff_uid: active.buff.uid?,
+                            duration: duration.max(update.minimum_duration),
+                        })
+                    })
+                    .collect();
+                (update.origin, BuffPlanAction::ChangeDuration(plans))
+            }
             BuffCommand::AddSpecialCount(update) => {
                 if update.target_uid == 0
                     || update.count <= 0
