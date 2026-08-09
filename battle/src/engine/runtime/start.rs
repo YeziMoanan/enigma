@@ -168,7 +168,10 @@ impl BattleRuntime {
             &self.managers,
             &opening_deal,
         );
-        let draw_pile = crate::engine::manager::card::start::draw_bag(game_data, &self.fight);
+        let draw_pile = crate::engine::manager::card::start::configured_draw_bag(
+            self.managers.catalog(),
+            &self.fight,
+        );
         let deck_num = crate::engine::manager::card::start::deck_size(&self.fight);
         self.managers
             .execute_card(CardCommand::SetAiQueue(CardSetAiQueue {

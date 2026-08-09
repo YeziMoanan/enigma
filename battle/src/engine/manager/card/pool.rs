@@ -40,38 +40,26 @@ pub(crate) fn normal_player_candidate_pool_with(
 }
 
 pub(crate) fn device_draw_bag(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
+    device_draw_bag_from(fight, |model_id| {
+        crate::catalog::configured_device_card_weights(game_data, model_id)
+    })
+}
+
+pub(super) fn device_draw_bag_from(
+    fight: &Fight,
+    mut configured: impl FnMut(i32) -> Vec<(i32, usize)>,
+) -> Vec<CardInfo> {
     fight
         .attacker
         .iter()
         .flat_map(|team| &team.entitys)
         .filter_map(|entity| {
-            let character = game_data.character.get(entity.model_id?)?;
-            let device = game_data.fight_device.get(character.device_id)?;
-            Some(
-                [&device.power_skill, &device.special_power_skill]
-                    .into_iter()
-                    .flat_map(|skills| weighted_device_cards(entity, skills)),
-            )
+            let weights = configured(entity.model_id?);
+            Some(weights.into_iter().flat_map(|(skill_id, count)| {
+                std::iter::repeat_n(card_for(entity, Some(skill_id)).unwrap(), count)
+            }))
         })
         .flatten()
-        .collect()
-}
-
-fn weighted_device_cards(entity: &FightEntityInfo, skills: &str) -> Vec<CardInfo> {
-    skills
-        .split('|')
-        .filter_map(|entry| {
-            let mut parts = entry.split('#');
-            let skill_id = parts.next().and_then(|value| value.parse::<i32>().ok());
-            let count = parts.next().and_then(|value| value.parse::<usize>().ok());
-            match (skill_id, count, parts.next()) {
-                (Some(skill_id), Some(count), None) if skill_id > 0 => Some((skill_id, count)),
-                _ => None,
-            }
-        })
-        .flat_map(|(skill_id, count)| {
-            std::iter::repeat_n(card_for(entity, Some(skill_id)).unwrap(), count)
-        })
         .collect()
 }
 

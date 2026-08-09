@@ -146,6 +146,26 @@ fn resolve_configured_cards(fight: &Fight, entries: &str) -> Result<Vec<CardInfo
 }
 
 pub fn draw_bag(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
+    draw_bag_from(fight, |fight| {
+        crate::engine::manager::card::pool::device_draw_bag(game_data, fight)
+    })
+}
+
+pub(crate) fn configured_draw_bag(
+    catalog: crate::catalog::BattleCatalog,
+    fight: &Fight,
+) -> Vec<CardInfo> {
+    draw_bag_from(fight, |fight| {
+        crate::engine::manager::card::pool::device_draw_bag_from(fight, |model_id| {
+            catalog.device_card_weights(model_id)
+        })
+    })
+}
+
+fn draw_bag_from(
+    fight: &Fight,
+    device_cards: impl FnOnce(&Fight) -> Vec<CardInfo>,
+) -> Vec<CardInfo> {
     let candidates =
         crate::engine::manager::card::pool::normal_player_candidate_pool_with(fight, |_| false);
     let mut cards = active_player_uids(fight)
@@ -160,9 +180,7 @@ pub fn draw_bag(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
                 .filter_map(move |index| owner.get(index as usize % owner.len().max(1)).cloned())
         })
         .collect::<Vec<_>>();
-    cards.extend(crate::engine::manager::card::pool::device_draw_bag(
-        game_data, fight,
-    ));
+    cards.extend(device_cards(fight));
     cards
 }
 
@@ -577,6 +595,12 @@ mod tests {
         };
 
         let bag = draw_bag(crate::test_support::game_data(), &fight);
+        let configured = configured_draw_bag(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            &fight,
+        );
+
+        assert_eq!(configured, bag);
 
         assert_eq!(deck_size(&fight), 16);
         assert_eq!(bag.len(), 26);

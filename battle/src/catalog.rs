@@ -579,6 +579,10 @@ impl BattleCatalog {
         configured_teaching_cards(self.game_data, episode_id)
     }
 
+    pub(crate) fn device_card_weights(self, model_id: i32) -> Vec<(i32, usize)> {
+        configured_device_card_weights(self.game_data, model_id)
+    }
+
     pub(crate) fn defender_reservation_count(self, fight: &sonettobuf::Fight) -> usize {
         configured_defender_reservation_count(self.game_data, fight)
     }
@@ -1056,6 +1060,31 @@ pub(crate) fn configured_teaching_cards(
         opening_cards: row.opening_cards.clone(),
         refill_cards: row.refill_cards.clone(),
     })
+}
+
+pub(crate) fn configured_device_card_weights(
+    game_data: &config::GameDB,
+    model_id: i32,
+) -> Vec<(i32, usize)> {
+    let Some(character) = game_data.character.get(model_id) else {
+        return Vec::new();
+    };
+    let Some(device) = game_data.fight_device.get(character.device_id) else {
+        return Vec::new();
+    };
+    [&device.power_skill, &device.special_power_skill]
+        .into_iter()
+        .flat_map(|skills| skills.split('|'))
+        .filter_map(|entry| {
+            let mut parts = entry.split('#');
+            let skill_id = parts.next().and_then(|value| value.parse::<i32>().ok());
+            let count = parts.next().and_then(|value| value.parse::<usize>().ok());
+            match (skill_id, count, parts.next()) {
+                (Some(skill_id), Some(count), None) if skill_id > 0 => Some((skill_id, count)),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn damage_target_count_kind(game_data: &config::GameDB, code: i32) -> i32 {
@@ -2020,6 +2049,25 @@ mod tests {
         assert_eq!(catalog.card_skill_rank(&card(Some(31_345_111), Some(9))), 1);
         assert_eq!(catalog.card_skill_rank(&card(Some(-1), Some(9))), 9);
         assert_eq!(catalog.card_skill_rank(&card(None, Some(9))), 9);
+    }
+
+    #[test]
+    fn normalizes_device_card_weights() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.device_card_weights(3_149),
+            vec![
+                (31_446_011, 2),
+                (31_446_012, 2),
+                (31_446_021, 2),
+                (31_446_022, 2),
+                (31_490_201, 1),
+                (31_490_211, 1),
+            ]
+        );
+        assert!(catalog.device_card_weights(-1).is_empty());
     }
 
     #[test]
