@@ -32,6 +32,12 @@ pub(crate) struct ConfiguredPlayerSkill {
     pub need_power: Option<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfiguredTeachingCards {
+    pub opening_cards: String,
+    pub refill_cards: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EntityExAttributes {
     pub crit_rate: i32,
@@ -569,6 +575,10 @@ impl BattleCatalog {
             .collect()
     }
 
+    pub(crate) fn teaching_cards(self, episode_id: i32) -> Option<ConfiguredTeachingCards> {
+        configured_teaching_cards(self.game_data, episode_id)
+    }
+
     pub(crate) fn defender_reservation_count(self, fight: &sonettobuf::Fight) -> usize {
         configured_defender_reservation_count(self.game_data, fight)
     }
@@ -1035,6 +1045,17 @@ pub(crate) fn configured_wave_start_actions(
         }
     }
     Ok(actions)
+}
+
+pub(crate) fn configured_teaching_cards(
+    game_data: &config::GameDB,
+    episode_id: i32,
+) -> Option<ConfiguredTeachingCards> {
+    let row = game_data.teaching_card.get(episode_id)?;
+    Some(ConfiguredTeachingCards {
+        opening_cards: row.opening_cards.clone(),
+        refill_cards: row.refill_cards.clone(),
+    })
 }
 
 pub(crate) fn damage_target_count_kind(game_data: &config::GameDB, code: i32) -> i32 {

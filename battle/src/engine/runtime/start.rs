@@ -139,7 +139,7 @@ impl BattleRuntime {
             .filter(|card| !card.temp_card.unwrap_or_default())
             .count();
         let (opening_deal, preserve_refill_floor) = if let Some(configured) =
-            crate::engine::manager::card::start::configured_opening_deal(game_data, &self.fight)?
+            crate::engine::manager::card::start::opening_deal(self.managers.catalog(), &self.fight)?
         {
             (configured, true)
         } else {
@@ -153,9 +153,11 @@ impl BattleRuntime {
                 (player_deck.clone(), false)
             }
         };
-        self.determinism.enqueue_card_draws(
-            crate::engine::manager::card::start::configured_refill_draws(game_data, &self.fight)?,
-        );
+        self.determinism
+            .enqueue_card_draws(crate::engine::manager::card::start::refill_draws(
+                self.managers.catalog(),
+                &self.fight,
+            )?);
         let opening_pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
             self.catalog_data
                 .expect("battle runtime was not constructed with a catalog"),

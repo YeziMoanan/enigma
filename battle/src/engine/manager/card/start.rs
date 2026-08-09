@@ -36,7 +36,23 @@ pub fn configured_opening_deal(
     game_data: &config::GameDB,
     fight: &Fight,
 ) -> Result<Option<Vec<CardInfo>>, String> {
-    let Some(config) = teaching_card_config(game_data, fight) else {
+    opening_deal_from(fight, |episode_id| {
+        crate::catalog::configured_teaching_cards(game_data, episode_id)
+    })
+}
+
+pub(crate) fn opening_deal(
+    catalog: crate::catalog::BattleCatalog,
+    fight: &Fight,
+) -> Result<Option<Vec<CardInfo>>, String> {
+    opening_deal_from(fight, |episode_id| catalog.teaching_cards(episode_id))
+}
+
+fn opening_deal_from(
+    fight: &Fight,
+    configured: impl FnOnce(i32) -> Option<crate::catalog::ConfiguredTeachingCards>,
+) -> Result<Option<Vec<CardInfo>>, String> {
+    let Some(config) = teaching_card_config(fight, configured) else {
         return Ok(None);
     };
     let cards = resolve_configured_cards(fight, &config.opening_cards)?;
@@ -50,24 +66,38 @@ pub fn configured_refill_draws(
     game_data: &config::GameDB,
     fight: &Fight,
 ) -> Result<Vec<CardInfo>, String> {
-    let Some(config) = teaching_card_config(game_data, fight) else {
+    refill_draws_from(fight, |episode_id| {
+        crate::catalog::configured_teaching_cards(game_data, episode_id)
+    })
+}
+
+pub(crate) fn refill_draws(
+    catalog: crate::catalog::BattleCatalog,
+    fight: &Fight,
+) -> Result<Vec<CardInfo>, String> {
+    refill_draws_from(fight, |episode_id| catalog.teaching_cards(episode_id))
+}
+
+fn refill_draws_from(
+    fight: &Fight,
+    configured: impl FnOnce(i32) -> Option<crate::catalog::ConfiguredTeachingCards>,
+) -> Result<Vec<CardInfo>, String> {
+    let Some(config) = teaching_card_config(fight, configured) else {
         return Ok(Vec::new());
     };
     resolve_configured_cards(fight, &config.refill_cards)
 }
 
-fn teaching_card_config<'a>(
-    game_data: &'a config::GameDB,
+fn teaching_card_config(
     fight: &Fight,
-) -> Option<&'a config::teaching_card::TeachingCard> {
+    configured: impl FnOnce(i32) -> Option<crate::catalog::ConfiguredTeachingCards>,
+) -> Option<crate::catalog::ConfiguredTeachingCards> {
     if crate::engine::fight::versions::round_start_setup_layout(fight.version.unwrap_or_default())
         != Some(crate::engine::fight::versions::RoundStartSetupLayout::Version7)
     {
         return None;
     }
-    game_data
-        .teaching_card
-        .get(fight.episode_id.unwrap_or_default())
+    configured(fight.episode_id.unwrap_or_default())
 }
 
 fn resolve_configured_cards(fight: &Fight, entries: &str) -> Result<Vec<CardInfo>, String> {
@@ -393,6 +423,7 @@ mod tests {
     #[test]
     fn configured_opening_deals_resolve_every_tracked_model_and_skill_group() {
         crate::test_support::init_config();
+        let catalog = crate::catalog::BattleCatalog::new(crate::test_support::game_data());
         let cases = [
             (
                 10001,
@@ -464,6 +495,8 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
+            assert_eq!(opening_deal(catalog, &fight).unwrap(), Some(deal.clone()));
+
             assert_eq!(
                 deal.iter()
                     .map(|card| (card.uid.unwrap(), card.skill_id.unwrap()))
@@ -476,6 +509,7 @@ mod tests {
     #[test]
     fn configured_opening_deals_do_not_change_version_six_replays() {
         crate::test_support::init_config();
+        let catalog = crate::catalog::BattleCatalog::new(crate::test_support::game_data());
         let fight = Fight {
             episode_id: Some(10002),
             version: Some(6),
@@ -499,11 +533,14 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        assert!(opening_deal(catalog, &fight).unwrap().is_none());
+        assert!(refill_draws(catalog, &fight).unwrap().is_empty());
     }
 
     #[test]
     fn configured_refill_draws_resolve_through_the_same_card_groups() {
         crate::test_support::init_config();
+        let catalog = crate::catalog::BattleCatalog::new(crate::test_support::game_data());
         let fight = Fight {
             episode_id: Some(10001),
             version: Some(7),
@@ -517,9 +554,10 @@ mod tests {
             ..Default::default()
         };
 
+        let configured = configured_refill_draws(crate::test_support::game_data(), &fight).unwrap();
+        assert_eq!(refill_draws(catalog, &fight).unwrap(), configured);
         assert_eq!(
-            configured_refill_draws(crate::test_support::game_data(), &fight)
-                .unwrap()
+            configured
                 .iter()
                 .map(|card| (card.uid.unwrap(), card.skill_id.unwrap()))
                 .collect::<Vec<_>>(),
