@@ -370,8 +370,8 @@ impl BattleRuntime {
                 .map_err(|error| format!("{error:?}"))?,
                 fight_version,
             )?);
-            let (next_ai, _) = crate::engine::manager::card::start_decks_from_fight(
-                game_data,
+            let (next_ai, _) = crate::engine::manager::card::start::configured_start_decks(
+                self.managers.catalog(),
                 &self.fight,
                 &self.managers.ex_point,
                 &self.managers.eureka,
@@ -465,8 +465,8 @@ impl BattleRuntime {
         finish_if_battle_ended(&mut self.round_state, &self.fight, &pool, &self.managers);
         fight_steps.extend(project_result(round_start, fight_version)?);
         if !self.round_state.is_finish {
-            let cards = crate::engine::manager::card::start_decks_from_fight(
-                game_data,
+            let cards = crate::engine::manager::card::start::configured_start_decks(
+                self.managers.catalog(),
                 &self.fight,
                 &self.managers.ex_point,
                 &self.managers.eureka,

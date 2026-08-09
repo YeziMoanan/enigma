@@ -101,7 +101,6 @@ impl BattleRuntime {
     }
 
     pub(super) fn build_start_round_from_schedule(&mut self) -> Result<FightRound, String> {
-        let game_data = self.game_data();
         let battle_id = self.fight.battle_id.unwrap_or_default();
         let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
             self.catalog_data
@@ -120,8 +119,8 @@ impl BattleRuntime {
             &mut self.determinism,
             context,
         );
-        let (ai_deck, player_deck) = crate::engine::manager::card::start_decks_from_fight(
-            game_data,
+        let (ai_deck, player_deck) = crate::engine::manager::card::start::configured_start_decks(
+            self.managers.catalog(),
             &self.fight,
             &self.managers.ex_point,
             &self.managers.eureka,
@@ -144,7 +143,7 @@ impl BattleRuntime {
             (configured, true)
         } else {
             let drawn = self.determinism.draw_cards(
-                &available_player_cards(game_data, &self.fight),
+                &available_player_cards(self.managers.catalog(), &self.fight),
                 opening_hand_size,
             );
             if drawn.len() == opening_hand_size {
@@ -273,6 +272,13 @@ impl BattleRuntime {
     }
 }
 
-pub(super) fn available_player_cards(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
-    crate::engine::manager::card::pool::player_candidate_pool_with(game_data, fight, |_| false)
+pub(super) fn available_player_cards(
+    catalog: crate::catalog::BattleCatalog,
+    fight: &Fight,
+) -> Vec<CardInfo> {
+    crate::engine::manager::card::pool::player_candidate_pool_from(
+        fight,
+        |_| false,
+        |model_id| catalog.device_card_weights(model_id),
+    )
 }

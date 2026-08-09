@@ -4,7 +4,7 @@ use sonettobuf::{CardInfo, Fight};
 use crate::engine::manager::card::{
     ai::generate_ai_deck_with_extra_actions,
     draw::draw_guaranteed_by_uid,
-    pool::{active_enemy_entities, active_player_uids, card_for, player_candidate_pool},
+    pool::{active_enemy_entities, active_player_uids, card_for},
 };
 
 const CARDS_PER_HERO: i32 = 16;
@@ -193,6 +193,63 @@ pub fn start_decks_from_fight(
     seed_value: i32,
     captured: Option<(Vec<CardInfo>, Vec<CardInfo>)>,
 ) -> (Vec<CardInfo>, Vec<CardInfo>) {
+    start_decks_from(
+        fight,
+        ex_point,
+        eureka,
+        extra_ai_actions,
+        seed_value,
+        captured,
+        |allow_ex_skill| {
+            crate::engine::manager::card::pool::player_candidate_pool_from(
+                fight,
+                |entity| {
+                    allow_ex_skill && crate::engine::manager::card::pool::can_use_ex_skill(entity)
+                },
+                |model_id| crate::catalog::configured_device_card_weights(game_data, model_id),
+            )
+        },
+    )
+}
+
+pub(crate) fn configured_start_decks(
+    catalog: crate::catalog::BattleCatalog,
+    fight: &Fight,
+    ex_point: &crate::engine::manager::ex_point::ExPointManager,
+    eureka: &crate::engine::manager::eureka::EurekaManager,
+    extra_ai_actions: i32,
+    seed_value: i32,
+    captured: Option<(Vec<CardInfo>, Vec<CardInfo>)>,
+) -> (Vec<CardInfo>, Vec<CardInfo>) {
+    start_decks_from(
+        fight,
+        ex_point,
+        eureka,
+        extra_ai_actions,
+        seed_value,
+        captured,
+        |allow_ex_skill| {
+            crate::engine::manager::card::pool::player_candidate_pool_from(
+                fight,
+                |entity| {
+                    allow_ex_skill && crate::engine::manager::card::pool::can_use_ex_skill(entity)
+                },
+                |model_id| catalog.device_card_weights(model_id),
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_decks_from(
+    fight: &Fight,
+    ex_point: &crate::engine::manager::ex_point::ExPointManager,
+    eureka: &crate::engine::manager::eureka::EurekaManager,
+    extra_ai_actions: i32,
+    seed_value: i32,
+    captured: Option<(Vec<CardInfo>, Vec<CardInfo>)>,
+    mut player_candidates: impl FnMut(bool) -> Vec<CardInfo>,
+) -> (Vec<CardInfo>, Vec<CardInfo>) {
     let required_uids = active_player_uids(fight);
     let valid_target_uids = fight
         .attacker
@@ -205,7 +262,7 @@ pub fn start_decks_from_fight(
     let hand_size = hand_size(fight);
     let mut rng = StdRng::seed_from_u64(seed(fight, seed_value));
     if let Some((captured_ai, captured_player)) = captured {
-        let captured_candidates = player_candidate_pool(game_data, fight);
+        let captured_candidates = player_candidates(true);
         let ai_candidates = active_enemy_entities(fight)
             .into_iter()
             .flat_map(|entity| {
@@ -248,8 +305,7 @@ pub fn start_decks_from_fight(
         return (ai, player);
     }
 
-    let candidates =
-        crate::engine::manager::card::pool::player_candidate_pool_with(game_data, fight, |_| false);
+    let candidates = player_candidates(false);
     let player = draw_guaranteed_by_uid(&candidates, &required_uids, hand_size, &mut rng);
     let ai =
         generate_ai_deck_with_extra_actions(fight, ex_point, eureka, extra_ai_actions, &mut rng);
@@ -311,6 +367,18 @@ mod tests {
             0,
             7,
             None,
+        );
+        assert_eq!(
+            configured_start_decks(
+                crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+                &fight,
+                &ex_point,
+                &eureka,
+                0,
+                7,
+                None,
+            ),
+            (ai.clone(), player.clone())
         );
 
         assert_eq!(player.len(), 5);

@@ -3,9 +3,11 @@ use sonettobuf::{CardInfo, Fight, FightEntityInfo};
 use crate::engine::skill::target::TargetEntity;
 
 pub fn player_candidate_pool(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
-    player_candidate_pool_with(game_data, fight, |entity| {
-        entity.ex_point.unwrap_or_default() >= 5 + entity.expoint_max_add.unwrap_or_default()
-    })
+    player_candidate_pool_with(game_data, fight, can_use_ex_skill)
+}
+
+pub(super) fn can_use_ex_skill(entity: &FightEntityInfo) -> bool {
+    entity.ex_point.unwrap_or_default() >= 5 + entity.expoint_max_add.unwrap_or_default()
 }
 
 pub fn player_candidate_pool_with(
@@ -13,9 +15,19 @@ pub fn player_candidate_pool_with(
     fight: &Fight,
     mut can_use_ex_skill: impl FnMut(&FightEntityInfo) -> bool,
 ) -> Vec<CardInfo> {
+    player_candidate_pool_from(fight, &mut can_use_ex_skill, |model_id| {
+        crate::catalog::configured_device_card_weights(game_data, model_id)
+    })
+}
+
+pub(crate) fn player_candidate_pool_from(
+    fight: &Fight,
+    mut can_use_ex_skill: impl FnMut(&FightEntityInfo) -> bool,
+    configured: impl FnMut(i32) -> Vec<(i32, usize)>,
+) -> Vec<CardInfo> {
     normal_player_candidate_pool_with(fight, &mut can_use_ex_skill)
         .into_iter()
-        .chain(device_draw_bag(game_data, fight))
+        .chain(device_draw_bag_from(fight, configured))
         .collect()
 }
 
