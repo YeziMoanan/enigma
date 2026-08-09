@@ -500,6 +500,7 @@ fn start_schedule_finishes_unconditional_setup_before_round_start() {
         .position(|(stage, _)| *stage == SetupStage::RoundStart)
         .unwrap();
 
+    assert!(!START.contains(&(SetupStage::EnterBattleStatic, 0)));
     assert!(unconditional < first_round_start);
     let sync = START
         .iter()
@@ -515,6 +516,167 @@ fn start_schedule_finishes_unconditional_setup_before_round_start() {
         .unwrap();
 
     assert!(sync < late && late < settlement);
+}
+
+fn collect_effects_of_type<'a>(
+    effect: &'a sonettobuf::ActEffect,
+    effect_type: i32,
+    matches: &mut Vec<&'a sonettobuf::ActEffect>,
+) {
+    if effect.effect_type == Some(effect_type) {
+        matches.push(effect);
+    }
+    if let Some(step) = &effect.fight_step {
+        for nested in &step.act_effect {
+            collect_effects_of_type(nested, effect_type, matches);
+        }
+    }
+}
+
+fn step_contains_effect(step: &sonettobuf::FightStep, effect_type: i32) -> bool {
+    let mut matches = Vec::new();
+    for effect in &step.act_effect {
+        collect_effects_of_type(effect, effect_type, &mut matches);
+    }
+    !matches.is_empty()
+}
+
+#[test]
+fn anjo_contract_is_offered_once_during_opening_and_not_on_later_rounds() {
+    init_config();
+    let fight = Fight {
+        version: Some(7),
+        attacker: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    uid: Some(10),
+                    model_id: Some(3100),
+                    position: Some(1),
+                    team_type: Some(1),
+                    current_hp: Some(100),
+                    passive_skill: vec![31000141],
+                    ..Default::default()
+                },
+                FightEntityInfo {
+                    uid: Some(20),
+                    model_id: Some(3086),
+                    position: Some(2),
+                    team_type: Some(1),
+                    current_hp: Some(100),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let catalog = SkillEffectCatalog::from_fight(config::configs::get(), &fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let subscribers = crate::engine::event::dispatcher::dispatch_compiled_setup(
+        &pool,
+        &managers,
+        &catalog,
+        SetupStage::EnterBattleStatic,
+        0,
+    )
+    .unwrap();
+    assert_eq!(subscribers.len(), 1);
+    assert_eq!(subscribers[0].0.owner_uid, 10);
+    assert_eq!(subscribers[0].0.skill_id, 31000141);
+    let mut determinism = RoundDeterminism::default();
+    let (opening, _) = run_start(
+        managers.catalog(),
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut determinism,
+        TargetContext {
+            current_round: 1,
+            ..Default::default()
+        },
+        CardSetup {
+            hand: Vec::new(),
+            draw_pile: Vec::new(),
+            deck_num: 0,
+        },
+        0,
+    )
+    .unwrap();
+
+    let contract_type = sonettobuf::effect_type_enum::EffectType::Notifiyherocontract as i32;
+    let opening_steps =
+        crate::engine::packet::timeline::project_for_version(&opening.frames, 7).unwrap();
+    let mut opening_contracts = Vec::new();
+    for effect in opening_steps.iter().flat_map(|step| &step.act_effect) {
+        collect_effects_of_type(effect, contract_type, &mut opening_contracts);
+    }
+    assert_eq!(opening_contracts.len(), 1);
+    assert_eq!(opening_contracts[0].target_id, Some(10));
+    assert_eq!(opening_contracts[0].config_effect, Some(60092));
+    assert_eq!(opening_contracts[0].reserve_str.as_deref(), Some("20"));
+    assert!(managers.contract.selection_origin(10, 20).is_some());
+    let enter_fight_deal = sonettobuf::effect_type_enum::EffectType::Enterfightdeal as i32;
+    let deck_count = sonettobuf::effect_type_enum::EffectType::Carddecknum as i32;
+    let enter_fight_deal = opening_steps
+        .iter()
+        .position(|step| step_contains_effect(step, enter_fight_deal))
+        .unwrap();
+    let deck_counts = opening_steps
+        .iter()
+        .enumerate()
+        .filter(|(_, step)| step_contains_effect(step, deck_count))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let contract = opening_steps
+        .iter()
+        .position(|step| step_contains_effect(step, contract_type))
+        .unwrap();
+    assert_eq!(deck_counts.len(), 2);
+    assert_eq!(
+        opening_steps[deck_counts[0]]
+            .act_effect
+            .iter()
+            .filter(|effect| effect.effect_type == Some(deck_count))
+            .count(),
+        2
+    );
+    assert_eq!(
+        opening_steps[deck_counts[1]]
+            .act_effect
+            .iter()
+            .filter(|effect| effect.effect_type == Some(deck_count))
+            .count(),
+        1
+    );
+    assert!(enter_fight_deal < deck_counts[0]);
+    assert!(deck_counts[0] < contract && contract < deck_counts[1]);
+
+    for round in [2, 3] {
+        let (transition, _) = run_round_start_split(
+            &mut managers,
+            &pool,
+            &catalog,
+            &mut determinism,
+            TargetContext {
+                current_round: round,
+                ..Default::default()
+            },
+            1,
+        )
+        .unwrap();
+        let steps =
+            crate::engine::packet::timeline::project_for_version(&transition.frames, 7).unwrap();
+        let mut contracts = Vec::new();
+        for effect in steps.iter().flat_map(|step| &step.act_effect) {
+            collect_effects_of_type(effect, contract_type, &mut contracts);
+        }
+        assert!(
+            contracts.is_empty(),
+            "round {round} repeated the entry-only Contract offer"
+        );
+        assert!(managers.contract.selection_origin(10, 20).is_some());
+    }
 }
 
 #[test]
