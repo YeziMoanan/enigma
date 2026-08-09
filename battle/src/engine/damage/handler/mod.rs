@@ -1,12 +1,9 @@
 use crate::engine::{
     damage::butterfly_damage,
     entity::attr::AttrId,
-    manager::{
-        buff::BuffManager,
-        hp::{
-            DamageEffectKind, HpCommand, HpDamage, HpHeal, HpHealKind, HpLoss, HurtDamageFromType,
-            HurtInfoData,
-        },
+    manager::hp::{
+        DamageEffectKind, HpCommand, HpDamage, HpHeal, HpHealKind, HpLoss, HurtDamageFromType,
+        HurtInfoData,
     },
     skill::{
         behavior::{BehaviorOpContext, classify::BehaviorKind, registry::BehaviorHandler},
@@ -16,6 +13,9 @@ use crate::engine::{
     },
 };
 use sonettobuf::effect_type_enum::EffectType;
+
+#[cfg(test)]
+use crate::engine::manager::buff::BuffManager;
 
 mod affinity;
 mod critical;
@@ -497,7 +497,10 @@ impl BehaviorHandler for Handler {
                 if *replacement_buff_id <= 0 || *count_scope != 3 || *rate_per_character <= 0 {
                     return None;
                 }
-                let mut feature = BuffManager::configured_features(*replacement_buff_id)
+                let mut feature = context
+                    .managers
+                    .buff
+                    .definition_features(*replacement_buff_id)
                     .into_iter()
                     .find(|feature| is_kind(feature, BuffActKind::AttrOnlyCalDamageReplaceAttr))?;
                 feature.owner_uid = source_uid;

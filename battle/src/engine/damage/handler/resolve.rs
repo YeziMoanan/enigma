@@ -129,7 +129,9 @@ pub fn resolve_configured_replacement_damage_command(
     config_effect: i32,
     hurt_effect_type: i32,
 ) -> Option<HpCommand> {
-    let mut feature = BuffManager::configured_features(replacement_buff_id)
+    let mut feature = runtime
+        .buffs
+        .definition_features(replacement_buff_id)
         .into_iter()
         .find(|feature| is_kind(feature, BuffActKind::AttrOnlyCalDamageReplaceAttr))?;
     feature.owner_uid = request.source_uid;

@@ -835,19 +835,13 @@ impl BuffManager {
 
     pub fn configured_features(buff_id: i32) -> Vec<ActiveBuffFeature> {
         let definition = BuffDefinition::get(buff_id);
-        active_feature(
-            config::try_get(),
-            0,
-            0,
-            true,
-            &BuffInfo {
-                buff_id: Some(buff_id),
-                count: Some(1),
-                layer: Some(1),
-                ..Default::default()
-            },
-            definition.as_ref(),
-        )
+        configured_features(config::try_get(), buff_id, definition.as_ref())
+    }
+
+    pub(crate) fn definition_features(&self, buff_id: i32) -> Vec<ActiveBuffFeature> {
+        let game = self.catalog().game_data();
+        let definition = BuffDefinition::configured(game, buff_id);
+        configured_features(Some(game), buff_id, definition.as_ref())
     }
 
     pub fn passive_skill_links_for(&self, uid: i64) -> Vec<BuffPassiveSkillLink> {
@@ -914,6 +908,26 @@ impl BuffManager {
             })
             .collect()
     }
+}
+
+fn configured_features(
+    game: Option<&config::GameDB>,
+    buff_id: i32,
+    definition: Option<&BuffDefinition>,
+) -> Vec<ActiveBuffFeature> {
+    active_feature(
+        game,
+        0,
+        0,
+        true,
+        &BuffInfo {
+            buff_id: Some(buff_id),
+            count: Some(1),
+            layer: Some(1),
+            ..Default::default()
+        },
+        definition,
+    )
 }
 
 fn passive_skill_owner(active: &ActiveBuff) -> i64 {
