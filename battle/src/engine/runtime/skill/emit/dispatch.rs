@@ -578,7 +578,8 @@ pub(in crate::engine::runtime) fn emit_ops(
                 behavior::registry::FireCountMode::Transfer => (1, fire_count),
             };
             for _ in 0..emissions {
-                let behavior_ops = (definition.emit_ops)(
+                let behavior_ops = behavior::registry::emit_runtime_ops(
+                    definition,
                     BehaviorOpContext {
                         source_uid: invocation.plan.source_uid,
                         source_team,
@@ -593,6 +594,7 @@ pub(in crate::engine::runtime) fn emit_ops(
                         target: &mut execution.context,
                     },
                     &slot.behavior,
+                    catalog,
                 )
                 .ok_or(SkillOpError::MissingBehaviorOp {
                     skill_id: invocation.plan.skill_id,
