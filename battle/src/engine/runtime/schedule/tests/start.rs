@@ -177,16 +177,18 @@ fn opening_raw_deal_uses_surplus_cards_to_refill_composed_slots() {
 }
 
 #[test]
-fn opening_setup_applies_the_active_draw_limit_before_dealing() {
+fn opening_setup_applies_the_configured_fourth_ally_limit_before_dealing() {
     init_config();
     let fight = Fight {
         attacker: Some(FightTeam {
             entitys: (0..4)
                 .map(|index| FightEntityInfo {
                     uid: Some(index + 1),
+                    position: Some(index as i32 + 1),
+                    career: Some(if index == 3 { 101 } else { 6 }),
                     team_type: Some(1),
                     current_hp: Some(100),
-                    passive_skill: (index == 0).then_some(40).into_iter().collect(),
+                    passive_skill: (index == 3).then_some(40).into_iter().collect(),
                     ..Default::default()
                 })
                 .collect(),
@@ -196,6 +198,12 @@ fn opening_setup_applies_the_active_draw_limit_before_dealing() {
     };
     let pool = TargetPool::from_fight(&fight);
     let mut managers = BattleManagers::seeded(&fight);
+    managers
+        .battle_rule
+        .extend_owned_skills([crate::engine::fight::rules::OwnedBattleSkill {
+            owner_uid: crate::engine::fight::rules::ATTACKER_SIDE_UID,
+            skill_id: 1163852001,
+        }]);
     let mut slot = SkillEffectSlot::new(
         ParsedBehavior::new(1, "AddBuff", vec![31490001]),
         TargetRequest::self_only(),
@@ -209,7 +217,8 @@ fn opening_setup_applies_the_active_draw_limit_before_dealing() {
         raw_args: Vec::new(),
     }];
     slot.compiled_route = ConditionRoute::compile(&slot.conditions);
-    let mut catalog = SkillEffectCatalog::default();
+    let mut catalog =
+        SkillEffectCatalog::from_roots(config::configs::get(), [1163852001], std::iter::empty());
     catalog.insert(ParsedSkillEffect {
         skill_id: 40,
         slots: vec![slot],
@@ -219,28 +228,45 @@ fn opening_setup_applies_the_active_draw_limit_before_dealing() {
         skill_id: Some(skill_id),
         ..Default::default()
     };
+    let opening = [
+        31070111, 31280121, 31070121, 31430121, 31430111, 31280111, 31446011, 31446011, 31070111,
+        31070121, 31430111,
+    ]
+    .into_iter()
+    .map(card)
+    .collect::<Vec<_>>();
+    let mut determinism = RoundDeterminism::default();
+    determinism.enqueue_card_draws(opening[8..].to_vec());
 
     let (start, dealt) = run_start(
         managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
-        &mut RoundDeterminism::default(),
+        &mut determinism,
         TargetContext::default(),
         CardSetup {
-            hand: (1..=8).map(card).collect(),
-            draw_pile: (9..=10)
-                .flat_map(|skill_id| [card(skill_id), card(skill_id)])
-                .collect(),
-            deck_num: 64,
+            hand: opening[..8].to_vec(),
+            draw_pile: opening[8..].to_vec(),
+            deck_num: 48,
         },
         8,
     )
     .unwrap();
 
-    assert_eq!(dealt.len(), 10);
-    assert_eq!(managers.card.normal_hand_len(), 10);
-    assert_eq!(managers.card.deck_num(), 62);
+    assert!(
+        managers
+            .buff
+            .active_for(4)
+            .any(|buff| buff.buff_id == Some(1163852002))
+    );
+    assert_eq!(
+        crate::engine::mechanic::card::CardMechanic.normal_hand_limit(8, &managers, &pool),
+        11
+    );
+    assert_eq!(dealt, opening);
+    assert_eq!(managers.card.normal_hand_len(), 11);
+    assert_eq!(managers.card.deck_num(), 45);
     let steps = crate::engine::packet::timeline::project(&start.frames).unwrap();
     assert_eq!(
         steps
@@ -252,7 +278,7 @@ fn opening_setup_applies_the_active_draw_limit_before_dealing() {
             })
             .filter_map(|effect| effect.effect_num)
             .collect::<Vec<_>>(),
-        vec![64, 62, 62]
+        vec![48, 45, 45]
     );
 }
 
