@@ -275,6 +275,10 @@ impl BattleCatalog {
         contract_binding_buffs(self.game_data, ex_skill_level, career)
     }
 
+    pub(crate) fn summoned_unique_skills(self, summoned_id: i32) -> Vec<i32> {
+        summoned_unique_skills(self.game_data, summoned_id)
+    }
+
     pub(crate) fn buff_status(
         self,
         buff_id: i32,
@@ -873,6 +877,17 @@ pub(crate) fn contract_binding_buffs(
     ))
 }
 
+pub(crate) fn summoned_unique_skills(game_data: &config::GameDB, summoned_id: i32) -> Vec<i32> {
+    game_data
+        .summoned
+        .get(summoned_id)
+        .into_iter()
+        .flat_map(|row| row.unique_skills.split(['#', '|', ',']))
+        .filter_map(|value| value.trim().parse().ok())
+        .filter(|value| *value > 0)
+        .collect()
+}
+
 fn mapped_contract_buff(
     game_data: &config::GameDB,
     config_id: i32,
@@ -992,6 +1007,15 @@ mod tests {
         assert_eq!(catalog.damage_target_count_kind(202), 2);
         assert_eq!(catalog.target_count(i32::MAX), 0);
         assert_eq!(catalog.damage_target_count_kind(i32::MAX), 0);
+    }
+
+    #[test]
+    fn normalizes_summoned_unique_skills() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(catalog.summoned_unique_skills(15_001), vec![30_740_171]);
+        assert!(catalog.summoned_unique_skills(-1).is_empty());
     }
 
     #[test]
