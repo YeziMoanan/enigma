@@ -188,6 +188,36 @@ pub async fn add_currency_in_transaction(
     Ok(())
 }
 
+pub(super) async fn add_currency_up_to_limit_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
+    user_id: i64,
+    currency_id: i32,
+    amount: i32,
+    limit: i32,
+    now: i64,
+) -> sqlx::Result<()> {
+    if currency_id == POWER_CURRENCY_ID {
+        settle_power_recovery_in_transaction(tx, user_id, now).await?;
+    }
+    let amount = amount.min(limit).max(0);
+    sqlx::query(
+        "INSERT INTO currencies
+             (user_id, currency_id, quantity, last_recover_time, expired_time)
+         VALUES (?, ?, ?, ?, 0)
+         ON CONFLICT(user_id, currency_id) DO UPDATE SET
+             quantity = MAX(quantity, MIN(quantity + excluded.quantity, ?)),
+             last_recover_time = excluded.last_recover_time",
+    )
+    .bind(user_id)
+    .bind(currency_id)
+    .bind(amount)
+    .bind(now)
+    .bind(limit)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub async fn get_currencies(
     pool: &SqlitePool,
     user_id: i64,
