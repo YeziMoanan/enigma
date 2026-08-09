@@ -75,7 +75,9 @@ fn run() -> anyhow::Result<()> {
 }
 
 fn init_config() -> anyhow::Result<&'static config::GameDB> {
-    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/excel2json");
+    let data = env::var_os("ENIGMA_BATTLE_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/excel2json"));
     config::init(data.to_str().unwrap())?;
     Ok(config::configs::get())
 }

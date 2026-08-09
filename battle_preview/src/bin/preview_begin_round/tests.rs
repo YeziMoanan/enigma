@@ -35,6 +35,7 @@ fn cloth_input_discovery_returns_same_round_requests_in_capture_order() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[cfg(feature = "private-fixtures")]
 #[test]
 fn captured_twins_selection_has_a_committed_runtime_source() {
     let db = init_config().unwrap();
@@ -119,6 +120,7 @@ fn captured_twins_selection_has_a_committed_runtime_source() {
     }));
 }
 
+#[cfg(feature = "private-fixtures")]
 #[test]
 fn captured_version7_conduit_sentinel_keeps_activation_sequence() {
     fn contains_act(step: &FightStep, act_id: i32) -> bool {
@@ -227,6 +229,7 @@ fn captured_version7_conduit_sentinel_keeps_activation_sequence() {
     );
 }
 
+#[cfg(feature = "private-fixtures")]
 #[test]
 fn generated_round_uses_captured_rng_but_not_damage_amounts() {
     let db = init_config().unwrap();
@@ -269,6 +272,7 @@ fn generated_round_uses_captured_rng_but_not_damage_amounts() {
     assert_ne!(without_card_choices, expected);
 }
 
+#[cfg(feature = "private-fixtures")]
 #[test]
 fn reads_dungeon_and_tower_start_reply_envelopes() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/battles");
