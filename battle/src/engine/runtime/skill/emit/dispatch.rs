@@ -143,12 +143,8 @@ pub(in crate::engine::runtime) fn emit_ops(
                 invocation.plan.source_uid,
                 invocation.plan.skill_id,
             );
-            execution.context.active_skill_rank = managers
-                .game_data()
-                .skill
-                .get(invocation.plan.skill_id)
-                .map(|row| row.skill_rank)
-                .unwrap_or_default();
+            execution.context.active_skill_rank =
+                managers.catalog().skill_rank(invocation.plan.skill_id);
             execution.context.active_skill_type = catalog.skill_type(effect_skill_id);
             execution.context.active_skill_effect_tag = catalog.effect_tag(effect_skill_id);
         }
@@ -984,12 +980,7 @@ pub(in crate::engine::runtime) fn emit_ops(
                             invocation.plan.skill_id,
                         ),
                         is_attack: catalog.is_attack(effect_skill_id),
-                        rank: managers
-                            .game_data()
-                            .skill
-                            .get(invocation.plan.skill_id)
-                            .map(|row| row.skill_rank)
-                            .unwrap_or_default(),
+                        rank: managers.catalog().skill_rank(invocation.plan.skill_id),
                         skill_type: catalog.skill_type(effect_skill_id),
                         effect_tag: catalog.effect_tag(effect_skill_id),
                         additional_moxie: invocation.additional_moxie,

@@ -94,12 +94,7 @@ fn action_event(
             invocation.plan.skill_id,
         ),
         is_attack: catalog.is_attack(invocation.plan.skill_id),
-        rank: managers
-            .game_data()
-            .skill
-            .get(invocation.plan.skill_id)
-            .map(|row| row.skill_rank)
-            .unwrap_or_default(),
+        rank: managers.catalog().skill_rank(invocation.plan.skill_id),
         skill_type: catalog.skill_type(invocation.plan.skill_id),
         effect_tag: catalog.effect_tag(invocation.plan.skill_id),
         assassinate: execution.context.active_skill_assassinate,
