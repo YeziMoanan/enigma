@@ -210,11 +210,12 @@ impl CardDeck {
     pub fn compose_adjacent(&mut self, rank_up: &HashMap<(i64, i32), i32>) -> Vec<i64> {
         let mut owners = Vec::new();
         let mut index = 0;
+        let catalog = self.catalog();
         while index + 1 < self.hand.len() {
             let left = &self.hand[index];
             let right = &self.hand[index + 1];
             let owner_uid = left.uid.unwrap_or_default();
-            let Some(next_skill_id) = composable_next(left, right, rank_up) else {
+            let Some(next_skill_id) = composable_next(catalog, left, right, rank_up) else {
                 index += 1;
                 continue;
             };
@@ -228,7 +229,6 @@ impl CardDeck {
                     .unwrap_or_default()
                     .saturating_add(right.energy.unwrap_or_default()),
             );
-            let catalog = self.catalog();
             merge_enchants(catalog, &mut self.hand[index].enchants, &right.enchants);
             self.remove_card(index + 1);
             owners.push(owner_uid);
@@ -407,6 +407,7 @@ impl CardDeck {
 }
 
 fn composable_next(
+    catalog: Option<crate::catalog::BattleCatalog>,
     left: &CardInfo,
     right: &CardInfo,
     rank_up: &HashMap<(i64, i32), i32>,
@@ -421,7 +422,7 @@ fn composable_next(
         || has_non_combine_enchant(right)
         || (left.card_type != Some(CardType::Skill3 as i32)
             && right.card_type != Some(CardType::Skill3 as i32)
-            && crate::engine::skill::effect::catalog::configured_is_big_skill(skill_id))
+            && catalog.is_some_and(|catalog| catalog.skill_is_big(skill_id)))
     {
         return None;
     }
@@ -551,6 +552,25 @@ mod tests {
         assert_eq!(deck.hand()[0].skill_id, Some(101));
         assert_eq!(deck.hand()[0].temp_card, Some(false));
         assert_eq!(deck.hand()[1], card(11, 200));
+    }
+
+    #[test]
+    fn adjacent_ultimate_cards_require_the_skill_three_lane() {
+        crate::test_support::init_config();
+        let catalog = crate::catalog::BattleCatalog::new(crate::test_support::game_data());
+        let hand = vec![card(10, 30020131), card(10, 30020131)];
+        let rank_up = HashMap::from([((10, 30020131), 30020132)]);
+        let mut legacy = CardDeck::new(hand.clone());
+        let mut explicit = CardDeck::new(hand).with_catalog(catalog);
+
+        assert!(legacy.compose_adjacent(&rank_up).is_empty());
+        assert!(explicit.compose_adjacent(&rank_up).is_empty());
+
+        legacy.hand[0].card_type = Some(CardType::Skill3 as i32);
+        explicit.hand[0].card_type = Some(CardType::Skill3 as i32);
+        assert_eq!(legacy.compose_adjacent(&rank_up), vec![10]);
+        assert_eq!(explicit.compose_adjacent(&rank_up), vec![10]);
+        assert_eq!(explicit, legacy);
     }
 
     #[test]
