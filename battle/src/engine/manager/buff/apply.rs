@@ -177,14 +177,15 @@ impl BuffManager {
             buff_id,
             count_or_layer_from(&buff, Some(definition)),
         );
-        let markers = marker::add_markers(buff_id)
+        let markers = definition
+            .wire_markers(crate::engine::skill::buff_act::wire::WirePhase::Add)
             .into_iter()
-            .map(|marker| BuffMarkerResult {
+            .map(|effect_type| BuffMarkerResult {
                 target_uid,
-                effect_type: marker.effect_type,
-                effect_num: marker::effect_num(
-                    marker.effect_type,
-                    buff_id,
+                effect_type,
+                effect_num: definition.marker_effect_num(
+                    self.catalog().game_data(),
+                    effect_type,
                     buff.act_common_params.as_deref(),
                 ),
                 buff_act_id: 0,
@@ -605,9 +606,9 @@ impl BuffManager {
             .map(|marker| BuffMarkerResult {
                 target_uid: spec.route.target_uid,
                 effect_type: marker.effect_type as i32,
-                effect_num: marker::effect_num(
+                effect_num: spec.definition.marker_effect_num(
+                    self.catalog().game_data(),
                     marker.effect_type as i32,
-                    child.buff.buff_id.unwrap_or_default(),
                     child.buff.act_common_params.as_deref(),
                 ),
                 buff_act_id: 0,
@@ -620,9 +621,9 @@ impl BuffManager {
                 .map(|effect_type| BuffMarkerResult {
                     target_uid: spec.route.target_uid,
                     effect_type,
-                    effect_num: marker::effect_num(
+                    effect_num: spec.definition.marker_effect_num(
+                        self.catalog().game_data(),
                         effect_type,
-                        child.buff.buff_id.unwrap_or_default(),
                         child.buff.act_common_params.as_deref(),
                     ),
                     buff_act_id: 0,
@@ -652,9 +653,9 @@ impl BuffManager {
                 .map(|marker| BuffMarkerResult {
                     target_uid: plan.spec.route.target_uid,
                     effect_type: marker.effect_type as i32,
-                    effect_num: marker::effect_num(
+                    effect_num: plan.spec.definition.marker_effect_num(
+                        self.catalog().game_data(),
                         marker.effect_type as i32,
-                        update.after.buff_id.unwrap_or_default(),
                         update.after.act_common_params.as_deref(),
                     ),
                     buff_act_id: 0,
@@ -668,9 +669,9 @@ impl BuffManager {
                     .map(|effect_type| BuffMarkerResult {
                         target_uid: plan.spec.route.target_uid,
                         effect_type,
-                        effect_num: marker::effect_num(
+                        effect_num: plan.spec.definition.marker_effect_num(
+                            self.catalog().game_data(),
                             effect_type,
-                            update.after.buff_id.unwrap_or_default(),
                             update.after.act_common_params.as_deref(),
                         ),
                         buff_act_id: 0,

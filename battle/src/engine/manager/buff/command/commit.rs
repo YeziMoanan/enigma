@@ -349,9 +349,9 @@ impl BuffManager {
         {
             added.buff = update.after;
             for marker in &mut added.markers {
-                marker.effect_num = crate::engine::buff::marker::effect_num(
+                marker.effect_num = plan.definition.marker_effect_num(
+                    self.catalog().game_data(),
                     marker.effect_type,
-                    added.buff.buff_id.unwrap_or_default(),
                     added.buff.act_common_params.as_deref(),
                 );
             }

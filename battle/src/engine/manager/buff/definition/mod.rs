@@ -272,6 +272,50 @@ impl BuffDefinition {
             .collect()
     }
 
+    pub(super) fn marker_effect_num(
+        &self,
+        game: &config::GameDB,
+        effect_type: i32,
+        act_common_params: Option<&str>,
+    ) -> i32 {
+        use sonettobuf::effect_type_enum::EffectType;
+
+        if effect_type == EffectType::Exskillpointchange as i32 {
+            return super::active_feature(
+                Some(game),
+                0,
+                0,
+                true,
+                &sonettobuf::BuffInfo {
+                    buff_id: Some(self.id),
+                    count: Some(1),
+                    layer: Some(1),
+                    ..Default::default()
+                },
+                Some(self),
+            )
+            .iter()
+            .filter(|feature| {
+                crate::engine::skill::buff_act::is_kind(feature, BuffActKind::ExSkillPointChange)
+            })
+            .filter_map(|feature| feature.values.get(1))
+            .copied()
+            .sum();
+        }
+        if ![
+            EffectType::Fixattrteamenergy as i32,
+            EffectType::Fixattrteamenergyandbuff as i32,
+        ]
+        .contains(&effect_type)
+        {
+            return 0;
+        }
+        act_common_params
+            .and_then(|raw| raw.split('#').nth(1))
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_default()
+    }
+
     pub(super) fn state_snapshot_wire(&self, params: Option<&str>) -> Vec<(i32, Option<String>)> {
         self.features
             .iter()
