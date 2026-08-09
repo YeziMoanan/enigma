@@ -1210,29 +1210,12 @@ fn specific_skill_matches(
 }
 
 fn has_master_halo(uid: i64, managers: Option<&BattleManagers>) -> bool {
-    let is_halo = |raw: &str| {
-        raw.split('|').any(|feature| {
-            matches!(
-                feature
-                    .split('#')
-                    .next()
-                    .and_then(|value| value.parse().ok()),
-                Some(771 | 772 | 822)
-            )
-        })
-    };
     managers.is_some_and(|managers| {
         managers
             .buff
             .active_for(uid)
-            .filter_map(|buff| {
-                managers
-                    .game_data()
-                    .skill_buff
-                    .get(buff.buff_id?)
-                    .map(|row| &row.features)
-            })
-            .any(|features| is_halo(features))
+            .filter_map(|buff| buff.buff_id)
+            .any(|buff_id| managers.catalog().buff_has_master_halo(buff_id))
     })
 }
 
