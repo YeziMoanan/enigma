@@ -613,6 +613,17 @@ impl BattleCatalog {
         parts.next().and_then(|value| value.parse::<i32>().ok())
     }
 
+    pub(crate) fn wave_start_actions(
+        self,
+        battle_id: i32,
+        wave: i32,
+    ) -> Result<
+        Vec<crate::engine::fight::trigger::WaveStartAction>,
+        crate::engine::fight::trigger::BattleTriggerError,
+    > {
+        configured_wave_start_actions(self.game_data, battle_id, wave)
+    }
+
     pub(crate) fn careers(self, career: i32) -> Vec<i32> {
         self.game_data
             .fight_effect_group
@@ -939,6 +950,91 @@ pub(crate) fn target_count(game_data: &config::GameDB, code: i32) -> i32 {
         .get(code)
         .map(|row| row.target_number)
         .unwrap_or_default()
+}
+
+pub(crate) fn configured_wave_start_actions(
+    game_data: &config::GameDB,
+    battle_id: i32,
+    wave: i32,
+) -> Result<
+    Vec<crate::engine::fight::trigger::WaveStartAction>,
+    crate::engine::fight::trigger::BattleTriggerError,
+> {
+    use crate::engine::fight::trigger::{BattleTriggerError, TriggerActionKind, WaveStartAction};
+
+    let mut actions = Vec::new();
+    for trigger in game_data
+        .trigger
+        .iter()
+        .filter(|trigger| trigger.battle_id == battle_id && trigger.trigger_type == "WaveStart")
+    {
+        let configured_wave =
+            trigger
+                .param2
+                .parse::<i32>()
+                .map_err(|_| BattleTriggerError::InvalidWave {
+                    trigger_id: trigger.id,
+                    value: trigger.param2.clone(),
+                })?;
+        if configured_wave != wave {
+            continue;
+        }
+
+        for value in trigger
+            .action_list
+            .split(['#', '|', ','])
+            .filter(|value| !value.is_empty())
+        {
+            let action_id =
+                value
+                    .parse::<i32>()
+                    .map_err(|_| BattleTriggerError::InvalidActionId {
+                        trigger_id: trigger.id,
+                        value: value.to_owned(),
+                    })?;
+            let action = game_data.trigger_action.get(action_id).ok_or(
+                BattleTriggerError::MissingAction {
+                    trigger_id: trigger.id,
+                    action_id,
+                },
+            )?;
+            let kind = match action.action_type.as_str() {
+                "Prompt" => {
+                    let prompt_id = action.param1.parse::<i32>().map_err(|_| {
+                        BattleTriggerError::InvalidPromptId {
+                            action_id,
+                            value: action.param1.clone(),
+                        }
+                    })?;
+                    if game_data.fight_prompt.get(prompt_id).is_none() {
+                        return Err(BattleTriggerError::MissingPrompt {
+                            action_id,
+                            prompt_id,
+                        });
+                    }
+                    TriggerActionKind::Prompt
+                }
+                unsupported => {
+                    tracing::warn!(
+                        target: "battle::engine::fight::trigger",
+                        battle_id,
+                        wave,
+                        trigger_id = trigger.id,
+                        action_id,
+                        action_type = unsupported,
+                        "unsupported battle trigger action"
+                    );
+                    continue;
+                }
+            };
+            actions.push(WaveStartAction {
+                trigger_id: trigger.id,
+                action_id,
+                kind,
+            });
+        }
+    }
+    Ok(actions)
 }
 
 pub(crate) fn damage_target_count_kind(game_data: &config::GameDB, code: i32) -> i32 {

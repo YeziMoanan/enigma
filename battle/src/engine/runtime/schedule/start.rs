@@ -487,7 +487,7 @@ pub fn run_finished_round_transition(managers: &BattleManagers) -> (DrainResult,
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_start(
-    game_data: &config::GameDB,
+    battle_catalog: crate::catalog::BattleCatalog,
     managers: &mut BattleManagers,
     pool: &TargetPool,
     catalog: &SkillEffectCatalog,
@@ -746,7 +746,7 @@ pub fn run_start(
             append(
                 &mut result,
                 run_wave_start_triggers(
-                    game_data,
+                    battle_catalog,
                     managers,
                     pool,
                     catalog,

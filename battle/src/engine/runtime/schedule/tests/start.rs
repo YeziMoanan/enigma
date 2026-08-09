@@ -40,7 +40,7 @@ fn opening_cards_exist_before_card_setup_rules_run() {
     });
 
     let (result, _) = run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -138,7 +138,7 @@ fn opening_raw_deal_uses_surplus_cards_to_refill_composed_slots() {
     let mut managers = BattleManagers::seeded(&fight);
 
     let (_, dealt) = run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &SkillEffectCatalog::default(),
@@ -221,7 +221,7 @@ fn opening_setup_applies_the_active_draw_limit_before_dealing() {
     };
 
     let (start, dealt) = run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -291,7 +291,7 @@ fn start_schedule_runs_the_leading_round_start_lane() {
     });
 
     run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -339,7 +339,7 @@ fn opening_round_does_not_consume_a_timed_layered_buff() {
     let catalog = SkillEffectCatalog::default();
 
     run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -397,7 +397,7 @@ fn opening_round_advances_a_timed_buff_granted_during_setup() {
     });
 
     run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -458,7 +458,7 @@ fn opening_round_does_not_advance_a_buff_granted_by_round_start() {
     });
 
     let (start, _) = run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -567,7 +567,7 @@ fn configured_special_temp_card_runs_during_the_opening_round_start_card_event()
     let mut managers = BattleManagers::seeded(&fight);
     let catalog = SkillEffectCatalog::default();
     let (start, _) = run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -656,7 +656,7 @@ fn configured_hero_temp_card_uses_the_live_group_rank_and_projection() {
     let pool = TargetPool::from_fight(&fight);
     let mut managers = BattleManagers::seeded(&fight);
     let (start, _) = run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &SkillEffectCatalog::default(),
@@ -829,7 +829,7 @@ fn opening_round_start_conditions_only_run_for_the_player_side() {
     });
 
     run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -879,7 +879,7 @@ fn opening_keeps_new_one_round_buffs_until_their_configured_duration_stage() {
     let catalog = SkillEffectCatalog::from_fight(config::configs::get(), &fight);
 
     run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &catalog,
@@ -933,7 +933,7 @@ fn configured_conduit_is_initialized_before_battle_start_rules() {
     let pool = TargetPool::from_fight(&fight);
     let mut managers = BattleManagers::seeded(&fight);
     let (start, _) = run_start(
-        crate::test_support::game_data(),
+        managers.catalog(),
         &mut managers,
         &pool,
         &SkillEffectCatalog::default(),

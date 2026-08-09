@@ -14,7 +14,6 @@ use crate::engine::{
 use super::{BattleRuntime, determinism::RoundDeterminism, schedule};
 
 fn run_start_schedule(
-    game_data: &config::GameDB,
     fight: &Fight,
     managers: &mut BattleManagers,
     catalog: &SkillEffectCatalog,
@@ -22,10 +21,9 @@ fn run_start_schedule(
     determinism: &mut RoundDeterminism,
     hand_size: usize,
 ) -> Result<(Vec<FightStep>, Vec<CardInfo>), String> {
-    let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
-        managers.catalog(),
-        fight,
-    );
+    let battle_catalog = managers.catalog();
+    let pool =
+        crate::engine::skill::target::TargetPool::from_fight_with_catalog(battle_catalog, fight);
     let context = crate::engine::skill::target::TargetContext {
         battle_id: fight.battle_id.unwrap_or_default(),
         current_round: 1,
@@ -33,7 +31,7 @@ fn run_start_schedule(
     };
     managers.gauge.begin_opening_setup();
     let result = schedule::run_start(
-        game_data,
+        battle_catalog,
         managers,
         &pool,
         catalog,
@@ -82,10 +80,8 @@ impl BattleRuntime {
         determinism: Option<&mut RoundDeterminism>,
     ) -> Result<(Vec<FightStep>, Vec<CardInfo>), String> {
         let hand_size = crate::engine::manager::card::start::hand_size(&self.fight);
-        let game_data = self.game_data();
         let determinism = determinism.unwrap_or(&mut self.determinism);
         run_start_schedule(
-            game_data,
             &self.fight,
             &mut self.managers,
             &self.catalog,
