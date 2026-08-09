@@ -279,6 +279,10 @@ impl BattleCatalog {
         summoned_unique_skills(self.game_data, summoned_id)
     }
 
+    pub(crate) fn monster_toughness(self, model_id: i32, max_hp: i32) -> Option<(i32, i32)> {
+        configured_monster_toughness(self.game_data, model_id, max_hp)
+    }
+
     pub(crate) fn upgrade_selection(
         self,
         upgrade_id: i32,
@@ -970,6 +974,25 @@ pub(crate) fn configured_ex_point_max(
     spec.split('#').nth(1)?.trim().parse().ok()
 }
 
+pub(crate) fn configured_monster_toughness(
+    game_data: &config::GameDB,
+    model_id: i32,
+    max_hp: i32,
+) -> Option<(i32, i32)> {
+    let raw = &game_data.monster.get(model_id)?.toughness;
+    let mut parts = raw.split('#').filter_map(|value| value.parse::<i32>().ok());
+    let amount = parts.next()?;
+    let points = parts.next()?.max(0);
+    let show_type = parts.next().unwrap_or_default();
+    let segment = match show_type {
+        0 => amount,
+        1 => (i64::from(max_hp.max(0)) * i64::from(amount) / 1000).clamp(0, i64::from(i32::MAX))
+            as i32,
+        _ => return None,
+    };
+    (segment > 0 && points > 0).then_some((segment, points))
+}
+
 fn mapped_contract_buff(
     game_data: &config::GameDB,
     config_id: i32,
@@ -1145,6 +1168,18 @@ mod tests {
             Some(17)
         );
         assert_eq!(configured_ex_point_max(game_data, None, None, 1), None);
+    }
+
+    #[test]
+    fn normalizes_monster_toughness() {
+        crate::test_support::init_config();
+        let catalog = BattleCatalog::new(crate::test_support::game_data());
+
+        assert_eq!(
+            catalog.monster_toughness(109_350_003, 1_015_000),
+            Some((101_500, 4))
+        );
+        assert_eq!(catalog.monster_toughness(-1, 1_015_000), None);
     }
 
     #[test]

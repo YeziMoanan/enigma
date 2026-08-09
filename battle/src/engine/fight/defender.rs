@@ -200,12 +200,10 @@ impl Defender {
             crate::engine::entity::stats::configured_monster_stats(game_data, monster_id, level)
                 .ok_or_else(|| anyhow::anyhow!("Monster stats {} not found", monster_id))?;
         let attr = stats.base();
-        let (toughness_value, toughness_point) = crate::engine::manager::toughness::initial_values(
-            &monster.toughness,
-            attr.hp.unwrap_or_default(),
-        )
-        .map(|(value, point)| (Some(value), Some(point)))
-        .unwrap_or_default();
+        let (toughness_value, toughness_point) = catalog
+            .monster_toughness(monster_id, attr.hp.unwrap_or_default())
+            .map(|(value, point)| (Some(value), Some(point)))
+            .unwrap_or_default();
 
         Ok(FightEntityInfo {
             uid: Some(uid),
