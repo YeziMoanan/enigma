@@ -631,7 +631,7 @@ pub(super) fn direct_damage(
             .filter_map(|(actual, delta)| (*actual == attr_id).then_some(*delta))
             .sum::<i32>()
     };
-    let is_ultimate = crate::engine::skill::effect::catalog::configured_is_big_skill(skill_id);
+    let is_ultimate = runtime.pool.catalog().skill_is_big(skill_id);
     let extra_action =
         crate::engine::skill::condition::extra::skill_kind_from_is_extra(extra_skill_kind)
             .is_some_and(|kind| kind.is_extra_action());
