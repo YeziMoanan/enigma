@@ -540,7 +540,7 @@ fn run_player_card_ops(
                 }
                 .into();
             if crate::engine::mechanic::card::CardMechanic.is_device_card(managers, &played.card) {
-                invocation.mode = crate::engine::skill::action::SkillExecutionMode::Device;
+                invocation.mode = crate::engine::skill::action::SkillExecutionMode::DeviceCard;
             }
             invocation.card_index = played.card_index;
             invocation.card_enchants = played

@@ -193,11 +193,17 @@ fn completed_active_use_skill_requires_an_active_execution_mode_and_real_source(
         0,
         crate::engine::skill::action::SkillExecutionMode::DirectBig,
     ));
-    assert!(!matches(
+    assert!(matches(
         &completed,
         10,
         0,
         crate::engine::skill::action::SkillExecutionMode::Device,
+    ));
+    assert!(!matches(
+        &completed,
+        10,
+        0,
+        crate::engine::skill::action::SkillExecutionMode::DeviceCard,
     ));
     assert!(!matches(
         &completed,
@@ -212,6 +218,12 @@ fn completed_active_use_skill_requires_an_active_execution_mode_and_real_source(
         crate::engine::skill::action::SkillExecutionMode::Active,
     ));
     for opcode in [502203, 502208, 502210] {
+        assert!(matches(
+            &exact_condition(opcode, "ActiveUseSkill", &["0"]),
+            10,
+            0,
+            crate::engine::skill::action::SkillExecutionMode::DeviceCard,
+        ));
         assert!(matches(
             &exact_condition(opcode, "ActiveUseSkill", &["0"]),
             10,

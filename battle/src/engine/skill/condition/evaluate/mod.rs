@@ -934,6 +934,7 @@ fn condition_kind_matches(
                     context.active_skill_mode,
                     crate::engine::skill::action::SkillExecutionMode::Active
                         | crate::engine::skill::action::SkillExecutionMode::DirectBig
+                        | crate::engine::skill::action::SkillExecutionMode::Device
                 )
                 && context.extra_skill_kind == 0
                 && active_skill_has_real_source(pool, context)
