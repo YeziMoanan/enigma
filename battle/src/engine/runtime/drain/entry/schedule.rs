@@ -196,6 +196,7 @@ fn run_setup_schedule_with_container(
             std::iter::empty(),
             |_| Vec::new(),
             owner_uids,
+            false,
             frame_container,
         )?;
         result.outcomes.extend(stage_result.outcomes);

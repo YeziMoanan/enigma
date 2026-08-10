@@ -690,13 +690,12 @@ pub fn run_start(
             opening_deck_counts = Some((initial_deck_num, managers.card.deck_num()));
         }
         let stage_result = if stage == SetupStage::RoundStartCondition {
-            drain::run_setup_stage_for_owners(
+            drain::run_opening_round_start_conditions(
                 managers,
                 pool,
                 catalog,
                 determinism,
                 context,
-                stage,
                 priority,
                 &owner_uids,
             )?

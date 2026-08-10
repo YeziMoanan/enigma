@@ -1037,6 +1037,117 @@ fn opening_round_start_conditions_only_run_for_the_player_side() {
 }
 
 #[test]
+fn configured_round_after_runs_for_defenders_during_opening() {
+    init_config();
+    let fight = Fight {
+        version: Some(7),
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                team_type: Some(1),
+                current_hp: Some(100),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: [-1, -2, -3]
+                .into_iter()
+                .map(|uid| FightEntityInfo {
+                    uid: Some(uid),
+                    team_type: Some(2),
+                    current_hp: Some(100),
+                    passive_skill: vec![116362110],
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let catalog = SkillEffectCatalog::from_fight(config::configs::get(), &fight);
+
+    let (result, _) = run_start(
+        managers.catalog(),
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext {
+            current_round: 1,
+            ..Default::default()
+        },
+        CardSetup {
+            hand: Vec::new(),
+            draw_pile: Vec::new(),
+            deck_num: 0,
+        },
+        0,
+    )
+    .unwrap();
+
+    for uid in [-1, -2, -3] {
+        let buffs = managers
+            .buff
+            .active_for(uid)
+            .filter(|buff| buff.buff_id == Some(116362001))
+            .collect::<Vec<_>>();
+        assert_eq!(buffs.len(), 1, "uid={uid}");
+        assert_eq!(buffs[0].from_uid, Some(uid));
+        assert_eq!(buffs[0].duration, Some(4));
+        assert!(
+            [116362002, 116362003, 116362004]
+                .into_iter()
+                .all(|buff_id| !managers.buff.has_buff_id(uid, buff_id))
+        );
+    }
+
+    fn collect_round_after(step: &sonettobuf::FightStep, actions: &mut Vec<(i64, i64)>) -> bool {
+        let mut found = false;
+        if step.act_id == Some(116362110) {
+            actions.push((
+                step.from_id.expect("configured action has a source"),
+                step.to_id.expect("configured action has a target"),
+            ));
+            found = true;
+        }
+        for child in step
+            .act_effect
+            .iter()
+            .filter_map(|effect| effect.fight_step.as_ref())
+        {
+            found |= collect_round_after(child, actions);
+        }
+        found
+    }
+
+    let steps = crate::engine::packet::timeline::project(&result.frames).unwrap();
+    let mut actions = Vec::new();
+    let action_positions = steps
+        .iter()
+        .enumerate()
+        .filter_map(|(index, step)| collect_round_after(step, &mut actions).then_some(index))
+        .collect::<Vec<_>>();
+    assert_eq!(actions, vec![(-1, -1), (-2, -2), (-3, -3)]);
+    let deal_position = steps
+        .iter()
+        .position(|step| {
+            step.act_effect.iter().any(|effect| {
+                effect.effect_type
+                    == Some(sonettobuf::effect_type_enum::EffectType::Enterfightdeal as i32)
+            })
+        })
+        .expect("opening projects card setup after round-start conditions");
+    assert!(
+        action_positions
+            .into_iter()
+            .all(|position| position < deal_position)
+    );
+}
+
+#[test]
 fn opening_keeps_new_one_round_buffs_until_their_configured_duration_stage() {
     init_config();
     let fight = Fight {

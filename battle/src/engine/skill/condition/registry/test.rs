@@ -867,13 +867,23 @@ fn round_after_uses_an_inclusive_round_start_threshold() {
         })
     );
     assert_eq!(parse(727100, "RoundAfter", &[]), None);
+    let definition = find_key(727100, "RoundAfter").unwrap();
     assert_eq!(
-        find_key(727100, "RoundAfter").map(|definition| definition.role),
-        Some(ConditionRole::Setup {
+        definition.role,
+        ConditionRole::Setup {
             stage: SetupStage::RoundStartCondition,
             priority: 100,
-        })
+        }
     );
+    assert_eq!(
+        opening_owner_eligibility(727100, "RoundAfter"),
+        Some(OpeningOwnerEligibility::BothSides)
+    );
+    assert_eq!(
+        opening_owner_eligibility(101, "None"),
+        Some(OpeningOwnerEligibility::PlayerSide)
+    );
+    assert_eq!(opening_owner_eligibility(727100, "None"), None);
 }
 
 #[test]
