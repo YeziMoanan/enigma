@@ -69,8 +69,12 @@ fn stacked_markers_use_the_layer_child_uid_lane() {
 }
 
 #[test]
-fn visible_layered_attribute_buff_has_no_post_apply_uid_reservation() {
+fn feature_kind_controls_post_apply_uid_reservation() {
     crate::test_support::init_config();
+
+    let carrier = BuffDefinition::get(31430141).unwrap();
+    assert!(carrier.uses_child_uid());
+    assert!(!carrier.reserves_child_after_first_apply());
 
     let higge = BuffDefinition::get(31200142).unwrap();
     assert!(higge.uses_child_uid());

@@ -563,6 +563,10 @@ impl BuffDefinition {
     pub(super) fn reserves_child_after_first_apply(&self) -> bool {
         !self.has_include_type(BuffIncludeType::OwnUid)
             && self.has_features
+            && !self
+                .features
+                .iter()
+                .any(|feature| feature.kind == Some(BuffActKind::ExtraValueElectricTransform))
             && ((self.has_include_type(BuffIncludeType::Stacked)
                 && !self.is_no_show
                 && self.status == BuffStatus::Special)
