@@ -203,6 +203,7 @@ pub enum BuffActKind {
     PowerMaxAdd,
     PaperCircleContinueChannel,
     Poison,
+    PowerfulPoison,
     PoisonSettleCanCrit,
     Provoke,
     RaspberryBigSkill,
@@ -884,6 +885,11 @@ buff_act_definitions! {
         runtime: |context| super::butterfly_record_skill::rule_ops(context.managers, context.pool, context.subscriber, context.event?),
         supports: |args| matches!(args, [count, enchant_id, allowed @ ..]
             if *count > 0 && *enchant_id > 0 && !allowed.is_empty()), wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1104, "ButterflyRecordSkill"), &[EffectType::None as i32]).with_initial_state(super::wire::InitialStateRule::ButterflyAllowedSkillKinds));
+    (1105, "PowerfulPoison") => PowerfulPoison,
+        effect_time_subscription: false,
+        supports: |args| matches!(args, [base, growth] if *base > 0 && *growth >= 0),
+        state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1105, "PowerfulPoison"), &[EffectType::Poison as i32]));
     (1111, "ToughnessOverflowRecord") => ToughnessOverflowRecord,
         effect_time_subscription: false, transactions: [EventKind::HpLost],
         transaction: super::toughness::transaction_rule_ops,

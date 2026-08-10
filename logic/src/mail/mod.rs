@@ -10,6 +10,9 @@ use sonettobuf::{
 };
 use sqlx::SqlitePool;
 
+pub mod catalog;
+pub mod manifest;
+
 #[derive(Default)]
 pub struct MailClaimOutcome {
     pub incr_ids: Vec<i64>,
@@ -139,14 +142,14 @@ impl MailManager {
 
         let mut rewards = reward::RewardSet::default();
         for (_, attachment) in &mails {
-            rewards.extend(reward::parse(attachment));
+            rewards.extend(reward::parse_mail_attachment(attachment)?);
         }
         let incr_ids = mails
             .iter()
             .map(|(incr_id, _)| *incr_id)
             .collect::<Vec<_>>();
         let material_changes = rewards.material_changes();
-        let mut tx = db.begin().await?;
+        let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
         mail::mark_claimed_in_transaction(&mut tx, self.player_id, &incr_ids).await?;
         let applied_rewards =
             reward::apply_in_transaction(&mut tx, db, self.player_id, rewards).await?;

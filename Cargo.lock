@@ -515,6 +515,7 @@ dependencies = [
  "rand 0.9.4",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tracing",
@@ -1441,9 +1442,15 @@ dependencies = [
  "anyhow",
  "axum",
  "common",
+ "config",
+ "database",
+ "logic",
  "serde",
  "serde_json",
+ "sha2",
+ "sqlx",
  "tokio",
+ "tower",
  "tracing",
 ]
 

@@ -454,7 +454,7 @@ mod tests {
             USER_ID,
             now,
             super::super::currencies::PowerRecovery {
-                quantity: recover_limit - recover_num,
+                quantity: i64::from(recover_limit - recover_num),
                 last_recover_time: Some(SERVER_DAY_START),
                 limit: recover_limit,
                 interval_seconds: recover_time,
@@ -474,13 +474,13 @@ mod tests {
                 logout_second: 0,
             }
         );
-        let quantity: i32 = sqlx::query_scalar(
+        let quantity: i64 = sqlx::query_scalar(
             "SELECT quantity FROM currencies WHERE user_id = ? AND currency_id = 4",
         )
         .bind(USER_ID)
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(quantity, recover_limit);
+        assert_eq!(quantity, i64::from(recover_limit));
     }
 }

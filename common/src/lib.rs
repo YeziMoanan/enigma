@@ -21,6 +21,10 @@ pub fn host() -> &'static str {
     &config().server.host
 }
 
+pub fn dns() -> &'static str {
+    &config().server.dns
+}
+
 pub fn http_port() -> u16 {
     config().server.http_port
 }
@@ -39,6 +43,10 @@ pub fn muip_host() -> &'static str {
 
 pub fn muip_port() -> u16 {
     config().muip.port
+}
+
+pub fn muip_allow_unspecified_container_bind() -> bool {
+    config().muip.allow_unspecified_container_bind
 }
 
 pub fn muip_token() -> &'static str {

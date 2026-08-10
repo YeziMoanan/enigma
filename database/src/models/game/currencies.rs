@@ -18,7 +18,7 @@ pub struct UserCurrencyModel {
 pub struct Currency {
     pub user_id: i64,
     pub currency_id: i32,
-    pub quantity: i32,
+    pub quantity: i64,
     pub last_recover_time: Option<i64>,
     pub expired_time: Option<i64>,
 }
@@ -27,10 +27,34 @@ impl From<Currency> for sonettobuf::Currency {
     fn from(c: Currency) -> Self {
         sonettobuf::Currency {
             currency_id: Some(c.currency_id as u32),
-            quantity: Some(c.quantity),
+            quantity: Some(c.protocol_quantity()),
             last_recover_time: c.last_recover_time.map(|t| t as u64),
             expired_time: c.expired_time.map(|t| t as u64),
         }
+    }
+}
+
+impl Currency {
+    pub fn protocol_quantity(&self) -> i32 {
+        self.quantity
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Currency;
+
+    #[test]
+    fn protocol_quantity_clamps_legacy_i64_balances() {
+        let currency = Currency {
+            user_id: 1,
+            currency_id: 3,
+            quantity: i64::from(i32::MAX) + 1,
+            last_recover_time: None,
+            expired_time: None,
+        };
+        assert_eq!(currency.protocol_quantity(), i32::MAX);
     }
 }
 

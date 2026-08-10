@@ -445,7 +445,7 @@ async fn can_pay(
             .await?
             .map(|currency| currency.quantity)
             .unwrap_or_default();
-        if current < *amount {
+        if current < i64::from(*amount) {
             return Ok(false);
         }
     }

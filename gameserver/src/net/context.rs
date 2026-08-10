@@ -1,6 +1,7 @@
 use common::time::ServerTime;
 use database::db::player_state;
 use prost::Message;
+use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
@@ -8,7 +9,10 @@ use sonettobuf::CmdId;
 
 use crate::{
     error::AppError,
-    net::{app::AppState, outbound::CommandPacket},
+    net::{
+        app::{AppState, SessionHandle},
+        outbound::{CommandPacket, DownTag},
+    },
     player::{Player, PlayerState},
     util::{common::encode_message, push},
 };
@@ -17,6 +21,7 @@ use crate::{
 pub struct ConnectionContext {
     pub state: &'static AppState,
     pub outbound: mpsc::Sender<CommandPacket>,
+    pub session: Arc<SessionHandle>,
 
     pub player: Option<Player>,
 
@@ -29,9 +34,13 @@ pub struct ConnectionContext {
 #[allow(dead_code)]
 impl ConnectionContext {
     pub fn new(outbound: mpsc::Sender<CommandPacket>, state: &'static AppState) -> Self {
+        let session = Arc::new(SessionHandle {
+            sender: outbound.clone(),
+        });
         Self {
             state,
             outbound,
+            session,
             player: None,
             logged_in: false,
             disconnect_requested: false,
@@ -92,12 +101,11 @@ impl ConnectionContext {
 
     pub async fn notify<T: Message>(&mut self, cmd_id: CmdId, msg: T) -> Result<(), AppError> {
         let body = encode_message(&msg)?;
-        let down_tag = self.state.reserve_down_tag().await;
 
         let packet = CommandPacket::Push {
             cmd_id,
             body,
-            down_tag,
+            down_tag: DownTag::Next,
         };
 
         self.send_packet(packet).await?;
@@ -132,14 +140,13 @@ impl ConnectionContext {
         up_tag: u8,
     ) -> Result<(), AppError> {
         let body = encode_message(&msg)?;
-        let down_tag = self.state.reserve_down_tag().await;
 
         let packet = CommandPacket::Reply {
             cmd_id,
             body,
             result_code,
             up_tag,
-            down_tag,
+            down_tag: DownTag::Next,
         };
 
         self.send_packet(packet).await?;
@@ -153,13 +160,12 @@ impl ConnectionContext {
         result_code: i16,
         up_tag: u8,
     ) -> Result<(), AppError> {
-        let down_tag = 255;
         let packet = CommandPacket::Reply {
             cmd_id,
             body,
             result_code,
             up_tag,
-            down_tag,
+            down_tag: DownTag::Fixed(255),
         };
 
         self.send_packet(packet).await?;
@@ -175,14 +181,12 @@ impl ConnectionContext {
         up_tag: u8,
     ) -> Result<(), AppError> {
         let body = encode_message(&msg)?;
-        let down_tag = 255;
-
         let packet = CommandPacket::Reply {
             cmd_id,
             body,
             result_code,
             up_tag,
-            down_tag,
+            down_tag: DownTag::Fixed(255),
         };
 
         self.send_packet(packet).await?;
@@ -196,14 +200,12 @@ impl ConnectionContext {
         result_code: i16,
         up_tag: u8,
     ) -> Result<(), AppError> {
-        let down_tag = self.state.reserve_down_tag().await;
-
         let packet = CommandPacket::Reply {
             cmd_id,
             body,
             result_code,
             up_tag,
-            down_tag,
+            down_tag: DownTag::Next,
         };
 
         self.send_packet(packet).await?;
@@ -219,8 +221,7 @@ impl ConnectionContext {
 
     pub fn register(&self) {
         if let Ok(player) = self.player() {
-            self.state
-                .register_session(player.id, self.outbound.clone());
+            self.state.register_session(player.id, self.session.clone());
             tracing::info!("Registered session for player {}", player.id);
         } else {
             tracing::warn!("Attempted to register session without player_id");

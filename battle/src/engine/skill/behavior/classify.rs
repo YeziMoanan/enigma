@@ -63,6 +63,7 @@ pub enum BehaviorKind {
     AddSpTempCard2,
     AddEmitterEnergy,
     AddTeamEnergy,
+    AddIndicator,
     AddRedOrBlueCount,
     AddConduitPower,
     AddConduitExPoint,

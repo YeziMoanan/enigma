@@ -21,7 +21,10 @@ use tracing::{info, warn};
 
 use crate::{
     logic::reward,
-    net::{app::AppState, outbound::CommandPacket},
+    net::{
+        app::AppState,
+        outbound::{CommandPacket, DownTag},
+    },
 };
 
 pub async fn run_gm_listener(addr: String, state: &'static AppState) -> std::io::Result<()> {
@@ -69,6 +72,13 @@ async fn handle_connection(stream: TcpStream, state: &'static AppState) -> std::
         GmRequest::Dungeons => dungeon_catalog(),
         GmRequest::Heroes { player_uid } => hero_upgrade_catalog(state, player_uid).await,
         GmRequest::Materials { query } => materials(state, query).await,
+        GmRequest::DisconnectPlayer { player_uid } => {
+            if state.disconnect_session(player_uid).await {
+                GmResponse::ok(format!("disconnected player {player_uid}"))
+            } else {
+                GmResponse::err(404, format!("player {player_uid} is not online"))
+            }
+        }
         GmRequest::Execute {
             player_uid,
             command,
@@ -972,12 +982,11 @@ async fn send_push<M: Message>(
         return Ok(());
     };
 
-    let down_tag = state.reserve_down_tag().await;
     sender
         .send(CommandPacket::Push {
             cmd_id,
             body: message.encode_to_vec(),
-            down_tag,
+            down_tag: DownTag::Next,
         })
         .await
         .map_err(|err| anyhow::anyhow!("failed to send MUIP push: {err}"))

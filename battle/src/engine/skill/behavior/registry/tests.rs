@@ -57,6 +57,27 @@ fn resource_spend_buff_grant_keeps_its_exact_behavior_key() {
 }
 
 #[test]
+fn ramona_poison_conversion_uses_the_existing_conversion_handler() {
+    let definition = find_key(60284, "PoisonConvertToPowerfulPoisonBuff").unwrap();
+    let supports = definition.supports.unwrap();
+
+    assert_eq!(definition.kind, BehaviorKind::PoisonConvertToTargetBuff);
+    assert_eq!(definition.phase, BehaviorPhase::AfterDamage);
+    assert!(definition.destination);
+    assert!(supports(&ParsedBehavior::new(
+        60284,
+        "PoisonConvertToPowerfulPoisonBuff",
+        vec![6, 31425003]
+    )));
+    assert!(!supports(&ParsedBehavior::new(
+        60284,
+        "PoisonConvertToPowerfulPoisonBuff",
+        vec![0, 31425003]
+    )));
+    assert!(find_key(60284, "PoisonConvertToTargetBuff").is_none());
+}
+
+#[test]
 fn ignore_beat_back_is_an_exact_argumentless_modifier() {
     let definition = find_key(60054, "IgnoreBeatBack").unwrap();
     let supports = definition.supports.unwrap();

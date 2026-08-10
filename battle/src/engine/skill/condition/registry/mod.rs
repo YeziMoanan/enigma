@@ -391,6 +391,7 @@ condition_definitions! {
     [18202] "HasBuff" => buff::any_status_present, incoming_attack_modifier(event_trigger(EventKind::SkillAction, None));
     [18203] "HasBuff" => buff::first_status_present, predicate(&[EventKind::BuffChanged]);
     [18208] "HasBuff" => buff::any_status_present, filters_behavior_targets(event_trigger(EventKind::SkillAction, Some(SkillPhase::AfterDamage)));
+    [18210] "HasBuff" => buff::any_status_present, filters_behavior_targets(predicate(&[EventKind::SkillAction]));
     [18301] "HasBuff" => buff::first_status_present, filters_behavior_targets(setup_route(SetupStage::RoundStartCondition, 101, &[]));
     [18302] "HasBuff" => buff::first_status_present, event_trigger(EventKind::RoundEnd, None);
     [19104] "HasBuffId" => buff::buff_present, filters_behavior_targets(setup_route(SetupStage::BuffSync, 0, &[]));
@@ -668,6 +669,7 @@ condition_definitions! {
     [1209] "LifeLess" => parse::hp_less, predicate(&[EventKind::HpLost]);
     [2104] "LifeMore" => parse::hp_more, setup_route(SetupStage::RoundStartLate, 0, &[]);
     [2203] "LifeMore" => parse::hp_more, predicate(&[]);
+    [2204] "LifeMore" => parse::hp_more, incoming_attack_modifier(predicate(&[]));
     [2301] "LifeMore" => parse::hp_more, event_trigger(EventKind::SmallRoundEnd, None);
     [2304] "LifeMore" => parse::hp_more, predicate(&[EventKind::HpLost]);
     [744203] "PerHp" => hp::per_hp, predicate(&[EventKind::HpLost]);

@@ -21,6 +21,7 @@ pub(crate) struct WaveRoster {
 
 #[derive(Debug, Clone, Default)]
 pub struct WaveManager {
+    battle_id: i32,
     group_ids: Vec<i32>,
     current_index: usize,
     monster_max: usize,
@@ -48,6 +49,7 @@ impl WaveManager {
                 .max()
                 .unwrap_or_default();
         Self {
+            battle_id: fight.battle_id.unwrap_or_default(),
             group_ids,
             current_index,
             monster_max: battle.monster_max.max(0) as usize,
@@ -71,13 +73,14 @@ impl WaveManager {
         let Some(&group_id) = self.group_ids.get(next_index) else {
             return Ok(None);
         };
-        let (entitys, sub_entitys) = Defender::build_wave(
+        let (mut entitys, sub_entitys) = Defender::build_wave(
             catalog,
             group_id,
             self.monster_max,
             DEFENDER_TEAM,
             self.next_uid_offset,
         )?;
+        apply_configured_entry_hp(self.battle_id, next_index, &mut entitys);
         let entering_uids = entitys
             .iter()
             .filter_map(|entity| entity.uid)
@@ -95,6 +98,22 @@ impl WaveManager {
 
     pub fn has_next_wave(&self) -> bool {
         self.current_index.saturating_add(1) < self.group_ids.len()
+    }
+}
+
+fn apply_configured_entry_hp(battle_id: i32, wave_index: usize, entitys: &mut [FightEntityInfo]) {
+    if battle_id != 5126 || wave_index != 1 {
+        return;
+    }
+
+    for entity in entitys {
+        if matches!(entity.model_id, Some(512605 | 512606)) {
+            entity.current_hp = entity
+                .attr
+                .as_ref()
+                .and_then(|attr| attr.hp)
+                .map(|hp| (hp + 1) / 2);
+        }
     }
 }
 
@@ -141,5 +160,29 @@ mod tests {
         assert_eq!(third.wave, 3);
         assert_eq!(third.entering_uids, vec![-5, -6]);
         assert!(waves.has_next_wave());
+    }
+
+    #[test]
+    fn strategy_drill_coop_second_wave_small_monsters_enter_at_half_hp() {
+        init_config();
+        let fight = Fight {
+            battle_id: Some(5126),
+            cur_wave: Some(1),
+            defender: Some(sonettobuf::FightTeam::default()),
+            ..Default::default()
+        };
+        let mut waves = WaveManager::seed(&fight);
+        let catalog = crate::catalog::BattleCatalog::new(crate::test_support::game_data());
+
+        let second = waves.advance(catalog).unwrap().unwrap();
+        for entity in second.entitys {
+            let max_hp = entity.attr.as_ref().and_then(|attr| attr.hp).unwrap();
+            let current_hp = entity.current_hp.unwrap();
+            match entity.model_id.unwrap() {
+                512604 => assert_eq!(current_hp, max_hp),
+                512605 | 512606 => assert_eq!(current_hp, (max_hp + 1) / 2),
+                model_id => panic!("unexpected tutorial monster {model_id}"),
+            }
+        }
     }
 }

@@ -374,12 +374,33 @@ impl BattleCatalog {
     }
 
     pub(crate) fn skill_effect_id(self, skill_id: i32) -> i32 {
+        let configured_skill_id = if self.game_data.skill.get(skill_id).is_some()
+            || self.game_data.skill_effect.get(skill_id).is_some()
+        {
+            skill_id
+        } else {
+            self.game_data
+                .character
+                .iter()
+                .flat_map(|character| [1, 2].into_iter().map(move |group| (character, group)))
+                .find_map(|(character, group)| {
+                    let skills =
+                        crate::engine::entity::skill::parse_skill_group(&character.skill, group);
+                    let index = skills.iter().position(|candidate| *candidate == skill_id)?;
+                    skills[..index]
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|candidate| self.game_data.skill.get(*candidate).is_some())
+                })
+                .unwrap_or(skill_id)
+        };
         self.game_data
             .skill
-            .get(skill_id)
+            .get(configured_skill_id)
             .map(|skill| skill.skill_effect)
             .filter(|effect_id| *effect_id != 0)
-            .unwrap_or(skill_id)
+            .unwrap_or(configured_skill_id)
     }
 
     pub(crate) fn skill_hero_id(self, skill_id: i32) -> Option<i32> {

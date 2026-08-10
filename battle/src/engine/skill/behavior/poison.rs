@@ -15,6 +15,10 @@ use crate::engine::{
 
 pub(super) struct Handler;
 
+pub(super) fn supports_conversion(behavior: &ParsedBehavior) -> bool {
+    matches!(behavior.args.as_slice(), [limit, buff_id] if *limit > 0 && *buff_id > 0)
+}
+
 impl BehaviorHandler for Handler {
     fn emit_ops(
         mut context: BehaviorOpContext<'_>,

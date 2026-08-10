@@ -116,6 +116,22 @@ fn static_buff_id_conditions_keep_their_exact_dependencies() {
 }
 
 #[test]
+fn new_babel_skill_cast_status_gate_keeps_its_exact_route() {
+    assert_eq!(
+        parse(18210, "HasBuff", &["7".into()]),
+        Some(ParsedConditionKind::BuffStatusCount {
+            status_ids: vec![7],
+            compare: ConditionCompare::GreaterThanOrEqual,
+            threshold: 1,
+        })
+    );
+    let definition = find_key(18210, "HasBuff").unwrap();
+    assert_eq!(definition.role, ConditionRole::Predicate);
+    assert_eq!(definition.dependencies, &[EventKind::SkillAction]);
+    assert!(definition.filters_behavior_targets);
+}
+
+#[test]
 fn regeneration_period_presence_gate_filters_the_source() {
     let definition = find_key(19012, "HasBuffId").unwrap();
 
@@ -1904,7 +1920,19 @@ fn active_life_more_gate_keeps_its_exact_static_route() {
             threshold: 500,
         })
     );
-    assert!(find_key(2204, "LifeMore").is_none());
+    let modifier = find_key(2204, "LifeMore").unwrap();
+    assert_eq!(modifier.role, ConditionRole::Predicate);
+    assert_eq!(
+        modifier.attack_modifier_side,
+        Some(AttackModifierSide::IncomingTarget)
+    );
+    assert_eq!(
+        parse(2204, "LifeMore", &["800".into()]),
+        Some(ParsedConditionKind::HpPermille {
+            compare: super::super::parse::ConditionCompare::GreaterThan,
+            threshold: 800,
+        })
+    );
 }
 
 #[test]

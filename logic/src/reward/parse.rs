@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 pub fn parse(value: &str) -> RewardSet {
     let mut rewards = RewardSet::default();
@@ -49,6 +50,57 @@ pub fn parse(value: &str) -> RewardSet {
     }
 
     rewards
+}
+
+pub fn parse_mail_attachment(value: &str) -> Result<RewardSet, AppError> {
+    if value.is_empty() {
+        return Ok(RewardSet::default());
+    }
+    let parts = value.split('|').collect::<Vec<_>>();
+    if !(1..=5).contains(&parts.len()) {
+        return Err(AppError::InvalidRequest);
+    }
+    let mut seen = HashSet::new();
+    for part in &parts {
+        let fields = part
+            .split('#')
+            .map(str::parse::<i32>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AppError::InvalidRequest)?;
+        let [material_type, id, quantity] = fields.as_slice() else {
+            return Err(AppError::InvalidRequest);
+        };
+        if *id <= 0
+            || *quantity <= 0
+            || !seen.insert((*material_type, *id))
+            || !valid_mail_material(*material_type, *id)
+        {
+            return Err(AppError::InvalidRequest);
+        }
+    }
+    Ok(parse(value))
+}
+
+fn valid_mail_material(material_type: i32, id: i32) -> bool {
+    let db = config::configs::get();
+    match RewardMaterialType::from_i32(material_type) {
+        Some(RewardMaterialType::Item) => db.item.get(id).is_some(),
+        Some(RewardMaterialType::Currency) => db.currency.get(id).is_some(),
+        Some(RewardMaterialType::Hero) => db.character.get(id).is_some(),
+        Some(RewardMaterialType::HeroSkin) => db.skin.get(id).is_some(),
+        Some(RewardMaterialType::PlayerCloth) | Some(RewardMaterialType::SpecialBlock) => db
+            .reward_group
+            .all()
+            .iter()
+            .any(|row| row.material_type == material_type && row.material_id == id),
+        Some(RewardMaterialType::Equip) => db.equip.get(id).is_some(),
+        Some(RewardMaterialType::PowerPotion) => db.power_item.get(id).is_some(),
+        Some(RewardMaterialType::Building) => db.room_building.get(id).is_some(),
+        Some(RewardMaterialType::BlockPackage) => db.block_package.get(id).is_some(),
+        Some(RewardMaterialType::Antique) => db.antique.get(id).is_some(),
+        Some(RewardMaterialType::NewInsight) => db.insight_item.get(id).is_some(),
+        _ => false,
+    }
 }
 
 pub fn parse_reward_id(reward_id: i32) -> RewardSet {

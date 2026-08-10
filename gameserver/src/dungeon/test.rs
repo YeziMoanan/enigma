@@ -953,8 +953,11 @@ async fn act229_victory_uses_only_act229_settlement() {
     .unwrap();
 
     let commands = std::iter::from_fn(|| packets.try_recv().ok())
-        .map(|packet| match packet {
-            CommandPacket::Push { cmd_id, .. } | CommandPacket::Reply { cmd_id, .. } => cmd_id,
+        .filter_map(|packet| match packet {
+            CommandPacket::Push { cmd_id, .. } | CommandPacket::Reply { cmd_id, .. } => {
+                Some(cmd_id)
+            }
+            CommandPacket::Disconnect => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(

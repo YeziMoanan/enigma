@@ -267,6 +267,19 @@ pub fn rule_ops(context: BehaviorOpContext<'_>, behavior: &ParsedBehavior) -> Op
             )));
             Some(ops)
         }
+        BehaviorKind::AddIndicator => {
+            let [indicator_id, delta] = behavior.args.as_slice() else {
+                return None;
+            };
+            Some(vec![RuleOp::EffectMarker {
+                target_uid: i64::from(*indicator_id),
+                effect_type: EffectType::Indicatorchange as i32,
+                effect_num: *delta,
+                config_effect: behavior.config_effect,
+                reserve_id: None,
+                reserve_str: None,
+            }])
+        }
         BehaviorKind::AddRedOrBlueCount => {
             let [color, count] = behavior.args.as_slice() else {
                 return None;
@@ -405,6 +418,10 @@ pub(super) fn supports_team_energy(behavior: &ParsedBehavior) -> bool {
 
 pub(super) fn supports_red_or_blue_count(behavior: &ParsedBehavior) -> bool {
     matches!(behavior.args.as_slice(), [color @ 1..=3, count] if *color > 0 && *count > 0)
+}
+
+pub(super) fn supports_indicator(behavior: &ParsedBehavior) -> bool {
+    matches!(behavior.args.as_slice(), [indicator_id, delta] if *indicator_id > 0 && *delta != 0)
 }
 
 pub(super) fn supports_total_skill_rank_power(behavior: &ParsedBehavior) -> bool {

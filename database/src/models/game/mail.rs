@@ -1,6 +1,22 @@
 use sonettobuf::Mail;
 use sqlx::FromRow;
 
+pub const CLIENT_LANGUAGE_SHORTCUTS: [&str; 8] = ["zh", "tw", "en", "kr", "jp", "de", "fr", "thai"];
+
+pub fn localized_text(value: &str) -> String {
+    serde_json::json!({
+        "zh": value,
+        "tw": value,
+        "en": value,
+        "kr": value,
+        "jp": value,
+        "de": value,
+        "fr": value,
+        "thai": value,
+    })
+    .to_string()
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct UserMail {
     pub incr_id: i64,

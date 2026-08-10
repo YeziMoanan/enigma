@@ -31,6 +31,7 @@ pub mod instruction_dungeon;
 
 pub mod items;
 pub mod mail;
+pub mod mail_campaign;
 pub mod manufacture;
 pub mod necrologist_story;
 pub mod odyssey;

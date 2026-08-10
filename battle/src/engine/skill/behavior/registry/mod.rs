@@ -508,6 +508,7 @@ behavior_definitions! {
     [60115] "TotalSkillRankToPower" => super::resource::Handler, TotalSkillRankToPower, Immediate, destination, super::resource::supports_total_skill_rank_power;
     [60152] "AddEmitterEnergy" => super::resource::Handler, AddEmitterEnergy, Immediate, destination, super::resource::supports_emitter_energy;
     [60153] "AddTeamEnergy" => super::resource::Handler, AddTeamEnergy, Immediate, setup_parent_destination, super::resource::supports_team_energy;
+    [60016] "AddIndicator" => super::resource::Handler, AddIndicator, Immediate, destination, super::resource::supports_indicator;
     [60154] "AddRedOrBlueCount" => super::resource::Handler, AddRedOrBlueCount, Immediate, destination, super::resource::supports_red_or_blue_count;
     [60291] "AddDevicePower" => super::resource::Handler, AddConduitPower, Immediate, destination, super::resource::supports_conduit_power;
     [60292] "AddDeviceExPoint" => super::resource::Handler, AddConduitExPoint, Immediate, setup_parent_destination, super::resource::supports_ex_point_gain;
@@ -614,7 +615,8 @@ behavior_definitions! {
     [60019] "KillTargets" => super::kill::Handler, KillTargets, AfterDamage, destination;
     [40006] "MonsterChange" => super::monster_change::Handler, MonsterChange, Immediate, destination, super::monster_change::supports;
     [60074] "CatapultBuff" => super::poison::Handler, CatapultBuff, AfterDamage, destination;
-    [60110] "PoisonConvertToTargetBuff" => super::poison::Handler, PoisonConvertToTargetBuff, AfterDamage, destination;
+    [60110] "PoisonConvertToTargetBuff" => super::poison::Handler, PoisonConvertToTargetBuff, AfterDamage, destination, super::poison::supports_conversion;
+    [60284] "PoisonConvertToPowerfulPoisonBuff" => super::poison::Handler, PoisonConvertToTargetBuff, AfterDamage, destination, super::poison::supports_conversion;
     [60111] "ConsumePoisonSettleDeadlyPoison" => super::poison::Handler, ConsumePoisonSettleDeadlyPoison, AfterDamage, destination;
     [100005] "Assassinate" => super::general::AssassinateHandler, Assassinate, Immediate, destination, arguments::none;
     [60037] "NotifyUpgradeHero" => super::general::Handler, NotifyUpgradeHero, Immediate, destination;

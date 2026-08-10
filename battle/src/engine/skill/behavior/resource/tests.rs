@@ -37,6 +37,43 @@ fn barcarola_resources_require_one_nonzero_configured_delta() {
 }
 
 #[test]
+fn add_indicator_emits_the_client_indicator_change() {
+    let fight = Fight::default();
+    let managers = BattleManagers::seeded(&fight);
+    let pool = crate::engine::skill::target::TargetPool::from_fight(&fight);
+    let mut determinism = crate::engine::runtime::determinism::RoundDeterminism::default();
+    let mut modifiers = crate::engine::skill::action::SkillModifiers::default();
+    let mut target = crate::engine::skill::target::TargetContext::default();
+    let behavior = ParsedBehavior::new(60016, "AddIndicator", vec![2, 1]);
+    let ops = super::super::rule_ops(
+        BehaviorOpContext {
+            source_uid: 1,
+            source_team: 1,
+            target_uid: 1,
+            active_skill_id: 0,
+            transfer_count: 1,
+            event: None,
+            managers: &managers,
+            pool: &pool,
+            determinism: &mut determinism,
+            modifiers: &mut modifiers,
+            target: &mut target,
+        },
+        &behavior,
+    )
+    .unwrap();
+    assert!(matches!(
+        ops.as_slice(),
+        [RuleOp::EffectMarker {
+            target_uid: 2,
+            effect_num: 1,
+            effect_type: 117,
+            ..
+        }]
+    ));
+}
+
+#[test]
 fn exact_red_or_blue_behavior_updates_its_registered_carrier() {
     crate::test_support::init_config();
     let fight = Fight {

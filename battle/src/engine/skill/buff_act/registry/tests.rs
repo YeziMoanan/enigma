@@ -105,6 +105,15 @@ fn registry_requires_exact_id_and_type() {
         StatReadTiming::OnGrant
     );
     assert_eq!(
+        find(1105, "PowerfulPoison").unwrap().kind,
+        BuffActKind::PowerfulPoison
+    );
+    assert_eq!(
+        destination(1105, "PowerfulPoison", &[1000, 450]),
+        Some(BuffActDestination::StateConsumer)
+    );
+    assert_eq!(destination(1105, "PowerfulPoison", &[0, 450]), None);
+    assert_eq!(
         find(861, "FixTempAttrByBuffLayer")
             .unwrap()
             .state
@@ -364,10 +373,7 @@ fn real_hurt_fix_uses_only_its_captured_add_and_refresh_markers() {
     let wire = super::super::wire::find(519, "RealHurtFix").unwrap();
     let marker = sonettobuf::effect_type_enum::EffectType::Realhurtfix as i32;
 
-    assert_eq!(
-        wire.markers(super::super::wire::WirePhase::Add),
-        &[marker]
-    );
+    assert_eq!(wire.markers(super::super::wire::WirePhase::Add), &[marker]);
     assert!(
         wire.markers(super::super::wire::WirePhase::Static)
             .is_empty()
@@ -383,10 +389,7 @@ fn dot_uses_only_its_captured_add_and_refresh_markers() {
     let wire = super::super::wire::find(202, "Dot").unwrap();
     let marker = sonettobuf::effect_type_enum::EffectType::Dot as i32;
 
-    assert_eq!(
-        wire.markers(super::super::wire::WirePhase::Add),
-        &[marker]
-    );
+    assert_eq!(wire.markers(super::super::wire::WirePhase::Add), &[marker]);
     assert!(
         wire.markers(super::super::wire::WirePhase::Static)
             .is_empty()

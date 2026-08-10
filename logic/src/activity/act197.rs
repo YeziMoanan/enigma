@@ -262,7 +262,7 @@ async fn material_quantity(
     if material.material_type == reward::RewardMaterialType::Currency.id() {
         return Ok(currencies::get_currency(db, player_id, material.id as i32)
             .await?
-            .map(|currency| currency.quantity)
+            .map(|currency| currency.protocol_quantity())
             .unwrap_or(0));
     }
 
