@@ -38,6 +38,13 @@ pub enum SetupFrameScope {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum OpeningOwnerEligibility {
+    #[default]
+    PlayerSide,
+    BothSides,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ConsequencePolicy {
     #[default]
     Default,
@@ -689,6 +696,18 @@ pub fn parse(opcode: i32, type_name: &str, args: &[String]) -> Option<ParsedCond
 
 pub fn find_key(opcode: i32, type_name: &str) -> Option<&'static ConditionDefinition> {
     definitions().find(|definition| definition.key.matches(opcode, type_name))
+}
+
+pub(crate) fn opening_owner_eligibility(
+    opcode: i32,
+    type_name: &str,
+) -> Option<OpeningOwnerEligibility> {
+    let definition = find_key(opcode, type_name)?;
+    Some(if definition.key.matches(727100, "RoundAfter") {
+        OpeningOwnerEligibility::BothSides
+    } else {
+        OpeningOwnerEligibility::PlayerSide
+    })
 }
 
 pub fn definitions() -> impl Iterator<Item = &'static ConditionDefinition> {
