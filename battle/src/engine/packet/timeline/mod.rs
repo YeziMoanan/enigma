@@ -604,9 +604,12 @@ fn project_change(
         BattleChange::Conduit(crate::engine::manager::conduit::ConduitChange::SkillBegan {
             team,
             power_id,
+            activation_cost,
             spent,
             ..
-        }) if *spent > 0 => vec![EffectPacket::conduit_skill_began(*team, *power_id, *spent)],
+        }) if *power_id != 999 && (*spent > 0 || *activation_cost == 0) => {
+            vec![EffectPacket::conduit_skill_began(*team, *power_id, *spent)]
+        }
         BattleChange::Conduit(crate::engine::manager::conduit::ConduitChange::SkillBegan {
             ..
         }) => Vec::new(),
@@ -614,11 +617,11 @@ fn project_change(
             crate::engine::manager::conduit::ConduitChange::SkillCostCommitted {
                 source_uid,
                 team,
-                activation_cost,
+                power_id,
                 consumed_this_round,
                 ..
             },
-        ) if *activation_cost > 0 => vec![EffectPacket::conduit_skill_cost_committed(
+        ) if *power_id != 999 => vec![EffectPacket::conduit_skill_cost_committed(
             *source_uid,
             *team,
             *consumed_this_round,
