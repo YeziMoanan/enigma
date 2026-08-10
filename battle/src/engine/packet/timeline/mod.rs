@@ -579,8 +579,15 @@ fn project_change(
             area,
         )) => vec![EffectPacket::conduit_initialized(area)],
         BattleChange::Conduit(crate::engine::manager::conduit::ConduitChange::GroupSelected {
-            ..
-        }) => Vec::new(),
+            source_uid,
+            team,
+            group,
+        }) => vec![EffectPacket::conduit_group_selected(
+            *source_uid,
+            *team,
+            *group,
+            0,
+        )],
         BattleChange::Conduit(
             crate::engine::manager::conduit::ConduitChange::SkillGroupChanged {
                 origin,

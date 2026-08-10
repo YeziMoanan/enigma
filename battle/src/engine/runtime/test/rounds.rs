@@ -115,6 +115,103 @@ fn destination_begin_round_owns_the_round_transition_and_reply_buckets() {
 }
 
 #[test]
+fn client_conduit_selection_projects_one_top_level_confirmation_before_actions() {
+    crate::test_support::init_config();
+    let entity = |uid, model_id| FightEntityInfo {
+        uid: Some(uid),
+        model_id: Some(model_id),
+        current_hp: Some(100_000),
+        attr: Some(sonettobuf::HeroAttribute {
+            hp: Some(100_000),
+            attack: Some(1_000),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let fight = Fight {
+        version: Some(7),
+        attacker: Some(FightTeam {
+            entitys: vec![entity(10, 3149)],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![entity(-1, 1001)],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut runtime = runtime(fight);
+    runtime
+        .managers
+        .execute_card(crate::engine::manager::card::CardCommand::Setup(
+            CardSetup {
+                hand: vec![CardInfo {
+                    uid: Some(10),
+                    skill_id: Some(31446011),
+                    temp_card: Some(false),
+                    card_type: Some(0),
+                    hero_id: Some(3149),
+                    ..Default::default()
+                }],
+                draw_pile: Vec::new(),
+                deck_num: 1,
+            },
+        ))
+        .unwrap();
+    let round = runtime
+        .build_begin_round_from_schedule(&BeginRoundRequest {
+            opers: vec![BeginRoundOper {
+                oper_type: Some(crate::engine::manager::card::CardOpType::PlayCard as i32),
+                param1: Some(1),
+                ..Default::default()
+            }],
+            devices_opers: vec![sonettobuf::FightDeviceOper {
+                uid: Some(10),
+                index: Some(1),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+
+    let selection_effects = round
+        .fight_step
+        .iter()
+        .flat_map(|step| &step.act_effect)
+        .filter(|effect| {
+            effect.effect_type
+                == Some(sonettobuf::effect_type_enum::EffectType::Deviceskillindex as i32)
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(selection_effects.len(), 1);
+    let effect = selection_effects[0];
+    assert_eq!(effect.target_id, Some(10));
+    assert_eq!(effect.effect_num, Some(1));
+    assert_eq!(effect.team_type, Some(1));
+    assert_eq!(effect.config_effect, Some(0));
+    assert_eq!(
+        round.fight_step[0]
+            .act_effect
+            .iter()
+            .map(|effect| effect.effect_type.unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            sonettobuf::effect_type_enum::EffectType::Usecards as i32,
+            sonettobuf::effect_type_enum::EffectType::Cardspush as i32,
+            sonettobuf::effect_type_enum::EffectType::Carddecknum as i32,
+        ]
+    );
+    assert_eq!(round.fight_step[1].act_effect.len(), 1);
+    assert_eq!(&round.fight_step[1].act_effect[0], effect);
+    let card_action_index = round
+        .fight_step
+        .iter()
+        .position(|step| step.act_id == Some(31446011))
+        .expect("the selected device card is played");
+    assert!(card_action_index > 1);
+}
+
+#[test]
 fn opening_round_uses_action_point_buffs_applied_during_setup() {
     crate::test_support::init_config();
     let fight = Fight {
