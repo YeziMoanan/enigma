@@ -622,8 +622,10 @@ fn conduit_source_target_uses_the_first_living_main_ally_as_its_frame_anchor() {
         crate::engine::runtime::record::FrameItem::Child(frame)
             if matches!(
                 frame.owner,
-                crate::engine::runtime::record::FrameOwner::Skill {
+                crate::engine::runtime::record::FrameOwner::ConduitSkill {
                     source_uid: 10,
+                    skill_id: 31490111,
+                    card_index: 1,
                     target_uid: Some(20),
                     ..
                 }
