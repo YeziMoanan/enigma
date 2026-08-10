@@ -58,3 +58,28 @@ fn zero_cost_conduit_activation_has_no_cost_projection() {
         );
     }
 }
+
+#[test]
+fn client_conduit_group_selection_projects_one_configless_confirmation() {
+    let effects = project_change_for_test(&BattleChange::Conduit(
+        crate::engine::manager::conduit::ConduitChange::GroupSelected {
+            source_uid: 263_811_366,
+            team: 1,
+            group: 1,
+        },
+    ))
+    .unwrap();
+
+    assert_eq!(effects.len(), 1);
+    let [effect] = effects.as_slice() else {
+        panic!("expected one client conduit selection effect");
+    };
+    assert_eq!(effect.target_id, Some(263_811_366));
+    assert_eq!(
+        effect.effect_type,
+        Some(EffectType::Deviceskillindex as i32)
+    );
+    assert_eq!(effect.effect_num, Some(1));
+    assert_eq!(effect.team_type, Some(1));
+    assert_eq!(effect.config_effect, Some(0));
+}
