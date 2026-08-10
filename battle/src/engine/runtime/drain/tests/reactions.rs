@@ -1,6 +1,131 @@
 use super::*;
 
 #[test]
+fn be_attacked_reaction_commits_before_same_hit_threshold() {
+    crate::test_support::init_config();
+    let entity = |uid, team_type, passive_skill| FightEntityInfo {
+        uid: Some(uid),
+        team_type: Some(team_type),
+        current_hp: Some(100_000),
+        attr: Some(HeroAttribute {
+            hp: Some(100_000),
+            attack: Some(1_000),
+            ..Default::default()
+        }),
+        passive_skill,
+        ..Default::default()
+    };
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    buffs: vec![BuffInfo {
+                        uid: Some(100),
+                        buff_id: Some(31430151),
+                        from_uid: Some(10),
+                        layer: Some(4),
+                        ..Default::default()
+                    }],
+                    ..entity(10, 1, vec![31430141, 31430151])
+                },
+                entity(11, 1, Vec::new()),
+            ],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                skill_group1: vec![1163855063],
+                ..entity(-1, 2, Vec::new())
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let catalog = SkillEffectCatalog::from_fight(config::configs::get(), &fight);
+    run_event(
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        BattleEvent::SkillAction(crate::engine::skill::action::SkillActionEvent {
+            source_uid: 10,
+            skill_id: 1163855063,
+            target_uid: -1,
+            target_uids: vec![-1],
+            attacked_target_uids: vec![-1],
+            phase: crate::engine::skill::action::SkillPhase::HitPassives,
+            skill_slot: 1,
+            is_attack: true,
+            rank: 1,
+            skill_type: 1,
+            effect_tag: 1,
+            assassinate: false,
+            ignore_riposte: false,
+            damage_amount: 1,
+            kill_count: 0,
+            crit_count: 0,
+            guard_break_count: 0,
+            additional_moxie: 0,
+            extra_skill_kind: 0,
+            mode: SkillExecutionMode::Active,
+            teammate_injury_count: 0,
+            teammate_injury_count_not_reset: 0,
+            team_injury_count_round: 0,
+            card_enchants: Vec::new(),
+            buff_additions: Vec::new(),
+        }),
+    )
+    .unwrap();
+    assert_eq!(managers.buff.buff_id_amount(10, 31430151), 4);
+
+    let mut invocation: SkillInvocation = SkillRequest {
+        source_uid: -1,
+        skill_id: 1163855063,
+    }
+    .into();
+    invocation.target = SkillTarget::Explicit(11);
+    let result = run(
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        [RuleOp::Skill(invocation)],
+    )
+    .unwrap();
+
+    fn contains_skill(
+        frame: &crate::engine::runtime::record::SemanticFrame,
+        skill_id: i32,
+    ) -> bool {
+        matches!(
+            frame.owner,
+            crate::engine::runtime::record::FrameOwner::Skill {
+                skill_id: id,
+                ..
+            } if id == skill_id
+        ) || frame.items.iter().any(|item| {
+            matches!(
+                item,
+                crate::engine::runtime::record::FrameItem::Child(child)
+                    if contains_skill(child, skill_id)
+            )
+        })
+    }
+
+    assert_eq!(managers.buff.buff_id_amount(10, 31430151), 0);
+    assert!(
+        result
+            .frames
+            .iter()
+            .any(|frame| contains_skill(frame, 31430181))
+    );
+}
+
+#[test]
 fn twins_conduit_activation_consumes_chirp_signal_through_the_captured_passive() {
     crate::test_support::init_config();
     let entity = |uid| FightEntityInfo {
