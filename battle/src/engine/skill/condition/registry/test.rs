@@ -672,6 +672,10 @@ fn trigger_families_reject_unconfigured_ids_and_wrong_types() {
         Some(SkillActionObserver::AllyOfAttackedTarget)
     );
     assert_eq!(
+        find_key(22213, "BeAttacked").map(|definition| definition.publication),
+        Some(PublicationPhase::BeforePublish)
+    );
+    assert_eq!(
         find_key(1001212, "Assassinate")
             .map(|definition| { (definition.role, definition.skill_action_observer) }),
         Some((
