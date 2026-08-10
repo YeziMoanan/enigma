@@ -876,13 +876,22 @@ fn round_after_uses_an_inclusive_round_start_threshold() {
         }
     );
     assert_eq!(
+        definition.opening_owner_eligibility,
+        OpeningOwnerEligibility::BothSides
+    );
+    assert_eq!(
         opening_owner_eligibility(727100, "RoundAfter"),
         Some(OpeningOwnerEligibility::BothSides)
+    );
+    assert_eq!(
+        find_key(101, "None").map(|definition| definition.opening_owner_eligibility),
+        Some(OpeningOwnerEligibility::PlayerSide)
     );
     assert_eq!(
         opening_owner_eligibility(101, "None"),
         Some(OpeningOwnerEligibility::PlayerSide)
     );
+    assert!(find_key(727100, "None").is_none());
     assert_eq!(opening_owner_eligibility(727100, "None"), None);
 }
 

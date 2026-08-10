@@ -114,6 +114,7 @@ pub struct ConditionDefinition {
     pub companion_setup: &'static [(SetupStage, i32)],
     pub reactivation_events: &'static [EventKind],
     pub setup_frame_scope: SetupFrameScope,
+    pub(crate) opening_owner_eligibility: OpeningOwnerEligibility,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -133,6 +134,7 @@ pub struct ConditionMetadata {
     pub companion_setup: &'static [(SetupStage, i32)],
     pub reactivation_events: &'static [EventKind],
     pub setup_frame_scope: SetupFrameScope,
+    pub(crate) opening_owner_eligibility: OpeningOwnerEligibility,
 }
 
 pub const fn definition(
@@ -159,6 +161,7 @@ pub const fn definition(
         companion_setup: metadata.companion_setup,
         reactivation_events: metadata.reactivation_events,
         setup_frame_scope: metadata.setup_frame_scope,
+        opening_owner_eligibility: metadata.opening_owner_eligibility,
     }
 }
 
@@ -179,6 +182,7 @@ pub const fn predicate(dependencies: &'static [EventKind]) -> ConditionMetadata 
         companion_setup: &[],
         reactivation_events: &[],
         setup_frame_scope: SetupFrameScope::Entity,
+        opening_owner_eligibility: OpeningOwnerEligibility::PlayerSide,
     }
 }
 
@@ -199,6 +203,7 @@ pub const fn event_trigger(event: EventKind, phase: Option<SkillPhase>) -> Condi
         companion_setup: &[],
         reactivation_events: &[],
         setup_frame_scope: SetupFrameScope::Entity,
+        opening_owner_eligibility: OpeningOwnerEligibility::PlayerSide,
     }
 }
 
@@ -223,6 +228,7 @@ pub const fn setup_route(
         companion_setup: &[],
         reactivation_events: &[],
         setup_frame_scope: SetupFrameScope::Entity,
+        opening_owner_eligibility: OpeningOwnerEligibility::PlayerSide,
     }
 }
 
@@ -324,6 +330,11 @@ pub const fn setup_in_side_frame(mut metadata: ConditionMetadata) -> ConditionMe
     metadata
 }
 
+pub const fn opening_owner_both_sides(mut metadata: ConditionMetadata) -> ConditionMetadata {
+    metadata.opening_owner_eligibility = OpeningOwnerEligibility::BothSides;
+    metadata
+}
+
 macro_rules! condition_definitions {
     ($([$($opcode:expr),+ $(,)?] $type_name:literal => $parse:path, $role:expr);+ $(;)?) => {
         pub const DEFINITIONS: &[ConditionDefinition] =
@@ -344,7 +355,7 @@ condition_definitions! {
     [104] "None" => none::round_start, setup_route(SetupStage::RoundStartLate, 0, &[]);
     [45100] "HeroRoundInterval" => lifecycle::period_then_start, setup_route(SetupStage::RoundStart, -1, &[]);
     [45101] "HeroRoundInterval" => lifecycle::period_then_start, setup_route(SetupStage::RoundStartCondition, 101, &[]);
-    [727100] "RoundAfter" => lifecycle::after_round, setup_route(SetupStage::RoundStartCondition, 100, &[]);
+    [727100] "RoundAfter" => lifecycle::after_round, opening_owner_both_sides(setup_route(SetupStage::RoundStartCondition, 100, &[]));
     [45102] "HeroRoundInterval" => lifecycle::round_interval, setup_route(SetupStage::RoundTransitionStart, 0, &[]);
     [45104] "HeroRoundInterval" => lifecycle::period_then_start, setup_route(SetupStage::RoundTransitionStart, 1, &[]);
     [45106] "HeroRoundInterval" => lifecycle::period_then_start, setup_route(SetupStage::CardSetup, 0, &[]);
@@ -702,12 +713,7 @@ pub(crate) fn opening_owner_eligibility(
     opcode: i32,
     type_name: &str,
 ) -> Option<OpeningOwnerEligibility> {
-    let definition = find_key(opcode, type_name)?;
-    Some(if definition.key.matches(727100, "RoundAfter") {
-        OpeningOwnerEligibility::BothSides
-    } else {
-        OpeningOwnerEligibility::PlayerSide
-    })
+    find_key(opcode, type_name).map(|definition| definition.opening_owner_eligibility)
 }
 
 pub fn definitions() -> impl Iterator<Item = &'static ConditionDefinition> {
