@@ -107,6 +107,20 @@ fn project_frame(
                 effects,
             ),
         ))),
+        FrameOwner::ConduitSkill {
+            source_uid,
+            skill_id,
+            card_index,
+            target_uid,
+        } => Ok(Some(normalize_framed_step(
+            EffectPacket::conduit_skill_fight_step(
+                *skill_id,
+                *source_uid,
+                target_uid.unwrap_or_default(),
+                *card_index,
+                effects,
+            ),
+        ))),
         FrameOwner::ConduitAction {
             source_uid,
             group,

@@ -64,10 +64,10 @@ fn zero_cost_conduit_activation_projects_zero_markers() {
                 },
             ))),
             FrameItem::Child(Box::new(SemanticFrame {
-                owner: FrameOwner::Skill {
+                owner: FrameOwner::ConduitSkill {
                     source_uid: 10,
                     skill_id: 31490111,
-                    card_index: 0,
+                    card_index: 1,
                     target_uid: Some(-1),
                 },
                 trigger: crate::engine::runtime::record::FrameTrigger::Active,
@@ -120,11 +120,23 @@ fn zero_cost_conduit_activation_projects_zero_markers() {
     assert_eq!(counter_change.effect_num1, Some(0));
     assert_eq!(
         child.fight_step.as_ref().and_then(|step| step.act_type),
-        Some(sonettobuf::fight_step::ActType::Skill as i32)
+        Some(sonettobuf::fight_step::ActType::Device as i32)
+    );
+    assert_eq!(
+        child.fight_step.as_ref().and_then(|step| step.from_id),
+        Some(10)
+    );
+    assert_eq!(
+        child.fight_step.as_ref().and_then(|step| step.to_id),
+        Some(-1)
     );
     assert_eq!(
         child.fight_step.as_ref().and_then(|step| step.act_id),
         Some(31490111)
+    );
+    assert_eq!(
+        child.fight_step.as_ref().and_then(|step| step.card_index),
+        Some(1)
     );
 }
 
