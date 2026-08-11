@@ -80,6 +80,21 @@ fn feature_kind_controls_post_apply_uid_reservation() {
     assert!(higge.uses_child_uid());
     assert!(!higge.reserves_child_after_first_apply());
 
+    for buff_id in [435011, 435421] {
+        let hidden_attr = BuffDefinition::get(buff_id).unwrap();
+        assert!(
+            hidden_attr
+                .features()
+                .iter()
+                .any(|feature| feature.kind == Some(BuffActKind::Attr))
+        );
+        assert!(!hidden_attr.reserves_child_after_first_apply());
+    }
+
+    let hidden_attr = BuffDefinition::get(435421).unwrap();
+    assert_eq!(hidden_attr.include_entries(), &[(10, 3)]);
+    assert!(hidden_attr.uses_child_uid());
+
     let lucy_upgrade = BuffDefinition::get(30860113).unwrap();
     assert!(lucy_upgrade.uses_child_uid());
     assert!(lucy_upgrade.reserves_child_after_first_apply());
