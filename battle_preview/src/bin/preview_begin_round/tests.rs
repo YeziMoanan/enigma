@@ -263,7 +263,7 @@ fn captured_version7_conduit_sentinel_keeps_activation_sequence() {
 
 #[cfg(feature = "private-fixtures")]
 #[test]
-fn captured_116385711_does_not_emit_the_defender_late_setup_passive() {
+fn captured_116385711_keeps_opening_owner_and_source_threshold_semantics() {
     fn contains_act(step: &FightStep, act_id: i32) -> bool {
         step.act_id == Some(act_id)
             || step
@@ -271,6 +271,37 @@ fn captured_116385711_does_not_emit_the_defender_late_setup_passive() {
                 .iter()
                 .filter_map(|effect| effect.fight_step.as_ref())
                 .any(|nested| contains_act(nested, act_id))
+    }
+    fn real_damage_kill_values(round: &FightRound) -> (Vec<String>, Vec<String>) {
+        fn collect(step: &FightStep, markers: &mut Vec<String>, buffs: &mut Vec<String>) {
+            for effect in &step.act_effect {
+                if let Some(info) = effect
+                    .buff_act_info
+                    .as_ref()
+                    .filter(|info| info.act_id == Some(1028))
+                {
+                    markers.push(info.str_param.clone().unwrap_or_default());
+                }
+                if let Some(buff) = effect.buff.as_ref() {
+                    buffs.extend(
+                        buff.act_info
+                            .iter()
+                            .filter(|info| info.act_id == Some(1028))
+                            .map(|info| info.str_param.clone().unwrap_or_default()),
+                    );
+                }
+                if let Some(nested) = effect.fight_step.as_ref() {
+                    collect(nested, markers, buffs);
+                }
+            }
+        }
+
+        let mut markers = Vec::new();
+        let mut buffs = Vec::new();
+        for step in &round.fight_step {
+            collect(step, &mut markers, &mut buffs);
+        }
+        (markers, buffs)
     }
 
     let db = init_config().unwrap();
@@ -304,6 +335,16 @@ fn captured_116385711_does_not_emit_the_defender_late_setup_passive() {
             .fight_step
             .iter()
             .any(|step| contains_act(step, 1163855066))
+    );
+
+    let expected = vec!["75680".to_owned(); 3];
+    assert_eq!(
+        real_damage_kill_values(&captured),
+        (expected.clone(), expected.clone())
+    );
+    assert_eq!(
+        real_damage_kill_values(&generated),
+        (expected.clone(), expected)
     );
 }
 
