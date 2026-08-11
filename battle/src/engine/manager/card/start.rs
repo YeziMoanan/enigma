@@ -156,9 +156,10 @@ pub(crate) fn configured_draw_bag(
     fight: &Fight,
 ) -> Vec<CardInfo> {
     draw_bag_from(fight, |fight| {
-        crate::engine::manager::card::pool::device_draw_bag_from(fight, |model_id| {
-            catalog.device_card_weights(model_id)
-        })
+        crate::engine::manager::card::pool::device_draw_bag_from(
+            fight,
+            |model_id, ex_skill_level| catalog.device_card_weights(model_id, ex_skill_level),
+        )
     })
 }
 
@@ -206,7 +207,13 @@ pub fn start_decks_from_fight(
                 |entity| {
                     allow_ex_skill && crate::engine::manager::card::pool::can_use_ex_skill(entity)
                 },
-                |model_id| crate::catalog::configured_device_card_weights(game_data, model_id),
+                |model_id, ex_skill_level| {
+                    crate::catalog::configured_device_card_weights(
+                        game_data,
+                        model_id,
+                        ex_skill_level,
+                    )
+                },
             )
         },
     );
@@ -249,7 +256,7 @@ pub(crate) fn configured_start_decks(
                 |entity| {
                     allow_ex_skill && crate::engine::manager::card::pool::can_use_ex_skill(entity)
                 },
-                |model_id| catalog.device_card_weights(model_id),
+                |model_id, ex_skill_level| catalog.device_card_weights(model_id, ex_skill_level),
             )
         },
     )
@@ -857,6 +864,30 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn device_draw_bag_uses_nautikas_unlocked_energy_cards() {
+        crate::test_support::init_config();
+        let mut owner = entity(10, 3149, 1, &[31490111], &[31490131]);
+        owner.ex_skill_level = Some(5);
+        let fight = Fight {
+            attacker: Some(FightTeam {
+                entitys: vec![owner],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let bag = configured_draw_bag(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            &fight,
+        );
+
+        assert!(bag.iter().any(|card| card.skill_id == Some(31495201)));
+        assert!(bag.iter().any(|card| card.skill_id == Some(31495211)));
+        assert!(!bag.iter().any(|card| card.skill_id == Some(31490201)));
+        assert!(!bag.iter().any(|card| card.skill_id == Some(31490211)));
     }
 
     fn entity(

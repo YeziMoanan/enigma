@@ -1017,6 +1017,33 @@ mod tests {
     }
 
     #[test]
+    fn seed_uses_the_owners_unlocked_nautika_device() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            attacker: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(10),
+                    model_id: Some(3149),
+                    ex_skill_level: Some(5),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let manager = ConduitManager::configured(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            &fight,
+        );
+
+        assert!(manager.owns_skill(10, 31495121));
+        assert!(manager.owns_skill(10, 31495141));
+        assert!(manager.owns_skill(10, 31495151));
+        assert!(!manager.owns_skill(10, 31490121));
+    }
+
+    #[test]
     fn selects_the_requested_group_on_the_owning_device() {
         config::init(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -703,7 +703,7 @@ fn normalizes_device_card_weights() {
     let catalog = BattleCatalog::new(crate::test_support::game_data());
 
     assert_eq!(
-        catalog.device_card_weights(3_149),
+        catalog.device_card_weights(3_149, 0),
         vec![
             (31_446_011, 2),
             (31_446_012, 2),
@@ -713,7 +713,37 @@ fn normalizes_device_card_weights() {
             (31_490_211, 1),
         ]
     );
-    assert!(catalog.device_card_weights(-1).is_empty());
+    assert_eq!(
+        catalog.device_card_weights(3_149, 5),
+        vec![
+            (31_446_012, 2),
+            (31_446_013, 2),
+            (31_446_022, 2),
+            (31_446_023, 2),
+            (31_495_201, 1),
+            (31_495_211, 1),
+        ]
+    );
+    assert!(catalog.device_card_weights(-1, 0).is_empty());
+}
+
+#[test]
+fn configured_conduit_uses_the_latest_unlocked_nautika_device() {
+    crate::test_support::init_config();
+    let game = crate::test_support::game_data();
+
+    let base = crate::catalog::configured_conduit_device(game, 3_149, 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(base[0][1].skill_id, 31_490_121);
+    assert_eq!(base[2][0].skill_id, 31_490_151);
+
+    let max = crate::catalog::configured_conduit_device(game, 3_149, 5)
+        .unwrap()
+        .unwrap();
+    assert_eq!(max[0][1].skill_id, 31_495_121);
+    assert_eq!(max[1][1].skill_id, 31_495_141);
+    assert_eq!(max[2][0].skill_id, 31_495_151);
 }
 
 #[test]
