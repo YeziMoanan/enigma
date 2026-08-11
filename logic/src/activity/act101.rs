@@ -58,7 +58,7 @@ pub async fn get101_bonus(
         .iter()
         .find(|row| row.activity_id == activity_id && row.id == day_id)
         .ok_or(AppError::InvalidRequest)?;
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let claimed =
         activity101::claim_activity101_day_in_transaction(&mut tx, player_id, activity_id, day_id)
             .await?;
@@ -111,7 +111,7 @@ pub async fn get101_bonus_list(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let mut claimed_ids = Vec::new();
     let mut reward_set = reward::RewardSet::default();
     for (day_id, bonus) in bonuses {
@@ -178,7 +178,7 @@ pub async fn get101_sp_bonus(
         return Err(AppError::InvalidRequest);
     }
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     if !activity_state::transition_in_transaction(
         &mut tx,
         player_id,
@@ -302,6 +302,39 @@ mod tests {
         assert!(retry.reply.ids.is_empty());
         assert!(retry.rewards.is_none());
         assert!(retry.material_changes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn concurrent_claims_wait_for_the_writer_and_grant_once() {
+        let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/excel2json");
+        let _ = config::init(data_dir.to_str().unwrap());
+        let row = config::configs::get().activity101.iter().next().unwrap();
+        let activity_id = row.activity_id;
+        let day_id = row.id as u32;
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        database::run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, created_at, updated_at)
+             VALUES (8, 'act101-concurrent', 0, 0);
+             INSERT INTO user_sign_in_info
+                (user_id, addup_sign_in_day, open_function_time, reward_mark)
+             VALUES (8, ?, 0, 0);",
+        )
+        .bind(day_id as i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let first = get101_bonus_list(&pool, 8, Some(activity_id), vec![day_id]);
+        let second = get101_bonus_list(&pool, 8, Some(activity_id), vec![day_id]);
+        let (first, second) = tokio::join!(first, second);
+        let first = first.unwrap();
+        let second = second.unwrap();
+        let claimed =
+            usize::from(!first.reply.ids.is_empty()) + usize::from(!second.reply.ids.is_empty());
+
+        assert_eq!(claimed, 1);
     }
 
     #[tokio::test]

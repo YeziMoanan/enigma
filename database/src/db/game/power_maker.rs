@@ -35,7 +35,7 @@ pub async fn take_state(
     user_id: i64,
     is_login: bool,
 ) -> Result<PowerMakerState> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let now = ServerTime::now_ms();
     super::currencies::settle_power_recovery_in_transaction(&mut tx, user_id, now).await?;
     let row = sqlx::query_as::<_, (i32, i32, i32, i32, i64)>(
@@ -80,7 +80,7 @@ pub async fn take_state(
 }
 
 pub async fn record_logout(pool: &SqlitePool, user_id: i64) -> Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let now = ServerTime::now_ms();
     super::currencies::settle_power_recovery_in_transaction(&mut tx, user_id, now).await?;
     sqlx::query(
@@ -425,6 +425,18 @@ mod tests {
         let repeated = take_state(&pool, USER_ID, true).await.unwrap();
         assert_eq!((login.make_count, login.logout_second), (3, 99));
         assert_eq!((repeated.make_count, repeated.logout_second), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn concurrent_logout_updates_wait_for_each_other() {
+        let pool = test_pool().await;
+        seed_progress(&pool, PRODUCTION_SECONDS, SERVER_DAY_START).await;
+
+        let (first, second) =
+            tokio::join!(record_logout(&pool, USER_ID), record_logout(&pool, USER_ID),);
+
+        first.unwrap();
+        second.unwrap();
     }
 
     #[tokio::test]
