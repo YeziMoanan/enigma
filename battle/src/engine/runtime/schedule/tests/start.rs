@@ -515,6 +515,139 @@ fn opening_round_does_not_advance_a_buff_granted_by_round_start() {
 }
 
 #[test]
+fn version_seven_opening_orders_immunity_duration_and_buff_gate() {
+    init_config();
+    let fight = Fight {
+        version: Some(7),
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                team_type: Some(1),
+                current_hp: Some(100),
+                passive_skill: vec![40, 31430171],
+                buffs: vec![BuffInfo {
+                    uid: Some(20),
+                    buff_id: Some(31430144),
+                    from_uid: Some(10),
+                    act_info: vec![sonettobuf::BuffActInfo {
+                        act_id: Some(1126),
+                        param: vec![1],
+                        str_param: Some(String::new()),
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let mut enter_fight = SkillEffectSlot::new(
+        ParsedBehavior::new(1, "AddBuff", vec![31280114, 1]),
+        TargetRequest::self_only(),
+    );
+    enter_fight.conditions = vec![ParsedCondition {
+        opcode: 5,
+        type_name: "EnterFight".to_owned(),
+        kind: ParsedConditionKind::Lifecycle(
+            crate::engine::skill::condition::lifecycle::LifecycleMode::EnterFight,
+        ),
+        raw_args: Vec::new(),
+    }];
+    enter_fight.compiled_route = ConditionRoute::compile(&enter_fight.conditions);
+    let mut catalog = SkillEffectCatalog::from_roots(config::configs::get(), [31430171], []);
+    catalog.insert(ParsedSkillEffect {
+        skill_id: 40,
+        slots: vec![enter_fight],
+    });
+
+    let (start, _) = run_start(
+        managers.catalog(),
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext {
+            current_round: 1,
+            ..Default::default()
+        },
+        CardSetup {
+            hand: Vec::new(),
+            draw_pile: Vec::new(),
+            deck_num: 0,
+        },
+        0,
+    )
+    .unwrap();
+
+    let immunity_reset = start
+        .outcomes
+        .iter()
+        .position(|outcome| {
+            matches!(
+                outcome,
+                RuleOutcome::BuffActInfoMarker(marker)
+                    if marker.target_uid == 10
+                        && marker.buff_uid == 20
+                        && marker.act_id == 1126
+                        && marker.params == [4]
+            )
+        })
+        .expect("opening resets the configured team immunity allowance");
+    let duration_refresh = start
+        .outcomes
+        .iter()
+        .position(|outcome| {
+            matches!(
+                outcome,
+                RuleOutcome::BuffBatch(changes)
+                    if changes.iter().any(|change| {
+                        change.origin.key.opcode
+                            == crate::engine::skill::buff_act::effect_time::ROUND_START_DURATION
+                            && change.change.refreshed.iter().any(|refresh| {
+                                refresh.after.buff_id == Some(31280114)
+                                    && refresh.after.duration == Some(3)
+                            })
+                    })
+            )
+        })
+        .expect("opening advances the pre-existing duration snapshot");
+    let buff_gate = start
+        .outcomes
+        .iter()
+        .position(|outcome| {
+            matches!(
+                outcome,
+                RuleOutcome::Buff(changes)
+                    if changes.change.added.iter().any(|added| {
+                        added.buff.buff_id == Some(31430171)
+                    })
+            )
+        })
+        .expect("opening emits the configured BuffGate output");
+
+    assert!(immunity_reset < duration_refresh && duration_refresh < buff_gate);
+    assert_eq!(
+        managers
+            .buff
+            .active_for(10)
+            .find(|buff| buff.buff_id == Some(31280114))
+            .and_then(|buff| buff.duration),
+        Some(3)
+    );
+    assert_eq!(
+        managers
+            .buff
+            .active_for(10)
+            .find(|buff| buff.buff_id == Some(31430171))
+            .and_then(|buff| buff.duration),
+        Some(2)
+    );
+}
+
+#[test]
 fn start_schedule_finishes_unconditional_setup_before_round_start() {
     init_config();
     let unconditional = START
