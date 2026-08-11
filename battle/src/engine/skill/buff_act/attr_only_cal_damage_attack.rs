@@ -33,6 +33,13 @@ pub fn supports_be_attacked(args: &[i32]) -> bool {
     )
 }
 
+pub fn supports_be_attacked_big_skill(args: &[i32]) -> bool {
+    matches!(
+        args,
+        [raw_attr, value] if AttrId::from_raw(*raw_attr).is_some() && *value != 0
+    )
+}
+
 pub fn attribute_delta(feature: &ActiveBuffFeature, attr_id: AttrId) -> i32 {
     match feature.values.as_slice() {
         [_, raw_attr_id, value, ..] if *raw_attr_id == attr_id as i32 => value * feature.amount,
@@ -52,9 +59,11 @@ pub fn consumes_after_attack(feature: &ActiveBuffFeature) -> bool {
 pub fn applies_to_incoming_damage(
     feature: &ActiveBuffFeature,
     damage_type: EntityDamageType,
+    is_big_skill: bool,
 ) -> bool {
     match super::feature_kind(feature) {
         Some(super::registry::BuffActKind::AttrOnlyCalDamageBeAttacked) => true,
+        Some(super::registry::BuffActKind::AttrOnlyCalDamageBeAttackedBigSkill) => is_big_skill,
         Some(super::registry::BuffActKind::AttrOnlyCalDamageBeAttackedType) => {
             matches!(feature.values.as_slice(), [_, raw_damage_type, ..]
                 if EntityDamageType::from_wire(*raw_damage_type) == damage_type)
@@ -66,12 +75,14 @@ pub fn applies_to_incoming_damage(
 pub fn applies_to_any_incoming_damage(
     feature: &ActiveBuffFeature,
     damage_types: &[EntityDamageType],
+    is_big_skill: bool,
 ) -> bool {
     match super::feature_kind(feature) {
         Some(super::registry::BuffActKind::AttrOnlyCalDamageBeAttacked) => true,
+        Some(super::registry::BuffActKind::AttrOnlyCalDamageBeAttackedBigSkill) => is_big_skill,
         Some(super::registry::BuffActKind::AttrOnlyCalDamageBeAttackedType) => damage_types
             .iter()
-            .any(|damage_type| applies_to_incoming_damage(feature, *damage_type)),
+            .any(|damage_type| applies_to_incoming_damage(feature, *damage_type, is_big_skill)),
         _ => false,
     }
 }
@@ -79,9 +90,10 @@ pub fn applies_to_any_incoming_damage(
 pub fn incoming_attribute_delta(
     feature: &ActiveBuffFeature,
     damage_type: EntityDamageType,
+    is_big_skill: bool,
     attr_id: AttrId,
 ) -> i32 {
-    if !applies_to_incoming_damage(feature, damage_type) {
+    if !applies_to_incoming_damage(feature, damage_type, is_big_skill) {
         return 0;
     }
     match super::feature_kind(feature) {
@@ -97,6 +109,19 @@ pub fn incoming_attribute_delta(
     }
 }
 
+pub fn consumes_after_incoming_skill(
+    managers: &BattleManagers,
+    feature: &ActiveBuffFeature,
+    is_big_skill: bool,
+) -> bool {
+    match super::feature_kind(feature) {
+        Some(super::registry::BuffActKind::AttrOnlyCalDamageBeAttackedBigSkill) => {
+            is_big_skill && managers.catalog().buff_has_effect_count(feature.buff_id)
+        }
+        _ => consumes_after_attack(feature),
+    }
+}
+
 pub fn applies_to_skill(feature: &ActiveBuffFeature, is_big_skill: bool) -> bool {
     match feature.values.as_slice() {
         [_, raw_attr_id, ..] if *raw_attr_id == AttrId::UltimateMight as i32 => is_big_skill,
@@ -106,14 +131,26 @@ pub fn applies_to_skill(feature: &ActiveBuffFeature, is_big_skill: bool) -> bool
 }
 
 pub fn consume_rule_op(managers: &BattleManagers, feature: &ActiveBuffFeature) -> Option<RuleOp> {
+    if !consumes_after_attack(feature) {
+        return None;
+    }
+    let command = consume_command(managers, feature)?;
+    Some(RuleOp::Command(BattleCommand::Buff(command)))
+}
+
+pub fn incoming_consume_rule_op(
+    managers: &BattleManagers,
+    feature: &ActiveBuffFeature,
+    is_big_skill: bool,
+) -> Option<RuleOp> {
+    if !consumes_after_incoming_skill(managers, feature, is_big_skill) {
+        return None;
+    }
     let command = consume_command(managers, feature)?;
     Some(RuleOp::Command(BattleCommand::Buff(command)))
 }
 
 fn consume_command(managers: &BattleManagers, feature: &ActiveBuffFeature) -> Option<BuffCommand> {
-    if !consumes_after_attack(feature) {
-        return None;
-    }
     managers
         .buff
         .snapshot(feature.owner_uid, feature.buff_uid)?;
@@ -296,6 +333,7 @@ mod tests {
                 &managers,
                 -1,
                 EntityDamageType::Mental,
+                false,
                 AttrId::DmgTakenReduction,
             ),
             250
@@ -304,12 +342,92 @@ mod tests {
             &managers,
             -1,
             &[EntityDamageType::Mental],
+            false,
         );
         let [(_, op)] = ops.as_slice() else {
             panic!("expected one target-local consumption");
         };
         let RuleOp::Command(BattleCommand::Buff(command)) = op else {
             panic!("expected a buff command");
+        };
+        managers.execute_buff(command.clone()).unwrap();
+
+        assert!(managers.buff.snapshot(-1, 3).is_none());
+    }
+
+    #[test]
+    fn ultimate_resistance_only_applies_to_an_ultimate_and_consumes_its_effect_count() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            defender: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(-1),
+                    current_hp: Some(100),
+                    buffs: vec![BuffInfo {
+                        uid: Some(3),
+                        buff_id: Some(104342519),
+                        from_uid: Some(-1),
+                        count: Some(1),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut managers = BattleManagers::seeded(&fight);
+
+        assert_eq!(
+            super::super::incoming_target_attack_attribute_delta(
+                &managers,
+                -1,
+                EntityDamageType::Mental,
+                false,
+                AttrId::DmgTakenReduction,
+            ),
+            0
+        );
+        assert_eq!(
+            super::super::incoming_target_attack_attribute_delta(
+                &managers,
+                -1,
+                EntityDamageType::Mental,
+                true,
+                AttrId::DmgTakenReduction,
+            ),
+            1000
+        );
+        let feature = managers
+            .buff
+            .active_features(&managers.hp)
+            .into_iter()
+            .find(|feature| feature.owner_uid == -1)
+            .unwrap();
+        assert_eq!(
+            super::super::feature_kind(&feature),
+            Some(super::super::registry::BuffActKind::AttrOnlyCalDamageBeAttackedBigSkill)
+        );
+        assert!(managers.catalog().buff_has_effect_count(feature.buff_id));
+        assert!(consumes_after_incoming_skill(&managers, &feature, true));
+        assert!(incoming_consume_rule_op(&managers, &feature, true).is_some());
+        assert!(
+            super::super::be_attacked_consumption_rule_ops(
+                &managers,
+                -1,
+                &[EntityDamageType::Mental],
+                false,
+            )
+            .is_empty()
+        );
+        let ops = super::super::be_attacked_consumption_rule_ops(
+            &managers,
+            -1,
+            &[EntityDamageType::Mental],
+            true,
+        );
+        let [(_, RuleOp::Command(BattleCommand::Buff(command)))] = ops.as_slice() else {
+            panic!("expected one ultimate-only consumption");
         };
         managers.execute_buff(command.clone()).unwrap();
 
@@ -344,6 +462,7 @@ mod tests {
                 &managers,
                 -1,
                 EntityDamageType::Mental,
+                false,
                 AttrId::DmgTakenReduction,
             ),
             -250
@@ -353,6 +472,7 @@ mod tests {
                 &managers,
                 -1,
                 EntityDamageType::Reality,
+                false,
                 AttrId::DmgTakenReduction,
             ),
             0
@@ -362,6 +482,7 @@ mod tests {
                 &managers,
                 -1,
                 &[EntityDamageType::Mental],
+                false,
             )
             .len(),
             1
@@ -371,6 +492,7 @@ mod tests {
                 &managers,
                 -1,
                 &[EntityDamageType::Reality],
+                false,
             )
             .is_empty()
         );
@@ -379,6 +501,7 @@ mod tests {
                 &managers,
                 -1,
                 &[EntityDamageType::Reality, EntityDamageType::Mental],
+                false,
             )
             .len(),
             1

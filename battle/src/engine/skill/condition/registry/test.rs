@@ -2267,6 +2267,25 @@ fn enter_fight_team_career_threshold_keeps_its_exact_key() {
             priority: 100,
         })
     );
+    assert_eq!(
+        parse(
+            561100,
+            "CareerGroupHeroCountEqual",
+            &["3,5,6".into(), "1".into()],
+        ),
+        Some(ParsedConditionKind::TeamCareerCount {
+            careers: vec![3, 5, 6],
+            compare: super::super::parse::ConditionCompare::Equal,
+            threshold: 1,
+        })
+    );
+    assert_eq!(
+        find_key(561100, "CareerGroupHeroCountEqual").map(|definition| definition.role),
+        Some(ConditionRole::Setup {
+            stage: SetupStage::RoundStartCondition,
+            priority: 100,
+        })
+    );
     assert!(find_key(562003, "CareerGroupHeroCountGE").is_none());
 }
 
@@ -2656,6 +2675,46 @@ fn round_end_teammate_count_keeps_its_exact_scope_and_route() {
             phase: None,
         }
     );
+}
+
+#[test]
+fn teammate_count_keeps_each_configured_setup_and_skill_phase_route() {
+    for (opcode, expected_role) in [
+        (
+            73102,
+            ConditionRole::Setup {
+                stage: SetupStage::RoundStartCondition,
+                priority: 102,
+            },
+        ),
+        (
+            73201,
+            ConditionRole::Trigger {
+                event: EventKind::SkillAction,
+                phase: Some(SkillPhase::Immediate),
+            },
+        ),
+        (
+            73210,
+            ConditionRole::Trigger {
+                event: EventKind::SkillAction,
+                phase: Some(SkillPhase::AfterHit),
+            },
+        ),
+    ] {
+        assert_eq!(
+            parse(opcode, "TeammateAliveNum", &["2".into()]),
+            Some(ParsedConditionKind::EntityCount {
+                scope: super::super::parse::EntityCountScope::AliveOtherTeammates,
+                compare: ConditionCompare::Equal,
+                count: 2,
+            })
+        );
+        assert_eq!(
+            find_key(opcode, "TeammateAliveNum").map(|definition| definition.role),
+            Some(expected_role)
+        );
+    }
 }
 
 #[test]

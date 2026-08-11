@@ -821,6 +821,18 @@ fn skill_target_count_attributes_keep_separate_exact_identities() {
 
 #[test]
 fn damage_type_be_attacked_attribute_keeps_its_exact_identity() {
+    let ultimate = find(109, "Attr").unwrap();
+    assert_eq!(
+        ultimate.kind,
+        BuffActKind::AttrOnlyCalDamageBeAttackedBigSkill
+    );
+    assert!(ultimate.state.consumer);
+    assert!(has_destination(109, "Attr", &[206, 1000]));
+    assert!(has_destination(109, "Attr", &[212, 300]));
+    assert!(!has_destination(109, "Attr", &[999, 1000]));
+    assert!(!has_destination(109, "Attr", &[206, 0]));
+    assert_eq!(runtime_event(109, "Attr", 202), None);
+
     assert!(has_destination(
         112,
         "AttrOnlyCalDamageBeAttacked",

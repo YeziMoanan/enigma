@@ -536,6 +536,7 @@ pub(super) fn damage_ops(
                 managers,
                 target_uid,
                 source_damage_type,
+                catalog.is_big_skill(skill_id),
                 crate::engine::entity::attr::AttrId::DmgTakenReduction,
             );
         if incoming_reduction != 0 {
@@ -724,6 +725,7 @@ pub(super) fn damage_ops(
                     managers,
                     target_uid,
                     additional_damage_type,
+                    catalog.is_big_skill(skill_id),
                     crate::engine::entity::attr::AttrId::DmgTakenReduction,
                 );
             if incoming_reduction != 0 {
