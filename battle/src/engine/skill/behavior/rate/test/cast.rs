@@ -86,6 +86,78 @@ fn magic_circle_attr_scope_one_is_owner_and_scope_two_is_team() {
 }
 
 #[test]
+fn wayfarer_of_the_dao_single_team_attribute_reaches_all_allies() {
+    let mut effects = SkillEffectCatalog::default();
+    effects.insert(ParsedSkillEffect {
+        skill_id: 436335,
+        slots: vec![SkillEffectSlot::new(
+            ParsedBehavior::new(60076, "MagicCircleAttr", vec![2, 214, 120]),
+            TargetRequest::self_only(),
+        )],
+    });
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    uid: Some(10),
+                    passive_skill: vec![436335],
+                    ..Default::default()
+                },
+                FightEntityInfo {
+                    uid: Some(11),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut managers = BattleManagers::seeded(&fight);
+    managers
+        .field
+        .execute_command(crate::engine::manager::field::FieldCommand {
+            origin: crate::engine::skill::rule::CommandOrigin {
+                domain: crate::engine::skill::rule::RuleDomain::Behavior,
+                key: crate::engine::skill::rule::DefinitionKey::new(50019, "AddMagicCircle"),
+            },
+            team: 1,
+            operation: crate::engine::manager::field::FieldOperation::DeployIfAbsent {
+                definition: crate::engine::manager::field::FieldDefinition {
+                    field_id: 1,
+                    duration: 1,
+                },
+                create_uid: 10,
+                initial_level: 1,
+                thresholds: Vec::new(),
+            },
+        })
+        .unwrap();
+    let pool = TargetPool::from_fight(&fight);
+
+    for source_uid in [10, 11] {
+        let mut modifiers = crate::engine::skill::action::SkillModifiers::default();
+        emit_passive_attack_attributes(
+            &mut modifiers,
+            source_uid,
+            100,
+            if source_uid == 10 { &[436335] } else { &[] },
+            RateRuntime {
+                effects: &effects,
+                managers: &managers,
+                pool: &pool,
+                context: TargetContext::default(),
+            },
+            &mut RoundDeterminism::default(),
+        );
+
+        assert_eq!(
+            modifiers.attack_attributes,
+            vec![(AttrId::IncantationMight, 120)]
+        );
+    }
+}
+
+#[test]
 fn excess_crit_conversion_is_returned_to_the_current_cast() {
     let mut effects = SkillEffectCatalog::default();
     effects.insert(ParsedSkillEffect {

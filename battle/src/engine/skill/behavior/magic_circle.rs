@@ -140,6 +140,13 @@ impl BehaviorHandler for Handler {
                     && configured(*circle_id)
             }
             (BehaviorKind::RemoveMagicCircleById, [circle_id]) => configured(*circle_id),
+            (BehaviorKind::MagicCircleAttr, args) => {
+                !args.is_empty()
+                    && args.len().is_multiple_of(3)
+                    && args
+                        .chunks_exact(3)
+                        .all(|args| matches!(args[0], 1 | 2) && AttrId::from_raw(args[1]).is_some())
+            }
             _ => false,
         }
     }
@@ -399,5 +406,33 @@ mod tests {
             )))
         )));
         assert!(matches!(ops[2], RuleOp::Command(BattleCommand::Field(_))));
+    }
+
+    #[test]
+    fn magic_circle_attributes_accept_single_or_multiple_scoped_triplets() {
+        let wayfarer_of_the_dao = ParsedBehavior::new(60076, "MagicCircleAttr", vec![2, 214, 120]);
+        let owner_and_team =
+            ParsedBehavior::new(60076, "MagicCircleAttr", vec![1, 301, 40, 2, 301, 40]);
+
+        assert!(Handler::supports(&wayfarer_of_the_dao));
+        assert!(Handler::supports(&owner_and_team));
+        assert!(crate::engine::skill::behavior::has_destination(
+            &wayfarer_of_the_dao
+        ));
+        assert!(!Handler::supports(&ParsedBehavior::new(
+            60076,
+            "MagicCircleAttr",
+            vec![2, 214]
+        )));
+        assert!(!Handler::supports(&ParsedBehavior::new(
+            60076,
+            "MagicCircleAttr",
+            vec![3, 214, 120]
+        )));
+        assert!(!Handler::supports(&ParsedBehavior::new(
+            60076,
+            "MagicCircleAttr",
+            vec![2, 999, 120]
+        )));
     }
 }

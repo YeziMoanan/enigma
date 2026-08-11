@@ -88,6 +88,24 @@ fn dynamic_current_battle_roots_compile_enigmas_field_condition() {
 }
 
 #[test]
+fn wayfarer_of_the_dao_team_incantation_bonus_is_a_supported_destination() {
+    init_config();
+    let catalog = SkillEffectCatalog::from_roots(config::configs::get(), [436335], []);
+    let effect = catalog.get(436335).unwrap();
+    let slot = effect
+        .slots
+        .iter()
+        .find(|slot| slot.behavior.spec.key.opcode == 60076)
+        .unwrap();
+
+    assert_eq!(slot.behavior.args, [2, 214, 120]);
+    assert!(crate::engine::skill::behavior::is_supported(&slot.behavior));
+    assert!(crate::engine::skill::behavior::has_destination(
+        &slot.behavior
+    ));
+}
+
+#[test]
 fn eagle_exit_cleanup_compiles_its_exact_buff_family_dispel() {
     init_config();
     let catalog = SkillEffectCatalog::from_roots(config::configs::get(), [30060141], []);
