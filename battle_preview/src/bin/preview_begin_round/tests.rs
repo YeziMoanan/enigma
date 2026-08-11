@@ -204,10 +204,10 @@ fn captured_version7_conduit_sentinel_keeps_activation_sequence() {
         )
     };
 
-    let captured = signature(&captured);
-    assert_eq!(signature(&generated), captured);
+    let captured_signature = signature(&captured);
+    assert_eq!(signature(&generated), captured_signature);
     assert_eq!(
-        captured.1,
+        captured_signature.1,
         vec![
             (
                 Some(sonettobuf::effect_type_enum::EffectType::Expointchange as i32),
@@ -226,6 +226,38 @@ fn captured_version7_conduit_sentinel_keeps_activation_sequence() {
                 Some(63),
             ),
         ]
+    );
+
+    fn child_of<'a>(step: &'a FightStep, parent_id: i32, child_id: i32) -> Option<&'a FightStep> {
+        if step.act_id == Some(parent_id) {
+            return step.act_effect.iter().find_map(|effect| {
+                effect
+                    .fight_step
+                    .as_ref()
+                    .filter(|child| child.act_id == Some(child_id))
+            });
+        }
+        step.act_effect
+            .iter()
+            .filter_map(|effect| effect.fight_step.as_ref())
+            .find_map(|nested| child_of(nested, parent_id, child_id))
+    }
+
+    fn reaction_frame(round: &FightRound) -> &FightStep {
+        round
+            .fight_step
+            .iter()
+            .find_map(|step| child_of(step, 31490111, 31430151))
+            .expect("Atomic active-ally reaction frame")
+    }
+    assert_eq!(reaction_frame(&captured).to_id, Some(263620439));
+    let generated_reaction = reaction_frame(&generated);
+    assert_eq!(generated_reaction.to_id, Some(263620439));
+    assert!(
+        generated_reaction
+            .act_effect
+            .iter()
+            .all(|effect| effect.target_id == Some(263620439))
     );
 }
 

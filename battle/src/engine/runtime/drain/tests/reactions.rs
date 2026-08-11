@@ -955,8 +955,29 @@ fn reactive_skill_frame_targets_the_other_team_of_a_hit() {
             &event,
             -3,
             crate::engine::skill::condition::registry::ReactionFrameTarget::Counterparty,
+            None,
         ),
         Some(10)
+    );
+    assert_eq!(
+        reaction_skill_target(
+            &pool,
+            &event,
+            -3,
+            crate::engine::skill::condition::registry::ReactionFrameTarget::CausingFrame,
+            Some(-2),
+        ),
+        Some(-2)
+    );
+    assert_eq!(
+        reaction_skill_target(
+            &pool,
+            &event,
+            -3,
+            crate::engine::skill::condition::registry::ReactionFrameTarget::CausingFrame,
+            None,
+        ),
+        Some(-2)
     );
 }
 
@@ -1120,6 +1141,87 @@ fn allied_action_observer_keeps_the_triggering_action_target() {
         reaction_counterparty(&TargetPool::default(), &event, 99),
         Some(-2)
     );
+}
+
+#[test]
+fn active_ally_reaction_without_parent_keeps_the_action_target() {
+    crate::test_support::init_config();
+    let entity = |uid, model_id| FightEntityInfo {
+        uid: Some(uid),
+        model_id: Some(model_id),
+        current_hp: Some(100_000),
+        attr: Some(HeroAttribute {
+            hp: Some(100_000),
+            attack: Some(1_000),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![
+                entity(10, 3149),
+                FightEntityInfo {
+                    passive_skill: vec![31430151],
+                    ..entity(30, 3143)
+                },
+            ],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![entity(-1, 1001)],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let catalog = SkillEffectCatalog::from_fight(config::configs::get(), &fight);
+
+    let result = run_event(
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        BattleEvent::AllyAction(ActionEvent {
+            source_uid: 10,
+            skill_id: 31490111,
+            target_uid: 30,
+            target_uids: vec![30],
+            skill_slot: 1,
+            is_attack: true,
+            rank: 1,
+            mode: SkillExecutionMode::Active,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(managers.buff.buff_id_amount(30, 31430151), 1);
+
+    fn find_step(step: &sonettobuf::FightStep, act_id: i32) -> Option<&sonettobuf::FightStep> {
+        (step.act_id == Some(act_id)).then_some(step).or_else(|| {
+            step.act_effect
+                .iter()
+                .filter_map(|effect| effect.fight_step.as_ref())
+                .find_map(|nested| find_step(nested, act_id))
+        })
+    }
+
+    let steps = crate::engine::packet::timeline::project(&result.frames).unwrap();
+    let reaction = steps
+        .iter()
+        .find_map(|step| find_step(step, 31430151))
+        .unwrap();
+    assert_eq!(reaction.to_id, Some(30));
+    assert!(reaction.act_effect.iter().any(|effect| {
+        effect.target_id == Some(30)
+            && effect
+                .buff
+                .as_ref()
+                .is_some_and(|buff| buff.buff_id == Some(31430151))
+    }));
 }
 
 #[test]
@@ -1395,6 +1497,7 @@ fn eureka_reaction_frame_stays_owned_by_the_subscriber() {
             &event,
             99,
             crate::engine::skill::condition::registry::ReactionFrameTarget::Owner,
+            None,
         ),
         Some(99)
     );

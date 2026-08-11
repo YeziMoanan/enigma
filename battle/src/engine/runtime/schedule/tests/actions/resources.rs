@@ -654,7 +654,7 @@ fn device_power_card_keeps_ally_action_without_granting_loop_chain() {
                 entity(10, 3149),
                 FightEntityInfo {
                     passive_skill: vec![31430151],
-                    skill_group1: vec![31430121],
+                    skill_group1: vec![31430111],
                     ..entity(30, 3143)
                 },
             ],
@@ -681,7 +681,7 @@ fn device_power_card_keeps_ally_action_without_granting_loop_chain() {
                 },
                 CardInfo {
                     uid: Some(30),
-                    skill_id: Some(31430121),
+                    skill_id: Some(31430111),
                     hero_id: Some(3143),
                     ..Default::default()
                 },
@@ -742,9 +742,32 @@ fn device_power_card_keeps_ally_action_without_granting_loop_chain() {
     assert!(active.events.iter().any(|event| matches!(
         event,
         BattleEvent::AllyAction(action)
-            if action.skill_id == 31430121 && action.mode == SkillExecutionMode::Active
+            if action.skill_id == 31430111 && action.mode == SkillExecutionMode::Active
     )));
     assert_eq!(managers.buff.buff_id_amount(30, 31430151), 1);
+
+    fn find_step(step: &sonettobuf::FightStep, act_id: i32) -> Option<&sonettobuf::FightStep> {
+        (step.act_id == Some(act_id)).then_some(step).or_else(|| {
+            step.act_effect
+                .iter()
+                .filter_map(|effect| effect.fight_step.as_ref())
+                .find_map(|nested| find_step(nested, act_id))
+        })
+    }
+
+    let steps = crate::engine::packet::timeline::project(&active.frames).unwrap();
+    let reaction = steps
+        .iter()
+        .find_map(|step| find_step(step, 31430151))
+        .unwrap();
+    assert_eq!(reaction.to_id, Some(-1));
+    assert!(reaction.act_effect.iter().any(|effect| {
+        effect.target_id == Some(30)
+            && effect
+                .buff
+                .as_ref()
+                .is_some_and(|buff| buff.buff_id == Some(31430151))
+    }));
 }
 
 #[test]
