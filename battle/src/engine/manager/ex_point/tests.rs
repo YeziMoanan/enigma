@@ -4,7 +4,7 @@ use super::*;
 use crate::engine::skill::rule::{DefinitionKey, RuleDomain};
 
 #[test]
-fn nautika_uses_rank_replaced_faith_cap() {
+fn rank_replaced_faith_cap_is_kept_for_the_original_owner() {
     crate::test_support::init_config();
     let mut fight = Fight {
         attacker: Some(FightTeam {
