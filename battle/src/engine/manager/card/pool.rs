@@ -15,15 +15,15 @@ pub fn player_candidate_pool_with(
     fight: &Fight,
     mut can_use_ex_skill: impl FnMut(&FightEntityInfo) -> bool,
 ) -> Vec<CardInfo> {
-    player_candidate_pool_from(fight, &mut can_use_ex_skill, |model_id| {
-        crate::catalog::configured_device_card_weights(game_data, model_id)
+    player_candidate_pool_from(fight, &mut can_use_ex_skill, |model_id, ex_skill_level| {
+        crate::catalog::configured_device_card_weights(game_data, model_id, ex_skill_level)
     })
 }
 
 pub(crate) fn player_candidate_pool_from(
     fight: &Fight,
     mut can_use_ex_skill: impl FnMut(&FightEntityInfo) -> bool,
-    configured: impl FnMut(i32) -> Vec<(i32, usize)>,
+    configured: impl FnMut(i32, i32) -> Vec<(i32, usize)>,
 ) -> Vec<CardInfo> {
     normal_player_candidate_pool_with(fight, &mut can_use_ex_skill)
         .into_iter()
@@ -52,21 +52,21 @@ pub(crate) fn normal_player_candidate_pool_with(
 }
 
 pub(crate) fn device_draw_bag(game_data: &config::GameDB, fight: &Fight) -> Vec<CardInfo> {
-    device_draw_bag_from(fight, |model_id| {
-        crate::catalog::configured_device_card_weights(game_data, model_id)
+    device_draw_bag_from(fight, |model_id, ex_skill_level| {
+        crate::catalog::configured_device_card_weights(game_data, model_id, ex_skill_level)
     })
 }
 
 pub(super) fn device_draw_bag_from(
     fight: &Fight,
-    mut configured: impl FnMut(i32) -> Vec<(i32, usize)>,
+    mut configured: impl FnMut(i32, i32) -> Vec<(i32, usize)>,
 ) -> Vec<CardInfo> {
     fight
         .attacker
         .iter()
         .flat_map(|team| &team.entitys)
         .filter_map(|entity| {
-            let weights = configured(entity.model_id?);
+            let weights = configured(entity.model_id?, entity.ex_skill_level.unwrap_or_default());
             Some(weights.into_iter().flat_map(|(skill_id, count)| {
                 std::iter::repeat_n(card_for(entity, Some(skill_id)).unwrap(), count)
             }))

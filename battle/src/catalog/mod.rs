@@ -588,8 +588,12 @@ impl BattleCatalog {
         configured_teaching_cards(self.game_data, episode_id)
     }
 
-    pub(crate) fn device_card_weights(self, model_id: i32) -> Vec<(i32, usize)> {
-        configured_device_card_weights(self.game_data, model_id)
+    pub(crate) fn device_card_weights(
+        self,
+        model_id: i32,
+        ex_skill_level: i32,
+    ) -> Vec<(i32, usize)> {
+        configured_device_card_weights(self.game_data, model_id, ex_skill_level)
     }
 
     pub(crate) fn skill_effects_for_fight(
@@ -623,11 +627,12 @@ impl BattleCatalog {
     pub(crate) fn conduit_device(
         self,
         model_id: i32,
+        ex_skill_level: i32,
     ) -> Result<
         Option<Vec<Vec<crate::engine::manager::conduit::ConduitSkill>>>,
         crate::engine::manager::conduit::ConduitError,
     > {
-        configured_conduit_device(self.game_data, model_id)
+        configured_conduit_device(self.game_data, model_id, ex_skill_level)
     }
 
     pub(crate) fn boss_rush_target_models(
@@ -1102,11 +1107,12 @@ pub(crate) fn configured_teaching_cards(
 pub(crate) fn configured_device_card_weights(
     game_data: &config::GameDB,
     model_id: i32,
+    ex_skill_level: i32,
 ) -> Vec<(i32, usize)> {
-    let Some(character) = game_data.character.get(model_id) else {
+    let Some(device_id) = configured_device_id(game_data, model_id, ex_skill_level) else {
         return Vec::new();
     };
-    let Some(device) = game_data.fight_device.get(character.device_id) else {
+    let Some(device) = game_data.fight_device.get(device_id) else {
         return Vec::new();
     };
     [&device.power_skill, &device.special_power_skill]
@@ -1239,20 +1245,18 @@ pub(crate) fn configured_defender_reservation_count(
 pub(crate) fn configured_conduit_device(
     game_data: &config::GameDB,
     model_id: i32,
+    ex_skill_level: i32,
 ) -> Result<
     Option<Vec<Vec<crate::engine::manager::conduit::ConduitSkill>>>,
     crate::engine::manager::conduit::ConduitError,
 > {
     use crate::engine::manager::conduit::{ConduitError, ConduitSkill, ConduitSkillGroup};
 
-    let Some(character) = game_data.character.get(model_id) else {
+    let Some(device_id) = configured_device_id(game_data, model_id, ex_skill_level) else {
         return Ok(None);
     };
-    if character.device_id == 0 {
-        return Ok(None);
-    }
-    let Some(definition) = game_data.fight_device.get(character.device_id) else {
-        return Err(ConduitError::MissingDefinition(character.device_id));
+    let Some(definition) = game_data.fight_device.get(device_id) else {
+        return Err(ConduitError::MissingDefinition(device_id));
     };
     let parse_group = |group, value: &str| {
         value
@@ -1260,16 +1264,11 @@ pub(crate) fn configured_conduit_device(
             .map(|entry| {
                 let parts = entry.split('#').collect::<Vec<_>>();
                 if parts.len() != 3 {
-                    return Err(ConduitError::InvalidSkill {
-                        device_id: character.device_id,
-                        group,
-                    });
+                    return Err(ConduitError::InvalidSkill { device_id, group });
                 }
                 let parse = |part: &str| {
-                    part.parse().map_err(|_| ConduitError::InvalidSkill {
-                        device_id: character.device_id,
-                        group,
-                    })
+                    part.parse()
+                        .map_err(|_| ConduitError::InvalidSkill { device_id, group })
                 };
                 Ok(ConduitSkill {
                     skill_id: parse(parts[0])?,
@@ -1293,7 +1292,7 @@ pub(crate) fn configured_conduit_device(
                 }]
             })
             .map_err(|_| ConduitError::InvalidSkill {
-                device_id: character.device_id,
+                device_id,
                 group: ConduitSkillGroup::Unique,
             })
     };
@@ -1303,6 +1302,29 @@ pub(crate) fn configured_conduit_device(
         parse_group(ConduitSkillGroup::Secondary, &definition.skill2)?,
         parse_unique()?,
     ]))
+}
+
+fn configured_device_id(
+    game_data: &config::GameDB,
+    model_id: i32,
+    ex_skill_level: i32,
+) -> Option<i32> {
+    let base_device_id = game_data.character.get(model_id)?.device_id;
+    if base_device_id == 0 {
+        return None;
+    }
+
+    // Portrayal upgrades are cumulative, so use the highest unlocked device.
+    // 塑造升级按阶段累积生效，因此选择当前已解锁的最高阶装置。
+    game_data
+        .skill_ex_level
+        .iter()
+        .filter(|row| {
+            row.hero_id == model_id && row.skill_level <= ex_skill_level && row.device_id != 0
+        })
+        .max_by_key(|row| row.skill_level)
+        .map(|row| row.device_id)
+        .or(Some(base_device_id))
 }
 
 fn mapped_contract_buff(
