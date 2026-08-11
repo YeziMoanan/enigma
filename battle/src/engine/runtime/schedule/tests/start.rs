@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn nautika_opening_initializes_bloodtithe_before_entry_mutations() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                model_id: Some(3120),
+                team_type: Some(1),
+                current_hp: Some(40_000),
+                attr: Some(HeroAttribute {
+                    hp: Some(40_000),
+                    ..Default::default()
+                }),
+                passive_skill: vec![31200142],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let catalog = SkillEffectCatalog::from_game_db(config::configs::get());
+
+    run_start(
+        managers.catalog(),
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext {
+            current_round: 1,
+            ..Default::default()
+        },
+        CardSetup {
+            hand: Vec::new(),
+            draw_pile: Vec::new(),
+            deck_num: 0,
+        },
+        0,
+    )
+    .unwrap();
+
+    let gauge = managers
+        .gauge
+        .get(crate::engine::mechanic::bloodtithe::rule::key(1))
+        .expect("Nautika should enable the team Bloodtithe gauge");
+    assert!(gauge.current > 0);
+    assert!(gauge.max.is_some_and(|max| gauge.current <= max));
+}
+
+#[test]
 fn opening_cards_exist_before_card_setup_rules_run() {
     init_config();
     let fight = Fight {
