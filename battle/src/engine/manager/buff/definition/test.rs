@@ -106,11 +106,13 @@ fn initial_wire_state_comes_from_the_resolved_exact_feature() {
     assert_eq!(crystal[0].params, vec![2, 2, 0]);
     assert_eq!(crystal[0].team_type, 1);
 
-    let kill = BuffDefinition::get(31280111)
-        .unwrap()
-        .initial_wire_states(10, 21, 1, 1000);
-    assert_eq!(kill[0].act_id, 1028);
-    assert_eq!(kill[0].str_param.as_deref(), Some("200"));
+    let kill = BuffDefinition::get(31280111).unwrap();
+    for current_hp in [1_015_000, 1_431_503, 8_423_100] {
+        assert!(kill.initial_wire_states(10, 21, 1, current_hp).is_empty());
+        let act_info = kill.initial_planned_act_info(Some(1_892), &[]).unwrap();
+        assert_eq!(act_info[0].act_id, Some(1028));
+        assert_eq!(act_info[0].str_param.as_deref(), Some("75680"));
+    }
 
     let channel = BuffDefinition::get(31280115)
         .unwrap()
