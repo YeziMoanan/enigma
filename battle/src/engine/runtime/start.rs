@@ -119,15 +119,35 @@ impl BattleRuntime {
             &mut self.determinism,
             context,
         );
-        let (ai_deck, player_deck) = crate::engine::manager::card::start::configured_start_decks(
+        let (captured, captured_draws) = self
+            .determinism
+            .take_start_decks()
+            .map(|(ai, player, draws)| {
+                (
+                    Some(
+                        crate::engine::manager::card::start::CapturedDeckSeed::Opening {
+                            ai,
+                            player,
+                        },
+                    ),
+                    draws,
+                )
+            })
+            .unwrap_or_default();
+        let decks = crate::engine::manager::card::start::configured_start_decks(
             self.managers.catalog(),
             &self.fight,
             &self.managers.ex_point,
             &self.managers.eureka,
             extra_ai_actions,
             battle_id,
-            self.determinism.take_start_decks(),
+            captured,
         );
+        if decks.used_capture {
+            self.determinism.enqueue_card_draws(captured_draws);
+        }
+        let ai_deck = decks.ai;
+        let player_deck = decks.player;
         self.catalog_data
             .expect("battle runtime was not constructed with a catalog")
             .extend_skill_roots(

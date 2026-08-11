@@ -381,7 +381,7 @@ impl BattleRuntime {
                 .map_err(|error| format!("{error:?}"))?,
                 fight_version,
             )?);
-            let (next_ai, _) = crate::engine::manager::card::start::configured_start_decks(
+            let next_ai = crate::engine::manager::card::start::configured_start_decks(
                 self.managers.catalog(),
                 &self.fight,
                 &self.managers.ex_point,
@@ -395,7 +395,8 @@ impl BattleRuntime {
                 ),
                 self.fight.battle_id.unwrap_or_default(),
                 None,
-            );
+            )
+            .ai;
             battle_catalog.extend_skill_roots(
                 catalog,
                 next_ai.iter().filter_map(|card| card.skill_id),
@@ -491,9 +492,9 @@ impl BattleRuntime {
                 self.round_state.cur_round,
                 self.determinism
                     .take_next_ai_card_snapshot()
-                    .map(|cards| (cards, Vec::new())),
+                    .map(crate::engine::manager::card::start::CapturedDeckSeed::NextAi),
             )
-            .0;
+            .ai;
             battle_catalog.extend_skill_roots(
                 catalog,
                 cards.iter().filter_map(|card| card.skill_id),
