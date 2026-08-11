@@ -689,13 +689,17 @@ pub fn run_start(
             push_cue(&mut result.frames, RoundCue::EnterFightDeal);
             opening_deck_counts = Some((initial_deck_num, managers.card.deck_num()));
         }
-        let stage_result = if stage == SetupStage::RoundStartCondition {
-            drain::run_opening_round_start_conditions(
+        let stage_result = if matches!(
+            stage,
+            SetupStage::RoundStartCondition | SetupStage::RoundStartLate
+        ) {
+            drain::run_opening_setup_stage_for_owners(
                 managers,
                 pool,
                 catalog,
                 determinism,
                 context,
+                stage,
                 priority,
                 &owner_uids,
             )?
