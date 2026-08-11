@@ -587,7 +587,13 @@ impl BuffDefinition {
             && ((self.has_include_type(BuffIncludeType::Stacked)
                 && !self.is_no_show
                 && self.status == BuffStatus::Special)
-                || (self.uses_stack_layer() && self.is_no_show && self.stack_max_layer() == 3))
+                || (self.uses_stack_layer()
+                    && self.is_no_show
+                    && self.stack_max_layer() == 3
+                    && !self
+                        .features
+                        .iter()
+                        .any(|feature| feature.kind == Some(BuffActKind::Attr))))
     }
 
     pub(super) fn reserves_child_before_explicit_layer_apply(&self) -> bool {
