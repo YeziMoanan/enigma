@@ -263,6 +263,52 @@ fn captured_version7_conduit_sentinel_keeps_activation_sequence() {
 
 #[cfg(feature = "private-fixtures")]
 #[test]
+fn captured_116385711_does_not_emit_the_defender_late_setup_passive() {
+    fn contains_act(step: &FightStep, act_id: i32) -> bool {
+        step.act_id == Some(act_id)
+            || step
+                .act_effect
+                .iter()
+                .filter_map(|effect| effect.fight_step.as_ref())
+                .any(|nested| contains_act(nested, act_id))
+    }
+
+    let db = init_config().unwrap();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures/battles/battle72/BeginRoundReply_1.json");
+    let value = captured_start_reply(&path).unwrap();
+    let fight: Fight = serde_json::from_value(value["fight"].clone()).unwrap();
+    let captured: FightRound = serde_json::from_value(value["round"].clone()).unwrap();
+    let (ex_attributes, sp_attributes) = preview_attributes(&fight, &path).unwrap();
+    let opening_determinism = captured_opening_determinism(db, &fight, &captured);
+    let mut runtime = BattleRuntime::new_with_attributes(
+        battle::catalog::BattleCatalog::new(db),
+        fight,
+        ex_attributes,
+        sp_attributes,
+    );
+    runtime
+        .start_round_with_determinism(opening_determinism)
+        .unwrap();
+    let generated = battle::dungeon::start_reply(&runtime).round.unwrap();
+
+    assert_eq!(generated.fight_step.len(), captured.fight_step.len());
+    assert!(
+        !captured
+            .fight_step
+            .iter()
+            .any(|step| contains_act(step, 1163855066))
+    );
+    assert!(
+        !generated
+            .fight_step
+            .iter()
+            .any(|step| contains_act(step, 1163855066))
+    );
+}
+
+#[cfg(feature = "private-fixtures")]
+#[test]
 fn generated_round_uses_captured_rng_but_not_damage_amounts() {
     let db = init_config().unwrap();
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/battles/battle71");

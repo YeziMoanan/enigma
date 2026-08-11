@@ -1037,6 +1037,94 @@ fn opening_round_start_conditions_only_run_for_the_player_side() {
 }
 
 #[test]
+fn opening_round_start_late_uses_owner_eligibility_but_recurring_setup_stays_unfiltered() {
+    init_config();
+    fn fight() -> Fight {
+        let entity = |uid, team_type| FightEntityInfo {
+            uid: Some(uid),
+            team_type: Some(team_type),
+            current_hp: Some(100),
+            passive_skill: vec![40],
+            ..Default::default()
+        };
+        Fight {
+            version: Some(7),
+            attacker: Some(FightTeam {
+                entitys: vec![entity(10, 1)],
+                ..Default::default()
+            }),
+            defender: Some(FightTeam {
+                entitys: vec![entity(-1, 2)],
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+    fn catalog() -> SkillEffectCatalog {
+        let mut slot = SkillEffectSlot::new(
+            ParsedBehavior::from_spec(BehaviorSpec::new(20002, "AddExPoint"), vec![1], Vec::new()),
+            TargetRequest::self_only(),
+        );
+        slot.conditions = vec![ParsedCondition {
+            opcode: 2104,
+            type_name: "LifeMore".to_owned(),
+            kind: ParsedConditionKind::HpPermille {
+                compare: crate::engine::skill::condition::ConditionCompare::GreaterThan,
+                threshold: 500,
+            },
+            raw_args: vec!["500".to_owned()],
+        }];
+        slot.compiled_route = ConditionRoute::compile(&slot.conditions);
+        let mut catalog = SkillEffectCatalog::default();
+        catalog.insert(ParsedSkillEffect {
+            skill_id: 40,
+            slots: vec![slot],
+        });
+        catalog
+    }
+
+    let opening_fight = fight();
+    let opening_pool = TargetPool::from_fight(&opening_fight);
+    let mut opening_managers = BattleManagers::seeded(&opening_fight);
+    run_start(
+        opening_managers.catalog(),
+        &mut opening_managers,
+        &opening_pool,
+        &catalog(),
+        &mut RoundDeterminism::default(),
+        TargetContext {
+            current_round: 1,
+            ..Default::default()
+        },
+        CardSetup {
+            hand: Vec::new(),
+            draw_pile: Vec::new(),
+            deck_num: 0,
+        },
+        0,
+    )
+    .unwrap();
+    assert_eq!(opening_managers.ex_point.get(10), 1);
+    assert_eq!(opening_managers.ex_point.get(-1), 0);
+
+    let recurring_fight = fight();
+    let recurring_pool = TargetPool::from_fight(&recurring_fight);
+    let mut recurring_managers = BattleManagers::seeded(&recurring_fight);
+    crate::engine::runtime::drain::run_setup_stage(
+        &mut recurring_managers,
+        &recurring_pool,
+        &catalog(),
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        SetupStage::RoundStartLate,
+        0,
+    )
+    .unwrap();
+    assert_eq!(recurring_managers.ex_point.get(10), 1);
+    assert_eq!(recurring_managers.ex_point.get(-1), 1);
+}
+
+#[test]
 fn configured_round_after_runs_for_defenders_during_opening() {
     init_config();
     let fight = Fight {
