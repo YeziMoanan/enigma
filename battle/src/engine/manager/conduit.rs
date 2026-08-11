@@ -475,8 +475,10 @@ impl ConduitManager {
                 {
                     return Err(ConduitError::ActivationInProgress(skill_id));
                 }
+                // A SetRunning reaction may switch the selected group after scheduling.
+                // SetRunning 反应可能在排程后切组；已获准的技能仍按装置完整配置启动。
                 let (team, skill) = self
-                    .skill(source_uid, skill_id)
+                    .configured_skill(source_uid, skill_id)
                     .ok_or(ConduitError::MissingSkill(skill_id))?;
                 if skill.is_stopped {
                     return Err(ConduitError::StoppedSkill(skill_id));
@@ -567,8 +569,10 @@ impl ConduitManager {
                 source_uid,
                 skill_id,
             } => {
+                // Lifecycle completion belongs to the scheduled skill even if reactions
+                // changed the selected group. 即使反应切组，生命周期仍归已排程技能。
                 let (team, _) = self
-                    .skill(source_uid, skill_id)
+                    .configured_skill(source_uid, skill_id)
                     .ok_or(ConduitError::MissingSkill(skill_id))?;
                 let uses = self.uses_this_round.entry(source_uid).or_default();
                 *uses = uses.saturating_add(1);
@@ -972,6 +976,78 @@ mod tests {
                 group: 2,
             }
         );
+    }
+
+    #[test]
+    fn scheduled_device_skill_survives_a_reaction_group_change() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            attacker: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(10),
+                    model_id: Some(3149),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut manager = ConduitManager::seed(&fight);
+        manager
+            .execute(ConduitCommand::SelectGroup {
+                source_uid: 10,
+                group: 2,
+            })
+            .unwrap();
+        assert!(manager.can_begin_skill(10, 31490131, 0));
+
+        // Simulate a SetRunning subscriber changing groups after scheduling.
+        // 模拟技能获准后，SetRunning 订阅反应在实际启动前切换技能组。
+        manager
+            .execute(ConduitCommand::SetSkillGroup {
+                origin: ORIGIN,
+                source_uid: 10,
+                group: 1,
+            })
+            .unwrap();
+
+        let began = manager
+            .execute(ConduitCommand::BeginSkill {
+                source_uid: 10,
+                skill_id: 31490131,
+                cost_reduction: 0,
+            })
+            .unwrap();
+        assert!(matches!(
+            began,
+            ConduitChange::SkillBegan {
+                skill_id: 31490131,
+                power_id: 2,
+                spent: 0,
+                ..
+            }
+        ));
+        manager
+            .execute(ConduitCommand::CommitSkillCost {
+                source_uid: 10,
+                skill_id: 31490131,
+            })
+            .unwrap();
+        manager
+            .execute(ConduitCommand::FinishSkill {
+                source_uid: 10,
+                skill_id: 31490131,
+            })
+            .unwrap();
+        manager
+            .execute(ConduitCommand::CompleteActivation {
+                source_uid: 10,
+                skill_id: 31490131,
+            })
+            .unwrap();
+
+        assert_eq!(manager.selected_group(10), Some(1));
+        assert_eq!(manager.uses(10), 1);
     }
 
     #[test]
