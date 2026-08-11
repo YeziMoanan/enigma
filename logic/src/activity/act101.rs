@@ -260,8 +260,7 @@ mod tests {
 
     #[tokio::test]
     async fn bulk_claim_grants_each_day_once() {
-        let data_dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/excel2json");
+        let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/excel2json");
         let _ = config::init(data_dir.to_str().unwrap());
         let rows = &config::configs::get().activity101;
         let activity_id = rows.iter().next().unwrap().activity_id;

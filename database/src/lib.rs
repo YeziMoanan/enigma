@@ -1,6 +1,10 @@
-use sqlx::{Connection, Row, SqliteConnection, migrate, migrate::MigrateError};
+use sqlx::{
+    Connection, Row, SqliteConnection, migrate,
+    migrate::MigrateError,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, str::FromStr, time::Duration};
 
 use tracing::{info, warn};
 
@@ -14,7 +18,11 @@ pub use sqlx::{Error, SqlitePool, query, query_as};
 pub async fn connect_to(settings: &DatabaseSettings) -> sqlx::Result<SqlitePool> {
     ensure_database_exists(&settings.db_name)?;
 
-    SqlitePool::connect(&settings.to_string()).await
+    // Shared production SQLite handles brief cross-service write contention.
+    // 统一连接配置允许跨服务的短暂写入竞争完成，避免玩家状态请求直接报错重连。
+    let options = SqliteConnectOptions::from_str(&settings.to_string())?
+        .busy_timeout(Duration::from_secs(30));
+    SqlitePoolOptions::new().connect_with(options).await
 }
 
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), migrate::MigrateError> {
