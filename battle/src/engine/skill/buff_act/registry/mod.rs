@@ -79,6 +79,7 @@ pub enum BuffActKind {
     AttrOnlyCalDamageAttack,
     AttrOnlyCalDamageAttackBigSkill,
     AttrOnlyCalDamageBeAttacked,
+    AttrOnlyCalDamageBeAttackedBigSkill,
     AttrOnlyCalDamageBeAttackedType,
     AttrOnlyCalDamageInExtra,
     AttrOnlyCalDamageHpReplaceAttackCalSkillDamage,
@@ -617,6 +618,9 @@ buff_act_definitions! {
     (112, "AttrOnlyCalDamageBeAttacked") => AttrOnlyCalDamageBeAttacked,
         effect_time_subscription: false,
         supports: super::attr_only_cal_damage_attack::supports_be_attacked, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(112, "AttrOnlyCalDamageBeAttacked"), &[EffectType::None as i32]));
+    (109, "Attr") => AttrOnlyCalDamageBeAttackedBigSkill,
+        effect_time_subscription: false,
+        supports: super::attr_only_cal_damage_attack::supports_be_attacked_big_skill, state_consumer: true;
     (114, "AttrOnlyCalDamageBeAttackedType") => AttrOnlyCalDamageBeAttackedType,
         effect_time_subscription: false,
         supports: super::attr_only_cal_damage_attack::supports_be_attacked_type, state_consumer: true,

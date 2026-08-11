@@ -37,6 +37,14 @@ pub fn team_career_count_at_most(_: i32, _: &str, args: &[String]) -> Option<Par
     })
 }
 
+pub fn team_career_count_equal(_: i32, _: &str, args: &[String]) -> Option<ParsedConditionKind> {
+    Some(ParsedConditionKind::TeamCareerCount {
+        careers: parse_list(args.first()?)?,
+        compare: ConditionCompare::Equal,
+        threshold: args.get(1)?.parse().ok()?,
+    })
+}
+
 pub fn natural_ally_count(_: i32, _: &str, args: &[String]) -> Option<ParsedConditionKind> {
     Some(ParsedConditionKind::PerTargetCareerCount {
         careers: vec![1, 2, 3, 4],
@@ -113,6 +121,18 @@ mod tests {
                 careers: vec![3, 5, 6],
                 compare: ConditionCompare::LessThanOrEqual,
                 threshold: 2,
+            })
+        );
+        assert_eq!(
+            team_career_count_equal(
+                561100,
+                "CareerGroupHeroCountEqual",
+                &["3,5,6".into(), "1".into()],
+            ),
+            Some(ParsedConditionKind::TeamCareerCount {
+                careers: vec![3, 5, 6],
+                compare: ConditionCompare::Equal,
+                threshold: 1,
             })
         );
     }

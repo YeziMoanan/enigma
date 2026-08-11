@@ -507,6 +507,7 @@ pub fn be_attacked_consumption_rule_ops(
     managers: &BattleManagers,
     target_uid: i64,
     damage_types: &[crate::engine::skill::target::EntityDamageType],
+    is_big_skill: bool,
 ) -> Vec<(ActiveBuffFeature, RuleOp)> {
     managers
         .buff
@@ -514,10 +515,19 @@ pub fn be_attacked_consumption_rule_ops(
         .into_iter()
         .filter(|feature| feature.owner_uid == target_uid)
         .filter(|feature| {
-            attr_only_cal_damage_attack::applies_to_any_incoming_damage(feature, damage_types)
+            attr_only_cal_damage_attack::applies_to_any_incoming_damage(
+                feature,
+                damage_types,
+                is_big_skill,
+            ) && attr_only_cal_damage_attack::consumes_after_incoming_skill(
+                managers,
+                feature,
+                is_big_skill,
+            )
         })
         .filter_map(|feature| {
-            attr_only_cal_damage_attack::consume_rule_op(managers, &feature).map(|op| (feature, op))
+            attr_only_cal_damage_attack::incoming_consume_rule_op(managers, &feature, is_big_skill)
+                .map(|op| (feature, op))
         })
         .collect()
 }
@@ -884,6 +894,7 @@ pub fn incoming_target_attack_attribute_delta(
     managers: &BattleManagers,
     target_uid: i64,
     damage_type: crate::engine::skill::target::EntityDamageType,
+    is_big_skill: bool,
     attr_id: AttrId,
 ) -> i32 {
     managers
@@ -892,7 +903,12 @@ pub fn incoming_target_attack_attribute_delta(
         .into_iter()
         .filter(|feature| feature.owner_uid == target_uid)
         .map(|feature| {
-            attr_only_cal_damage_attack::incoming_attribute_delta(&feature, damage_type, attr_id)
+            attr_only_cal_damage_attack::incoming_attribute_delta(
+                &feature,
+                damage_type,
+                is_big_skill,
+                attr_id,
+            )
         })
         .sum()
 }
