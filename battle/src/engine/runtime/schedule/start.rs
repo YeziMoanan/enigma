@@ -515,6 +515,15 @@ pub fn run_start(
     card_setup: CardSetup,
     hand_size: usize,
 ) -> Result<(DrainResult, Vec<sonettobuf::CardInfo>), DrainError> {
+    let opening_ultimate_owner_uids = pool
+        .attacker_main
+        .iter()
+        .filter(|entity| managers.hp.current(entity.uid) > 0)
+        .filter(|entity| {
+            crate::engine::mechanic::card::CardMechanic.ultimate_ready(managers, entity)
+        })
+        .map(|entity| entity.uid)
+        .collect::<Vec<_>>();
     let mut result = DrainResult::default();
     let conduit_initializations = managers
         .conduit
@@ -895,7 +904,10 @@ pub fn run_start(
         determinism,
         context,
         crate::engine::mechanic::card::CardMechanic.normal_hand_limit(hand_size, managers, pool),
-        opening_draws,
+        super::OpeningRefillSeed {
+            draws: opening_draws,
+            ultimate_owner_uids: &opening_ultimate_owner_uids,
+        },
     )?;
     let (initial_deck_num, setup_deck_num) =
         opening_deck_counts.expect("start schedule has one CardSetup stage");
