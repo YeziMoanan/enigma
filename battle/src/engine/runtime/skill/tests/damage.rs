@@ -115,6 +115,89 @@ fn configured_damage_target_overrides_an_unmapped_logic_target() {
 }
 
 #[test]
+fn jiu_niangzi_follow_up_uses_its_configured_enemy_target() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(10_000),
+                attr: Some(HeroAttribute {
+                    hp: Some(10_000),
+                    attack: Some(1_000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(-1),
+                current_hp: Some(10_000),
+                attr: Some(HeroAttribute {
+                    hp: Some(10_000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let managers = BattleManagers::seeded(&fight);
+    let pool = TargetPool::from_fight(&fight);
+    let catalog = SkillEffectCatalog::from_roots(config::configs::get(), [30830172], []);
+    let mut invocation: SkillInvocation = SkillRequest {
+        source_uid: 10,
+        skill_id: 30830172,
+    }
+    .into();
+    invocation.extra_skill_kind =
+        Some(crate::engine::skill::condition::extra::ExtraSkillKind::FollowUp);
+    invocation.mode = SkillExecutionMode::Active;
+
+    let ops = emit_all_ops(
+        invocation,
+        &managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        &SkillOpTrigger::Active,
+    )
+    .unwrap();
+
+    assert!(
+        ops.iter().any(|op| matches!(
+            op,
+            RuleOp::Command(BattleCommand::Hp(HpCommand::Damage(damage)))
+                if damage.target_uid == -1
+        ) || matches!(
+            op,
+            RuleOp::Command(BattleCommand::HpBatch(commands))
+                if commands.iter().any(|command| matches!(
+                    command,
+                    HpCommand::Damage(damage) if damage.target_uid == -1
+                ))
+        )),
+        "{ops:#?}"
+    );
+    assert!(!ops.iter().any(|op| matches!(
+        op,
+        RuleOp::Command(BattleCommand::Hp(HpCommand::Damage(damage)))
+            if damage.target_uid == 10
+    ) || matches!(
+        op,
+        RuleOp::Command(BattleCommand::HpBatch(commands))
+            if commands.iter().any(|command| matches!(
+                command,
+                HpCommand::Damage(damage) if damage.target_uid == 10
+            ))
+    )));
+}
+
+#[test]
 fn purple_emanation_applies_configured_halo_before_destined_doom_damage() {
     crate::test_support::init_config();
     let fight = Fight {
@@ -210,10 +293,7 @@ fn purple_emanation_applies_configured_halo_before_destined_doom_damage() {
     assert_eq!(freeze, immediate_completed + 1);
     assert_eq!(
         halo,
-        vec![
-            (freeze + 1, -1, Some(2)),
-            (freeze + 2, -2, Some(2)),
-        ]
+        vec![(freeze + 1, -1, Some(2)), (freeze + 2, -2, Some(2)),]
     );
     assert!(!immediate.ops.iter().any(|emission| matches!(
         emission.op,

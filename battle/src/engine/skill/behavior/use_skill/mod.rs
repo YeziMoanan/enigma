@@ -231,8 +231,8 @@ impl BehaviorHandler for Handler {
                         skill_id,
                     }
                     .into();
-                invocation.target =
-                    crate::engine::skill::action::SkillTarget::Explicit(context.target_uid);
+                // The behavior target selects the trigger/consumption context; the generated
+                // skill still owns its target rule. 行为目标只用于触发与消耗，追击按子技能配置选目标。
                 invocation.extra_skill_kind = skill_kind_from_is_extra(
                     crate::engine::skill::effect::catalog::configured_extra_kind(skill_id),
                 );
