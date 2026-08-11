@@ -1255,6 +1255,24 @@ fn child_buff_allocation_is_owned_by_the_exact_condition_route() {
 }
 
 #[test]
+fn active_ally_reactions_inherit_the_causing_frame_target() {
+    let definition = find_key(502212, "ActiveUseSkill").unwrap();
+
+    assert_eq!(
+        definition.role,
+        ConditionRole::Trigger {
+            event: EventKind::AllyAction,
+            phase: None,
+        }
+    );
+    assert_eq!(
+        definition.reaction_frame_target,
+        ReactionFrameTarget::CausingFrame
+    );
+    assert_eq!(definition.consequence, ConsequencePolicy::NormalBuffGrant);
+}
+
+#[test]
 fn hurt_kind_opcodes_keep_exact_attacker_type_predicates() {
     assert_eq!(
         parse(20202, "HurtReal", &[]),
