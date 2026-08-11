@@ -89,7 +89,7 @@ pub fn run_before_ai_round_start(
         .map(|entity| entity.uid)
         .collect::<Vec<_>>();
     owner_uids.extend(pool.assist_boss(crate::engine::fight::rules::DEFENDER_SIDE_UID));
-    let (result, pending_settlement) = run_round_start_before_duration(
+    let (mut result, pending_settlement) = run_round_start_before_duration(
         managers,
         pool,
         catalog,
@@ -101,6 +101,19 @@ pub fn run_before_ai_round_start(
         wave_entry_condition_uids,
     )?;
     debug_assert!(pending_settlement.capacity_groups.is_empty());
+    append(
+        &mut result,
+        drain::run_setup_stage_for_owners(
+            managers,
+            pool,
+            catalog,
+            determinism,
+            context,
+            SetupStage::RoundStartLate,
+            0,
+            &owner_uids,
+        )?,
+    );
     Ok(result)
 }
 
