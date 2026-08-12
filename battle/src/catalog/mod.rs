@@ -1174,19 +1174,19 @@ pub(crate) fn summoned_unique_skills(game_data: &config::GameDB, summoned_id: i3
 pub(crate) fn configured_ex_point_max(
     game_data: &config::GameDB,
     explicit_max: Option<i32>,
-    hero_id: Option<i32>,
+    model_id: Option<i32>,
     level: i32,
 ) -> Option<i32> {
     if let Some(max) = explicit_max.filter(|max| *max > 0) {
         return Some(max);
     }
 
-    let hero_id = hero_id?;
-    let rank = crate::engine::entity::stats::configured_rank(game_data, hero_id, level);
+    let model_id = model_id?;
+    let rank = crate::engine::entity::stats::configured_rank(game_data, model_id, level);
     let spec = if rank > 2 {
         game_data
             .character_rank_replace
-            .get(hero_id)
+            .get(model_id)
             .map(|row| row.unique_skill_point.as_str())
     } else {
         None
@@ -1194,11 +1194,20 @@ pub(crate) fn configured_ex_point_max(
     .or_else(|| {
         game_data
             .character
-            .get(hero_id)
+            .get(model_id)
             .map(|row| row.unique_skill_point.as_str())
-    })?;
+    });
 
-    spec.split('#').nth(1)?.trim().parse().ok()
+    if let Some(spec) = spec {
+        return spec.split('#').nth(1)?.trim().parse().ok();
+    }
+
+    let monster = game_data.monster.get(model_id)?;
+    let max = game_data
+        .monster_skill_template
+        .get(monster.skill_template)?
+        .unique_skill_point;
+    (max > 0).then_some(max)
 }
 
 pub(crate) fn configured_monster_toughness(

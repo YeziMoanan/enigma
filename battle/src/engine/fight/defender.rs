@@ -253,7 +253,6 @@ impl Defender {
             guard: Some(-1),
             sub_cd: Some(0),
             ex_point_type: Some(0),
-            ex_point_max: Some(skill_template.unique_skill_point),
             destiny_stone: Some(0),
             destiny_rank: Some(0),
             custom_unit_id: Some(0),
@@ -344,12 +343,18 @@ mod tests {
     }
 
     #[test]
-    fn monster_uses_its_configured_moxie_maximum() {
+    fn monster_moxie_maximum_is_manager_owned_and_not_serialized() {
         crate::test_support::init_config();
 
-        let monster = Defender::build_monster_with_uid(109_360_002, -1, 1, 2).unwrap();
+        let mut monster = Defender::build_monster_with_uid(109_360_002, -1, 1, 2).unwrap();
 
-        assert_eq!(monster.ex_point_max, Some(2));
+        assert_eq!(monster.ex_point_max, None);
+
+        monster.ex_point = Some(2);
+        let mut manager = crate::engine::manager::ex_point::ExPointManager::default();
+        manager.register(&monster);
+
+        assert!(manager.is_full(-1));
     }
 
     #[test]
