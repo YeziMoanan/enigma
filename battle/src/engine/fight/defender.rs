@@ -259,7 +259,7 @@ impl Defender {
             weak_careers: monster_ids(&monster.career_weak),
             toughness_value,
             toughness_point,
-            is_broken: Some(false),
+            is_broken: toughness_value.map(|_| false),
             ..Default::default()
         })
     }
@@ -330,6 +330,21 @@ mod tests {
         let entity = Defender::build_monster_with_uid(1_163_857_113, -1, 1, 2).unwrap();
 
         assert!(entity.passive_skill.contains(&116_362_200));
+    }
+
+    #[test]
+    fn monster_break_state_exists_only_with_configured_toughness() {
+        crate::test_support::init_config();
+
+        let without_toughness = Defender::build_monster_with_uid(4_030_703, -1, 1, 2).unwrap();
+        assert_eq!(without_toughness.toughness_value, None);
+        assert_eq!(without_toughness.toughness_point, None);
+        assert_eq!(without_toughness.is_broken, None);
+
+        let with_toughness = Defender::build_monster_with_uid(1_163_857_113, -2, 1, 2).unwrap();
+        assert!(with_toughness.toughness_value.is_some());
+        assert!(with_toughness.toughness_point.is_some());
+        assert_eq!(with_toughness.is_broken, Some(false));
     }
 
     #[test]
