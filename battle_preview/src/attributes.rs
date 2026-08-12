@@ -45,7 +45,7 @@ pub fn preview_attributes(fight: &Fight, battle_path: &Path) -> anyhow::Result<P
                 missing.uid, missing.model_id,
             ),
             MissingAttackerMetadataReason::SupplementalEquipment => eprintln!(
-                "attribute preview incomplete supplemental equipment metadata uid={} hero={}; preserved roster attributes",
+                "attribute preview incomplete supplemental equipment metadata uid={} hero={}; preserved authoritative attributes",
                 missing.uid, missing.model_id,
             ),
         }
@@ -105,6 +105,14 @@ fn hydrate_preview_attributes(
             Some(HeroMetadata::Update(hero)) => {
                 let inputs = preview_stat_inputs(entity, hero);
                 let stats = Stats::build(&inputs);
+                let mut ex = stats.ex();
+                let mut sp = stats.sp();
+                let supplemental_rejected = add_supplemental_equipment_attributes(
+                    entity,
+                    hero,
+                    Some(&mut ex),
+                    Some(&mut sp),
+                );
                 if battle::engine::diagnostics::enabled(
                     battle::engine::diagnostics::TraceArea::Damage,
                 ) {
@@ -113,8 +121,15 @@ fn hydrate_preview_attributes(
                         entity.model_id.unwrap_or_default(),
                     );
                 }
-                ex_attributes.push((uid, stats.ex()));
-                sp_attributes.push((uid, stats.sp()));
+                ex_attributes.push((uid, ex));
+                sp_attributes.push((uid, sp));
+                if supplemental_rejected {
+                    missing.push(MissingAttackerMetadata {
+                        uid,
+                        model_id: entity.model_id.unwrap_or_default(),
+                        reason: MissingAttackerMetadataReason::SupplementalEquipment,
+                    });
+                }
             }
             None => missing.push(MissingAttackerMetadata {
                 uid,
@@ -134,20 +149,35 @@ struct RosterPreviewAttributes {
 }
 
 fn roster_attributes(entity: &FightEntityInfo, hero: &HeroInfo) -> RosterPreviewAttributes {
-    let (break_stats, supplemental_rejected) = match supplemental_equipment_stats(entity, hero) {
-        Ok(stats) => (stats, false),
-        Err(()) => (Stats::default(), true),
+    let mut ex = hero.ex_attr;
+    let mut sp = hero.sp_attr;
+    let supplemental_rejected =
+        add_supplemental_equipment_attributes(entity, hero, ex.as_mut(), sp.as_mut());
+    RosterPreviewAttributes {
+        ex,
+        sp,
+        supplemental_rejected,
+    }
+}
+
+fn add_supplemental_equipment_attributes(
+    entity: &FightEntityInfo,
+    hero: &HeroInfo,
+    ex: Option<&mut HeroExAttribute>,
+    sp: Option<&mut HeroSpAttribute>,
+) -> bool {
+    let Ok(break_stats) = supplemental_equipment_stats(entity, hero) else {
+        return true;
     };
-    let ex = hero.ex_attr.map(|mut attributes| {
+    if let Some(attributes) = ex {
         add_stat(&mut attributes.cri, break_stats.cri);
         add_stat(&mut attributes.recri, break_stats.recri);
         add_stat(&mut attributes.cri_dmg, break_stats.cri_dmg);
         add_stat(&mut attributes.cri_def, break_stats.cri_def);
         add_stat(&mut attributes.add_dmg, break_stats.add_dmg);
         add_stat(&mut attributes.drop_dmg, break_stats.drop_dmg);
-        attributes
-    });
-    let sp = hero.sp_attr.map(|mut attributes| {
+    }
+    if let Some(attributes) = sp {
         add_stat(&mut attributes.revive, break_stats.revive);
         add_stat(&mut attributes.heal, break_stats.heal);
         add_stat(&mut attributes.absorb, break_stats.absorb);
@@ -160,13 +190,8 @@ fn roster_attributes(entity: &FightEntityInfo, hero: &HeroInfo) -> RosterPreview
         add_stat(&mut attributes.rebound_dmg, break_stats.rebound_dmg);
         add_stat(&mut attributes.extra_dmg, break_stats.extra_dmg);
         add_stat(&mut attributes.reuse_dmg, break_stats.reuse_dmg);
-        attributes
-    });
-    RosterPreviewAttributes {
-        ex,
-        sp,
-        supplemental_rejected,
     }
+    false
 }
 
 fn supplemental_equipment_stats(entity: &FightEntityInfo, hero: &HeroInfo) -> Result<Stats, ()> {
@@ -705,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    fn sorted_hero_updates_override_roster_metadata() {
+    fn sorted_hero_updates_override_roster_and_receive_supplemental_attributes() {
         crate::init_test_config();
         let directory = test_directory("precedence");
         let uid = 42;
@@ -755,10 +780,16 @@ mod tests {
         let entity = &fight.attacker.as_ref().unwrap().entitys[0];
         let expected = Stats::build(&preview_stat_inputs(entity, &later_update));
         let earlier = Stats::build(&preview_stat_inputs(entity, &earlier_update));
+        let supplemental = supplemental_equipment_stats(entity, &later_update).unwrap();
+        let mut expected_ex = expected.ex();
+        let mut earlier_ex = earlier.ex();
+        assert_eq!(supplemental.cri_dmg, 240);
+        add_stat(&mut expected_ex.cri_dmg, supplemental.cri_dmg);
+        add_stat(&mut earlier_ex.cri_dmg, supplemental.cri_dmg);
 
-        assert_eq!(extended, vec![(uid, expected.ex())]);
+        assert_eq!(extended, vec![(uid, expected_ex)]);
         assert_eq!(special, vec![(uid, expected.sp())]);
-        assert_ne!(extended, vec![(uid, earlier.ex())]);
+        assert_ne!(extended, vec![(uid, earlier_ex)]);
         assert_ne!(extended, vec![(uid, hero(uid, 1485).ex_attr.unwrap())]);
         fs::remove_dir_all(directory).unwrap();
     }
