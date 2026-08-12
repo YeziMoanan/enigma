@@ -244,6 +244,7 @@ impl BattleRuntime {
         let needs_refill = crate::engine::mechanic::card::CardMechanic
             .refill_hand_len(&self.managers, &pool)
             < hand_size;
+        let phase_two_refill_deferred = needs_refill && !runs_enemy_phase;
         if needs_refill && runs_enemy_phase {
             self.round_state.before_cards2 = round_field_cards(self.managers.card.hand());
             fight_steps.extend(project_result(schedule::run_round_deal(2), fight_version)?);
@@ -475,6 +476,8 @@ impl BattleRuntime {
             (round_start, next_round, hand_snapshot, dealt_cards, true)
         };
         finish_if_battle_ended(&mut self.round_state, &self.fight, &pool, &self.managers);
+        let terminal_during_next_round_preparation =
+            next_round_prepared && self.round_state.is_finish;
         fight_steps.extend(project_result(round_start, fight_version)?);
         if !self.round_state.is_finish {
             let cards = crate::engine::manager::card::start::configured_start_decks(
@@ -516,13 +519,32 @@ impl BattleRuntime {
         let next_round_begin_step = project_result(next_round, fight_version)?;
 
         self.managers.sync_entities(&mut self.fight);
-        if uses_action_phase_power_clear && self.round_state.is_finish {
+        if uses_action_phase_power_clear
+            && self.round_state.is_finish
+            && !terminal_during_next_round_preparation
+        {
             self.round_state.cur_round = active_round;
         }
         self.round_state.hero_sp_attributes = self.managers.hero_sp_attributes(&self.fight);
         self.round_state.last_change_hero_uid = self.fight.last_change_hero_uid;
         self.fight.cur_round = Some(self.round_state.cur_round);
         self.fight.is_finish = Some(self.round_state.is_finish);
+        let (next_round_hand_snapshot, next_round_dealt_cards) =
+            if terminal_during_next_round_preparation {
+                let team_cards = self.managers.card.team_cards().to_vec();
+                if phase_two_refill_deferred {
+                    self.round_state.before_cards2 = next_round_hand_snapshot;
+                    self.round_state.team_a_cards2 = next_round_dealt_cards
+                        .strip_suffix(team_cards.as_slice())
+                        .ok_or_else(|| {
+                            "prepared team cards are not the dealt-card suffix".to_owned()
+                        })?
+                        .to_vec();
+                }
+                (self.managers.card.hand().to_vec(), team_cards)
+            } else {
+                (next_round_hand_snapshot, next_round_dealt_cards)
+            };
         let mut round = next_round_shell(
             &self.fight,
             &self.round_state,
