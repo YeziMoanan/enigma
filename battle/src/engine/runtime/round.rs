@@ -108,6 +108,8 @@ impl BattleRuntime {
             current_round: self.round_state.cur_round,
             ..Default::default()
         };
+        let defenders_depleted_before_player_actions =
+            crate::engine::round::outcome::defenders_defeated(&pool, &self.managers);
         let commands = commands_from_opers(&request.opers);
         let fight_version = self.fight.version.unwrap_or_default();
         let uses_action_phase_power_clear =
@@ -240,12 +242,13 @@ impl BattleRuntime {
         let ended_after_attacker_settlement = battle_ended(&self.fight, &pool, &self.managers);
         let current_wave_defeated =
             crate::engine::round::outcome::defenders_defeated(&pool, &self.managers);
-        let runs_enemy_phase = !ended_after_attacker_settlement && !current_wave_defeated;
+        let runs_phase_two = !ended_after_attacker_settlement
+            && (!current_wave_defeated || defenders_depleted_before_player_actions);
         let needs_refill = crate::engine::mechanic::card::CardMechanic
             .refill_hand_len(&self.managers, &pool)
             < hand_size;
-        let phase_two_refill_deferred = needs_refill && !runs_enemy_phase;
-        if needs_refill && runs_enemy_phase {
+        let phase_two_refill_deferred = needs_refill && !runs_phase_two;
+        if needs_refill && runs_phase_two {
             self.round_state.before_cards2 = round_field_cards(self.managers.card.hand());
             fight_steps.extend(project_result(schedule::run_round_deal(2), fight_version)?);
         }
@@ -269,7 +272,7 @@ impl BattleRuntime {
                 fight_version,
             )?);
         }
-        if needs_refill && runs_enemy_phase {
+        if needs_refill && runs_phase_two {
             let refill = schedule::run_round_refill(
                 &mut self.managers,
                 &pool,
@@ -284,8 +287,8 @@ impl BattleRuntime {
             fight_steps.extend(project_result(refill, fight_version)?);
             self.round_state.team_a_cards2 = round_field_cards(self.managers.card.refilled());
         }
-        if runs_enemy_phase {
-            if uses_action_phase_power_clear {
+        if runs_phase_two {
+            if uses_action_phase_power_clear && !current_wave_defeated {
                 fight_steps.extend(project_result(
                     schedule::run_action_phase_start(
                         &mut self.managers,
