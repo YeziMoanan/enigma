@@ -230,12 +230,25 @@ fn roster_attributes(entity: &FightEntityInfo, hero: &HeroInfo) -> RosterPreview
     let mut ex = hero.ex_attr;
     let mut sp = hero.sp_attr;
     let supplemental_rejected =
-        add_supplemental_equipment_attributes(entity, hero, ex.as_mut(), sp.as_mut());
+        add_roster_equipment_attributes(entity, hero, ex.as_mut(), sp.as_mut());
     RosterPreviewAttributes {
         ex,
         sp,
         supplemental_rejected,
     }
+}
+
+fn add_roster_equipment_attributes(
+    entity: &FightEntityInfo,
+    hero: &HeroInfo,
+    ex: Option<&mut HeroExAttribute>,
+    sp: Option<&mut HeroSpAttribute>,
+) -> bool {
+    let Ok(loadout_stats) = roster_equipment_stats(entity, hero) else {
+        return true;
+    };
+    add_equipment_attributes(loadout_stats, ex, sp);
+    false
 }
 
 fn balanced_roster_attributes(
@@ -264,6 +277,15 @@ fn add_supplemental_equipment_attributes(
     let Ok(break_stats) = supplemental_equipment_stats(entity, hero) else {
         return true;
     };
+    add_equipment_attributes(break_stats, ex, sp);
+    false
+}
+
+fn add_equipment_attributes(
+    break_stats: Stats,
+    ex: Option<&mut HeroExAttribute>,
+    sp: Option<&mut HeroSpAttribute>,
+) {
     if let Some(attributes) = ex {
         add_stat(&mut attributes.cri, break_stats.cri);
         add_stat(&mut attributes.recri, break_stats.recri);
@@ -286,13 +308,32 @@ fn add_supplemental_equipment_attributes(
         add_stat(&mut attributes.extra_dmg, break_stats.extra_dmg);
         add_stat(&mut attributes.reuse_dmg, break_stats.reuse_dmg);
     }
-    false
+}
+
+fn roster_equipment_stats(entity: &FightEntityInfo, hero: &HeroInfo) -> Result<Stats, ()> {
+    let equips = validated_equipment_loadout(entity, hero)?;
+    Ok(Stats::build_for_loadout(
+        &HeroBuildInput::default(),
+        &equips,
+    ))
 }
 
 fn supplemental_equipment_stats(entity: &FightEntityInfo, hero: &HeroInfo) -> Result<Stats, ()> {
+    let equips = validated_equipment_loadout(entity, hero)?;
+    let supplemental = equips.into_iter().skip(1).collect::<Vec<_>>();
+    Ok(Stats::build_for_loadout(
+        &HeroBuildInput::default(),
+        &supplemental,
+    ))
+}
+
+fn validated_equipment_loadout(
+    entity: &FightEntityInfo,
+    hero: &HeroInfo,
+) -> Result<Vec<EquipmentBuildInput>, ()> {
     if entity.equips.is_empty() {
         return match (hero.default_equip_uid, entity.equip_uid) {
-            (None | Some(0), None | Some(0)) => Ok(Stats::default()),
+            (None | Some(0), None | Some(0)) => Ok(Vec::new()),
             _ => Err(()),
         };
     }
@@ -322,6 +363,14 @@ fn supplemental_equipment_stats(entity: &FightEntityInfo, hero: &HeroInfo) -> Re
     game.equip_strengthen_cost(primary_equipment.rare, primary_level)
         .ok_or(())?;
 
+    let primary = EquipmentBuildInput {
+        uid: selected_equip_uid,
+        equip_id: primary_equip_id,
+        level: primary_level,
+        break_level: 0,
+        refine_level: primary.refine_lv.unwrap_or_default(),
+    };
+
     if entity.equips.len() > 2 {
         return Err(());
     }
@@ -348,12 +397,8 @@ fn supplemental_equipment_stats(entity: &FightEntityInfo, hero: &HeroInfo) -> Re
             })
         })
         .transpose()?
-        .into_iter()
-        .collect::<Vec<_>>();
-    Ok(Stats::build_for_loadout(
-        &HeroBuildInput::default(),
-        &equips,
-    ))
+        .into_iter();
+    Ok(std::iter::once(primary).chain(equips).collect())
 }
 
 fn add_stat(value: &mut Option<i32>, addition: i32) {
@@ -531,11 +576,19 @@ mod tests {
 
         let (extended, special) = preview_attributes(&fight, &battle_path).unwrap();
 
-        let mut expected = hero(uid, 1485).ex_attr.unwrap();
+        let entity = &fight.attacker.as_ref().unwrap().entitys[0];
+        let roster = hero(uid, 1485);
+        let loadout_stats = roster_equipment_stats(entity, &roster).unwrap();
+        let supplemental_stats = supplemental_equipment_stats(entity, &roster).unwrap();
+        assert_eq!(loadout_stats.cri, 160);
+        assert_eq!(loadout_stats.cri_dmg, 240);
+        assert_eq!(supplemental_stats.cri, 0);
+        assert_eq!(supplemental_stats.cri_dmg, 240);
+        let mut expected = roster.ex_attr.unwrap();
+        expected.cri = Some(545);
         expected.cri_dmg = Some(1725);
         assert_eq!(extended, vec![(uid, expected)]);
-        assert_eq!(special, vec![(uid, hero(uid, 1485).sp_attr.unwrap())]);
-        let entity = &fight.attacker.as_ref().unwrap().entitys[0];
+        assert_eq!(special, vec![(uid, roster.sp_attr.unwrap())]);
         assert_eq!(entity.equips.len(), 2);
         assert_eq!(entity.passive_skill, vec![437111, 437215]);
         fs::remove_dir_all(directory).unwrap();
@@ -791,11 +844,13 @@ mod tests {
         roster.hero_id = 3028;
 
         let attributes = roster_attributes(entity, &roster);
+        let mut expected = roster.ex_attr.unwrap();
+        expected.cri = Some(545);
 
         assert_eq!(config::configs::get().linked_psychube_id(3028, 1571), None);
         assert_eq!(
             (attributes.ex, attributes.sp),
-            (roster.ex_attr, roster.sp_attr)
+            (Some(expected), roster.sp_attr)
         );
         assert!(!attributes.supplemental_rejected);
     }
