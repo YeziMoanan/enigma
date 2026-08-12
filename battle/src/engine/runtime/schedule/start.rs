@@ -142,13 +142,16 @@ pub fn run_round_start_after_ai_split(
         .collect::<Vec<_>>();
     owner_uids.extend(pool.assist_boss(crate::engine::fight::rules::ATTACKER_SIDE_UID));
     let duration_snapshot = duration_snapshot(managers, &owner_uids);
+    let setup_layout =
+        crate::engine::fight::versions::round_start_setup_layout(managers.fight_version());
+    let emits_conduit_action_phase_reset = setup_layout
+        == Some(crate::engine::fight::versions::RoundStartSetupLayout::Version7)
+        && !managers.conduit.action_phase_start_commands(1).is_empty();
     let mut fight_steps = DrainResult::default();
     push_cue(
         &mut fight_steps.frames,
         RoundCue::ChangeRound {
-            round: if crate::engine::fight::versions::writes_change_round_number(
-                managers.fight_version(),
-            ) {
+            round: if emits_conduit_action_phase_reset {
                 context.current_round
             } else {
                 0
@@ -221,8 +224,6 @@ pub fn run_round_start_after_ai_split(
         ROUND_START_EVENT_SETUP,
         &owner_uids,
     )?;
-    let setup_layout =
-        crate::engine::fight::versions::round_start_setup_layout(managers.fight_version());
     if setup_layout == Some(crate::engine::fight::versions::RoundStartSetupLayout::Version7) {
         append_round_phase(
             &mut settlement,
