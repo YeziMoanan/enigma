@@ -131,14 +131,36 @@ fn hydrate_preview_attributes(
                     });
                 }
             }
-            None => missing.push(MissingAttackerMetadata {
-                uid,
-                model_id: entity.model_id.unwrap_or_default(),
-                reason: MissingAttackerMetadataReason::RosterAttributes,
-            }),
+            None => {
+                if let Some((ex, sp)) = configured_trial_attributes(entity) {
+                    ex_attributes.push((uid, ex));
+                    sp_attributes.push((uid, sp));
+                } else {
+                    missing.push(MissingAttackerMetadata {
+                        uid,
+                        model_id: entity.model_id.unwrap_or_default(),
+                        reason: MissingAttackerMetadataReason::RosterAttributes,
+                    });
+                }
+            }
         }
     }
     ((ex_attributes, sp_attributes), missing)
+}
+
+fn configured_trial_attributes(
+    entity: &FightEntityInfo,
+) -> Option<(HeroExAttribute, HeroSpAttribute)> {
+    let trial_id = entity.trial_id.filter(|trial_id| *trial_id > 0)?;
+    let uid = entity.uid?;
+    let (trial, stats) = battle::engine::entity::builder::EntityBuilder::trial(
+        trial_id,
+        uid,
+        entity.position.unwrap_or_default(),
+        entity.team_type.unwrap_or_default(),
+    )
+    .ok()?;
+    (trial.model_id == entity.model_id).then(|| (stats.ex(), stats.sp()))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -796,18 +818,46 @@ mod tests {
 
     #[test]
     fn missing_attacker_metadata_is_reported_without_failing() {
-        let uid = 42;
-        let (attributes, missing) = hydrate_preview_attributes(&fight(uid), &HashMap::new());
+        for trial_id in [None, Some(0)] {
+            let uid = 42;
+            let mut fight = fight(uid);
+            fight.attacker.as_mut().unwrap().entitys[0].trial_id = trial_id;
 
-        assert_eq!(attributes, (Vec::new(), Vec::new()));
+            let (attributes, missing) = hydrate_preview_attributes(&fight, &HashMap::new());
+
+            assert_eq!(attributes, (Vec::new(), Vec::new()));
+            assert_eq!(
+                missing,
+                vec![MissingAttackerMetadata {
+                    uid,
+                    model_id: 3149,
+                    reason: MissingAttackerMetadataReason::RosterAttributes,
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn configured_trial_metadata_reconstructs_attributes_without_roster_metadata() {
+        crate::init_test_config();
+        let uid = 42;
+        let trial_id = 116385001;
+        let mut fight = fight(uid);
+        let entity = &mut fight.attacker.as_mut().unwrap().entitys[0];
+        entity.trial_id = Some(trial_id);
+
+        let (_, expected_stats) =
+            battle::engine::entity::builder::EntityBuilder::trial(trial_id, uid, 0, 0).unwrap();
+        let (attributes, missing) = hydrate_preview_attributes(&fight, &HashMap::new());
+
         assert_eq!(
-            missing,
-            vec![MissingAttackerMetadata {
-                uid,
-                model_id: 3149,
-                reason: MissingAttackerMetadataReason::RosterAttributes,
-            }]
+            attributes,
+            (
+                vec![(uid, expected_stats.ex())],
+                vec![(uid, expected_stats.sp())]
+            )
         );
+        assert!(missing.is_empty());
     }
 
     #[test]
