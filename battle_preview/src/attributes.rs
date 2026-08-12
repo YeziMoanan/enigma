@@ -6,7 +6,7 @@ use std::{
 
 use battle::engine::entity::{
     input::{EquipmentBuildInput, HeroBuildInput},
-    stats::{StatInputs, Stats, rank_from_level},
+    stats::{BattleBalance, StatInputs, Stats, rank_from_level},
 };
 use sonettobuf::{
     Fight, FightEntityInfo, HeroExAttribute, HeroInfo, HeroInfoListReply, HeroSpAttribute,
@@ -37,7 +37,9 @@ struct MissingAttackerMetadata {
 
 pub fn preview_attributes(fight: &Fight, battle_path: &Path) -> anyhow::Result<PreviewAttributes> {
     let local = battle_hero_metadata(battle_path)?;
-    let (attributes, missing) = hydrate_preview_attributes(fight, &local);
+    let battle_balance = captured_battle_balance(fight, battle_path)?;
+    let (attributes, missing) =
+        hydrate_preview_attributes_with_balance(fight, &local, battle_balance);
     for missing in &missing {
         match &missing.reason {
             MissingAttackerMetadataReason::RosterAttributes => eprintln!(
@@ -53,9 +55,18 @@ pub fn preview_attributes(fight: &Fight, battle_path: &Path) -> anyhow::Result<P
     Ok(attributes)
 }
 
+#[cfg(test)]
 fn hydrate_preview_attributes(
     fight: &Fight,
     local: &HashMap<i64, HeroMetadata>,
+) -> (PreviewAttributes, Vec<MissingAttackerMetadata>) {
+    hydrate_preview_attributes_with_balance(fight, local, None)
+}
+
+fn hydrate_preview_attributes_with_balance(
+    fight: &Fight,
+    local: &HashMap<i64, HeroMetadata>,
+    battle_balance: Option<BattleBalance>,
 ) -> (PreviewAttributes, Vec<MissingAttackerMetadata>) {
     let mut ex_attributes = Vec::new();
     let mut sp_attributes = Vec::new();
@@ -74,7 +85,9 @@ fn hydrate_preview_attributes(
                     ex,
                     sp,
                     supplemental_rejected,
-                } = roster_attributes(entity, hero);
+                } = battle_balance
+                    .map(|balance| balanced_roster_attributes(entity, hero, balance))
+                    .unwrap_or_else(|| roster_attributes(entity, hero));
                 if let Some(attributes) = ex {
                     ex_attributes.push((uid, attributes));
                 }
@@ -97,8 +110,13 @@ fn hydrate_preview_attributes(
                     battle::engine::diagnostics::TraceArea::Damage,
                 ) {
                     eprintln!(
-                        "attribute preview uid={uid} hero={} source=hero-roster",
+                        "attribute preview uid={uid} hero={} source={}",
                         entity.model_id.unwrap_or_default(),
+                        if battle_balance.is_some() {
+                            "hero-roster-balanced"
+                        } else {
+                            "hero-roster"
+                        },
                     );
                 }
             }
@@ -148,6 +166,44 @@ fn hydrate_preview_attributes(
     ((ex_attributes, sp_attributes), missing)
 }
 
+fn captured_battle_balance(
+    fight: &Fight,
+    battle_path: &Path,
+) -> anyhow::Result<Option<BattleBalance>> {
+    let Some(parent) = battle_path.parent() else {
+        return Ok(None);
+    };
+    let request_path = parent.join("StartDungeonRequest.json");
+    if !request_path.exists() {
+        return Ok(None);
+    }
+    let request: serde_json::Value = serde_json::from_str(&fs::read_to_string(request_path)?)?;
+    let is_balance = request
+        .get("isBalance")
+        .or_else(|| request.get("is_balance"))
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| anyhow::anyhow!("invalid isBalance value"))
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if !is_balance {
+        return Ok(None);
+    }
+    let battle_id = fight
+        .battle_id
+        .filter(|battle_id| *battle_id > 0)
+        .ok_or_else(|| anyhow::anyhow!("balanced request missing battle id"))?;
+    let battle = config::configs::get()
+        .battle
+        .get(battle_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown battle {battle_id}"))?;
+    BattleBalance::parse(&battle.balance)
+        .map(Some)
+        .ok_or_else(|| anyhow::anyhow!("invalid balance config for battle {battle_id}"))
+}
+
 fn configured_trial_attributes(
     entity: &FightEntityInfo,
 ) -> Option<(HeroExAttribute, HeroSpAttribute)> {
@@ -178,6 +234,23 @@ fn roster_attributes(entity: &FightEntityInfo, hero: &HeroInfo) -> RosterPreview
     RosterPreviewAttributes {
         ex,
         sp,
+        supplemental_rejected,
+    }
+}
+
+fn balanced_roster_attributes(
+    entity: &FightEntityInfo,
+    hero: &HeroInfo,
+    balance: BattleBalance,
+) -> RosterPreviewAttributes {
+    let stats = Stats::build(&balance.apply(preview_stat_inputs(entity, hero)));
+    let mut ex = stats.ex();
+    let mut sp = stats.sp();
+    let supplemental_rejected =
+        add_supplemental_equipment_attributes(entity, hero, Some(&mut ex), Some(&mut sp));
+    RosterPreviewAttributes {
+        ex: Some(ex),
+        sp: Some(sp),
         supplemental_rejected,
     }
 }
@@ -468,6 +541,107 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    #[test]
+    fn balanced_roster_reconstructs_configured_extended_attributes() {
+        crate::init_test_config();
+        let directory = test_directory("balanced-roster");
+        let uid = 42;
+        let fight = Fight {
+            battle_id: Some(116385108),
+            attacker: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(uid),
+                    model_id: Some(3127),
+                    level: Some(140),
+                    equip_uid: Some(100),
+                    equips: vec![EquipRecord {
+                        equip_uid: Some(100),
+                        equip_id: Some(1502),
+                        equip_lv: Some(60),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let roster = HeroInfo {
+            uid,
+            user_id: 1,
+            hero_id: 3127,
+            level: Some(121),
+            rank: Some(4),
+            talent: Some(10),
+            talent_cube_infos: vec![
+                TalentCubeInfo {
+                    cube_id: Some(10),
+                    ..Default::default()
+                },
+                TalentCubeInfo {
+                    cube_id: Some(12),
+                    ..Default::default()
+                },
+            ],
+            default_equip_uid: Some(100),
+            ex_attr: Some(HeroExAttribute {
+                cri: Some(205),
+                ..Default::default()
+            }),
+            sp_attr: Some(HeroSpAttribute::default()),
+            ..Default::default()
+        };
+        fs::write(
+            directory.join("HeroInfoListReply_1.json"),
+            serde_json::to_vec(&HeroInfoListReply {
+                heros: vec![roster],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let request_path = directory.join("StartDungeonRequest.json");
+        fs::write(
+            &request_path,
+            serde_json::to_vec(&serde_json::json!({ "isBalance": true })).unwrap(),
+        )
+        .unwrap();
+        let battle_path = directory.join("BeginRoundReply_1.json");
+
+        let (extended, _) = preview_attributes(&fight, &battle_path).unwrap();
+
+        assert_eq!(
+            captured_battle_balance(&fight, &battle_path).unwrap(),
+            BattleBalance::parse("140#12#60"),
+        );
+        assert_eq!(extended[0].1.cri, Some(325));
+
+        fs::write(
+            &request_path,
+            serde_json::to_vec(&serde_json::json!({ "isBalance": false })).unwrap(),
+        )
+        .unwrap();
+        let (extended, _) = preview_attributes(&fight, &battle_path).unwrap();
+        assert_eq!(extended[0].1.cri, Some(205));
+
+        fs::write(
+            &request_path,
+            serde_json::to_vec(&serde_json::json!({ "isBalance": "true" })).unwrap(),
+        )
+        .unwrap();
+        assert!(preview_attributes(&fight, &battle_path).is_err());
+
+        fs::write(
+            request_path,
+            serde_json::to_vec(&serde_json::json!({ "isBalance": true })).unwrap(),
+        )
+        .unwrap();
+        let mut missing_battle = fight.clone();
+        missing_battle.battle_id = None;
+        assert!(preview_attributes(&missing_battle, &battle_path).is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     fn assert_roster_attributes_preserved(fight: &Fight, hero: &HeroInfo) {
         let entity = &fight.attacker.as_ref().unwrap().entitys[0];
         let attributes = roster_attributes(entity, hero);
@@ -752,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn sorted_hero_updates_override_roster_and_receive_supplemental_attributes() {
+    fn sorted_hero_updates_override_balanced_roster_and_receive_supplemental_attributes() {
         crate::init_test_config();
         let directory = test_directory("precedence");
         let uid = 42;
@@ -795,8 +969,14 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
+        fs::write(
+            directory.join("StartDungeonRequest.json"),
+            serde_json::to_vec(&serde_json::json!({ "isBalance": true })).unwrap(),
+        )
+        .unwrap();
 
-        let fight = fight(uid);
+        let mut fight = fight(uid);
+        fight.battle_id = Some(116385108);
         let battle_path = directory.join("BeginRoundReply_1.json");
         let (extended, special) = preview_attributes(&fight, &battle_path).unwrap();
         let entity = &fight.attacker.as_ref().unwrap().entitys[0];
@@ -838,17 +1018,25 @@ mod tests {
     }
 
     #[test]
-    fn configured_trial_metadata_reconstructs_attributes_without_roster_metadata() {
+    fn configured_trial_metadata_bypasses_active_battle_balance() {
         crate::init_test_config();
+        let directory = test_directory("balanced-trial");
         let uid = 42;
         let trial_id = 116385001;
         let mut fight = fight(uid);
+        fight.battle_id = Some(116385108);
         let entity = &mut fight.attacker.as_mut().unwrap().entitys[0];
         entity.trial_id = Some(trial_id);
+        fs::write(
+            directory.join("StartDungeonRequest.json"),
+            serde_json::to_vec(&serde_json::json!({ "isBalance": true })).unwrap(),
+        )
+        .unwrap();
+        let battle_path = directory.join("BeginRoundReply_1.json");
 
         let (_, expected_stats) =
             battle::engine::entity::builder::EntityBuilder::trial(trial_id, uid, 0, 0).unwrap();
-        let (attributes, missing) = hydrate_preview_attributes(&fight, &HashMap::new());
+        let attributes = preview_attributes(&fight, &battle_path).unwrap();
 
         assert_eq!(
             attributes,
@@ -857,7 +1045,7 @@ mod tests {
                 vec![(uid, expected_stats.sp())]
             )
         );
-        assert!(missing.is_empty());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
