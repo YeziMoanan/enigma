@@ -661,6 +661,8 @@ fn conduit_unique_skill_uses_all_energy_and_its_documented_thresholds() {
         vec![(AttrId::CriticalRate, 1000), (AttrId::Penetration, 700)]
     );
     assert_eq!(modifiers.excess_crit_conversion_rate, 1000);
+    assert_eq!(modifiers.attack_career, Some(1));
+    assert_eq!(modifiers.additional_attack_career, Some(2));
     assert!(matches!(
         ops.as_slice(),
         [

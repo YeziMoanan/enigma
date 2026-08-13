@@ -24,8 +24,8 @@ mod loss;
 mod origin;
 mod resolve;
 
-pub(crate) use affinity::restrains_target;
 use affinity::{critical_technique_bonus, regular_multiplier};
+pub(crate) use affinity::{restrains_target, restrains_target_either};
 pub(crate) use critical::{
     chance as crit_chance, damage_multiplier as crit_damage_multiplier,
     excess_rate as excess_crit_rate,
@@ -534,6 +534,7 @@ impl BehaviorHandler for Handler {
                         attack_attributes: &context.modifiers.attack_attributes,
                         career_ratio_bonus: context.modifiers.career_ratio_bonus,
                         attack_career: context.modifiers.attack_career,
+                        additional_attack_career: context.modifiers.additional_attack_career,
                         critical_multiplier_remainder: 0,
                         is_conduit: context
                             .managers
@@ -581,9 +582,10 @@ impl BehaviorHandler for Handler {
                                 hurt: HurtInfoData {
                                     from_uid: source_uid,
                                     is_crit,
-                                    career_restraint: restrains_target(
+                                    career_restraint: restrains_target_either(
                                         context.managers.catalog(),
                                         context.modifiers.attack_career.unwrap_or(source.career),
+                                        context.modifiers.additional_attack_career,
                                         target,
                                     ),
                                     reduce_hp: 0,

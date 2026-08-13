@@ -335,6 +335,7 @@ pub struct SkillModifiers {
     pub excess_crit_conversion_rate: i32,
     pub career_ratio_bonus: i32,
     pub attack_career: Option<i32>,
+    pub additional_attack_career: Option<i32>,
     pub additional_damage: Vec<AdditionalDamageModifier>,
     pub after_damage_buffs: Vec<AfterDamageBuffModifier>,
     pub consume_team_injury_count_round: Option<DefinitionKey>,
@@ -354,6 +355,9 @@ impl SkillModifiers {
         self.excess_crit_conversion_rate += other.excess_crit_conversion_rate;
         self.career_ratio_bonus += other.career_ratio_bonus;
         self.attack_career = self.attack_career.or(other.attack_career);
+        self.additional_attack_career = self
+            .additional_attack_career
+            .or(other.additional_attack_career);
         self.additional_damage.append(&mut other.additional_damage);
         self.after_damage_buffs
             .append(&mut other.after_damage_buffs);
