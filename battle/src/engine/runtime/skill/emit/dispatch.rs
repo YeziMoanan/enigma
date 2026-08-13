@@ -631,7 +631,7 @@ pub(in crate::engine::runtime) fn emit_ops(
                 unreachable!("a completed phase emits a skill lifecycle")
             };
             phase_completed.op = RuleOp::BeginSkillAction { lifecycle, cost };
-            outputs.insert(0, phase_completed);
+            outputs.push(phase_completed);
         } else {
             outputs.push(phase_completed);
         }
