@@ -785,7 +785,7 @@ impl HpManager {
                 value.origin,
                 value.source_uid,
                 value.target_uid,
-                value.amount > 0,
+                value.amount > 0 || (value.amount == 0 && value.hurt.is_some()),
             ),
             HpCommand::Kill(value) => (
                 value.origin,
