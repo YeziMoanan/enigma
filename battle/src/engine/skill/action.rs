@@ -210,55 +210,57 @@ mod invocation_tests {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillRateAmount {
     Fixed(i32),
-    GaugeRaw {
+    GaugeCurrent {
         key: crate::engine::manager::gauge::GaugeKey,
         limit: i32,
         factor: i32,
         count: i32,
-        divisor: i32,
     },
 }
 
 impl SkillRateAmount {
-    pub const fn gauge_raw(
+    pub const fn gauge_current(
         key: crate::engine::manager::gauge::GaugeKey,
         limit: i32,
         factor: i32,
         count: i32,
-        divisor: i32,
     ) -> Self {
-        Self::GaugeRaw {
+        Self::GaugeCurrent {
             key,
             limit,
             factor,
             count,
-            divisor,
         }
     }
 
     pub const fn fixed_value(self) -> Option<i32> {
         match self {
             Self::Fixed(value) => Some(value),
-            Self::GaugeRaw { .. } => None,
+            Self::GaugeCurrent { .. } => None,
         }
     }
 
     pub fn resolve(self, gauges: &crate::engine::manager::gauge::GaugeManager) -> i32 {
         match self {
             Self::Fixed(value) => value,
-            Self::GaugeRaw {
+            Self::GaugeCurrent {
                 key,
                 limit,
                 factor,
                 count,
-                divisor,
-            } if limit >= 0 && factor >= 0 && count >= 0 && divisor > 0 => {
-                let raw = i64::from(gauges.raw_value(key).unwrap_or_default().clamp(0, limit));
-                (raw * i64::from(factor) * i64::from(count) / i64::from(divisor))
+            } if limit >= 0 && factor >= 0 && count >= 0 => {
+                let current = i64::from(
+                    gauges
+                        .get(key)
+                        .map(|state| state.current)
+                        .unwrap_or_default()
+                        .clamp(0, limit),
+                );
+                (current * i64::from(factor) * i64::from(count))
                     .try_into()
                     .unwrap_or(i32::MAX)
             }
-            Self::GaugeRaw { .. } => 0,
+            Self::GaugeCurrent { .. } => 0,
         }
     }
 }
