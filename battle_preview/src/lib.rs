@@ -10,7 +10,7 @@ mod attributes;
 mod compression;
 mod normalize;
 
-pub use attributes::{hydrate_configured_trial_identity, preview_attributes};
+pub use attributes::preview_attributes;
 pub use compression::expand_compressed_fight_steps;
 pub use normalize::normalize_live_json;
 
