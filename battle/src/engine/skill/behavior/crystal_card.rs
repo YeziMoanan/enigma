@@ -51,7 +51,7 @@ impl BehaviorHandler for Handler {
             .iter()
             .filter_map(|group| group.get(crystal).copied())
             .collect();
-        let card = captured.unwrap_or_else(|| generated_card(context.source_uid, skill_id));
+        let card = generated_card(context.managers, context.source_uid, skill_id);
         let origin = super::command_origin(behavior)?;
         Some(vec![
             RuleOp::Command(BattleCommand::Buff(BuffCommand::ReserveChildUids(
@@ -107,8 +107,12 @@ fn weighted_index(weights: &[i32], roll: i32) -> usize {
     weights.len().saturating_sub(1)
 }
 
-fn generated_card(source_uid: i64, skill_id: i32) -> sonettobuf::CardInfo {
-    crate::engine::manager::card::precast_card(source_uid, skill_id)
+fn generated_card(
+    managers: &crate::engine::manager::BattleManagers,
+    source_uid: i64,
+    skill_id: i32,
+) -> sonettobuf::CardInfo {
+    crate::engine::manager::card::temp::runtime_precast_card(managers, source_uid, skill_id)
 }
 
 fn candidate_groups(behavior: &ParsedBehavior) -> Vec<Vec<i32>> {
@@ -146,7 +150,7 @@ mod tests {
 
     #[test]
     fn generated_crystal_is_an_owner_bound_precast_card() {
-        let card = generated_card(10, 101);
+        let card = generated_card(&crate::engine::manager::BattleManagers::default(), 10, 101);
 
         assert_eq!(card.uid, Some(10));
         assert_eq!(card.temp_card, Some(true));
@@ -162,7 +166,10 @@ mod tests {
         let pool = TargetPool::default();
         let mut determinism = RoundDeterminism::default();
         determinism.enqueue_crystal_cards([CardInfo {
+            uid: Some(999),
             skill_id: Some(102),
+            temp_card: Some(false),
+            card_type: Some(123),
             ..Default::default()
         }]);
         let mut modifiers = SkillModifiers::default();
@@ -212,6 +219,11 @@ mod tests {
             &ops[1],
             RuleOp::Command(BattleCommand::Card(CardCommand::AddCrystal(add)))
                 if add.rank_group == vec![101, 102, 103]
+                    && add.card.uid == Some(10)
+                    && add.card.skill_id == Some(102)
+                    && add.card.temp_card == Some(true)
+                    && add.card.card_type
+                        == Some(sonettobuf::card_info::CardType::Skill3 as i32)
         ));
     }
 }

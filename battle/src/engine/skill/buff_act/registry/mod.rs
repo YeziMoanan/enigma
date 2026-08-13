@@ -59,8 +59,10 @@ pub enum BuffActKind {
     AddPassiveSkillByLayer,
     AddSplitEmitterNum,
     AddSpTempCard,
+    AddToBuffEntity,
     AddToBuffEntity2,
     AddBuffAfterAttack,
+    AddToAttacker,
     AddToAttackTargets,
     AddToTarget,
     AttackNumSplitEmitterNum,
@@ -70,11 +72,14 @@ pub enum BuffActKind {
     AttrByHeroId,
     AttrByLostHp,
     AttrByShield,
+    AttrSkillMultiple,
+    AttrSkillSingle,
     AttrByHeatScale,
     AttrFromEntity,
     AttrOnlyCalDamageAttack,
     AttrOnlyCalDamageAttackBigSkill,
     AttrOnlyCalDamageBeAttacked,
+    AttrOnlyCalDamageBeAttackedType,
     AttrOnlyCalDamageInExtra,
     AttrOnlyCalDamageHpReplaceAttackCalSkillDamage,
     AttrOnlyCalDamageReplaceAttr,
@@ -87,6 +92,8 @@ pub enum BuffActKind {
     BuffAddAct,
     BuffAddActLimit,
     BuffReplace,
+    BuffRoundAdd,
+    BuffRoundAddByBuffTypeId,
     BloodPoolCountAddExPoint,
     BloodPoolTag,
     BloodValueUseSkill,
@@ -104,12 +111,17 @@ pub enum BuffActKind {
     CareerRatioFix,
     CareerRestraint,
     CastChannel,
+    ChangeRemoveBuffUseSkillParam,
+    ContractCastChannel,
+    NoneCastChannel,
     ConsumeBuffAddBuffContinueChannel,
     ConsumeBuffContinueChannel,
     ConsumeCurBuffAndAuraAddBuff,
     ControlTeamInjuryCountRound,
+    CountContinueChannel,
     ConduitCardSelection,
     CreateAdditionalDamage,
+    CreateHeroTempCards,
     CreateMaxHpAdditionalDamageAndRemove,
     CritRateAlter2,
     CritRateAlterByOtherBuff,
@@ -152,6 +164,7 @@ pub enum BuffActKind {
     ExPointCantAdd,
     ExSkillPointChange,
     ExPointMaxAdd,
+    SpExPointMaxAdd,
     ExPointOverflowBank,
     FixAttrBySubBuffLayer,
     FixAttrByTeammateInjuryCountNotReset,
@@ -212,7 +225,7 @@ pub enum BuffActKind {
     RealHurtFix,
     RealDamageKill,
     Rebound,
-    ReplaceEntitySkillGroup,
+    ReboundBasedOnDamage,
     Revive,
     Shield,
     ShieldByBuffLayer,
@@ -236,6 +249,7 @@ pub enum BuffActKind {
     TeammateInjuryCount,
     ToughnessOverflowRecord,
     ToughnessRecover,
+    TransferAddExPoint,
     TransferEnergyBuff,
     UseSkillTeamAddEmitterEnergy,
     UseSkillConsumeFromAddEmitterEnergy,
@@ -334,6 +348,7 @@ pub enum RuntimeEventMultiplicity {
 pub struct RuntimeMarker {
     pub position: RuntimeMarkerPosition,
     pub target: RuntimeMarkerTarget,
+    pub effect_type: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -352,6 +367,7 @@ pub struct BuffActRuntimeDefinition {
     pub execution_timing: RuntimeExecutionTiming,
     pub event_multiplicity: RuntimeEventMultiplicity,
     pub reserves_trigger_child_uid: bool,
+    pub owns_duration: bool,
     pub marker: Option<RuntimeMarker>,
     pub handler: Option<RuntimeHandler>,
     pub scoped_handler: Option<ScopedRuntimeHandler>,
@@ -459,8 +475,9 @@ macro_rules! buff_act_definitions {
             $(, timing: $timing:ident)?
             $(, multiplicity: $multiplicity:ident)?
             $(, trigger_child_uid: $trigger_child_uid:expr)?
+            $(, owns_duration: $owns_duration:expr)?
             $(, stat_read: $stat_read:ident)?
-            $(, runtime_marker: $marker_position:ident($marker_target:ident))?
+            $(, runtime_marker: $marker_position:ident($marker_target:ident $(, $marker_effect_type:expr)?))?
             $(, runtime: $runtime:expr)?
             $(, scoped_runtime: $scoped_runtime:expr)?
             $(, transaction: $transaction:expr)?
@@ -491,7 +508,8 @@ macro_rules! buff_act_definitions {
                     execution_timing: buff_act_definitions!(@timing $($timing)?),
                     event_multiplicity: buff_act_definitions!(@multiplicity $($multiplicity)?),
                     reserves_trigger_child_uid: buff_act_definitions!(@trigger_child_uid $($trigger_child_uid)?),
-                    marker: buff_act_definitions!(@runtime_marker $($marker_position($marker_target))?),
+                    owns_duration: buff_act_definitions!(@owns_duration $($owns_duration)?),
+                    marker: buff_act_definitions!(@runtime_marker $($marker_position($marker_target $(, $marker_effect_type)?))?),
                     handler: buff_act_definitions!(@runtime $($runtime)?),
                     scoped_handler: buff_act_definitions!(@scoped_runtime $($scoped_runtime)?),
                 },
@@ -543,15 +561,20 @@ macro_rules! buff_act_definitions {
     (@multiplicity) => { RuntimeEventMultiplicity::EveryEvent };
     (@trigger_child_uid $value:expr) => { $value };
     (@trigger_child_uid) => { false };
+    (@owns_duration $value:expr) => { $value };
+    (@owns_duration) => { false };
     (@stat_read $value:ident) => { StatReadTiming::$value };
     (@stat_read) => { StatReadTiming::None };
-    (@runtime_marker $position:ident($target:ident)) => {
+    (@runtime_marker $position:ident($target:ident $(, $effect_type:expr)?)) => {
         Some(RuntimeMarker {
             position: RuntimeMarkerPosition::$position,
             target: RuntimeMarkerTarget::$target,
+            effect_type: buff_act_definitions!(@marker_effect_type $($effect_type)?),
         })
     };
     (@runtime_marker) => { None };
+    (@marker_effect_type $effect_type:expr) => { Some($effect_type) };
+    (@marker_effect_type) => { None };
     (@runtime $handler:expr) => { Some($handler) };
     (@runtime) => { None };
     (@scoped_runtime $handler:expr) => { Some($handler) };
@@ -576,22 +599,26 @@ buff_act_definitions! {
         publication: BeforePublish, frame: CausingFrame,
         transaction: super::attr::transaction_rule_ops, wire: (super::wire::BuffActWireDefinition::add_refresh(DefinitionKey::new(100, "Attr"), &[EffectType::Attr as i32]).with_max_hp(2, 0));
     (853, "AttrByLostHp") => AttrByLostHp, effect_time_subscription: false,
-        supports: super::attr_by_lost_hp::supports, state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(853, "AttrByLostHp"), &[EffectType::Attr as i32]));
+        supports: super::attr_by_lost_hp::supports, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(853, "AttrByLostHp"), &[EffectType::None as i32]));
     (1056, "AttrByLostHp") => AttrByLostHp, effect_time_subscription: false,
-        supports: super::attr_by_lost_hp::supports, state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1056, "AttrByLostHp"), &[EffectType::Attr as i32]));
+        supports: super::attr_by_lost_hp::supports, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(1056, "AttrByLostHp"), &[EffectType::None as i32]));
     (201, "Cure") => Cure,
         runtime: |context| super::cure::rule_ops(context.managers, context.subscriber, context.event?),
         supports: |args| super::cure::supports(BuffActKind::Cure, args), wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(201, "Cure"), &[EffectType::Cure as i32]));
     (202, "Dot") => Dot, stat_read: ByArguments,
         runtime: |context| Some(super::damage_over_time::damage_rule_ops(context.managers, context.pool, context.determinism, context.subscriber)),
-        supports: super::damage_over_time::supports_dot, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(202, "Dot"), &[EffectType::Dot as i32]));
+        supports: super::damage_over_time::supports_dot, wire: (super::wire::BuffActWireDefinition::add_refresh(DefinitionKey::new(202, "Dot"), &[EffectType::Dot as i32]));
     (203, "Dot") => Dot, stat_read: ByArguments,
         runtime: |context| Some(super::damage_over_time::damage_rule_ops(context.managers, context.pool, context.determinism, context.subscriber)),
         supports: super::damage_over_time::supports_dot, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(203, "Dot"), &[EffectType::Dot as i32]));
+    (213, "Dot") => Dot, stat_read: ByArguments,
+        runtime: |context| Some(super::damage_over_time::layered_damage_rule_ops(context.managers, context.pool, context.determinism, context.subscriber)),
+        supports: super::damage_over_time::supports_dot, wire: (super::wire::BuffActWireDefinition::new(DefinitionKey::new(213, "Dot"), &[], &[EffectType::Dot as i32], &[]));
     (512, "Cure") => Cure,
         runtime: |context| super::revive::rule_ops(context.managers, context.subscriber, context.event?),
         supports: super::revive::supports, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(512, "Cure"), &[EffectType::Cure as i32]));
     (849, "AdvancedCure") => AdvancedCure, events: [EventKind::BeAttacked],
+        owns_duration: true,
         runtime_marker: BeforeChanges(Owner),
         runtime: |context| super::cure::rule_ops(context.managers, context.subscriber, context.event?),
         supports: |args| super::cure::supports(BuffActKind::AdvancedCure, args), wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(849, "AdvancedCure"), &[EffectType::None as i32]));
@@ -602,10 +629,24 @@ buff_act_definitions! {
         supports: |args| matches!(args, [_, _, consume, ..] if *consume != 0), state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1001, "AttrOnlyCalDamageAttackBigSkill"), &[EffectType::Attr as i32]));
     (112, "AttrOnlyCalDamageBeAttacked") => AttrOnlyCalDamageBeAttacked,
         effect_time_subscription: false,
-        supports: |args| matches!(args, [_, _, consume, ..] if *consume != 0), state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(112, "AttrOnlyCalDamageBeAttacked"), &[EffectType::None as i32]));
+        supports: super::attr_only_cal_damage_attack::supports_be_attacked, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(112, "AttrOnlyCalDamageBeAttacked"), &[EffectType::None as i32]));
+    (114, "AttrOnlyCalDamageBeAttackedType") => AttrOnlyCalDamageBeAttackedType,
+        effect_time_subscription: false,
+        supports: super::attr_only_cal_damage_attack::supports_be_attacked_type, state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(114, "AttrOnlyCalDamageBeAttackedType"), &[EffectType::None as i32]));
     (740, "AttrOnlyCalDamageInExtra") => AttrOnlyCalDamageInExtra,
         effect_time_subscription: false,
         supports: super::attr_only_cal_damage_attack::supports_extra_action, state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(740, "AttrOnlyCalDamageInExtra"), &[EffectType::None as i32]));
+    (106, "AttrSkillSingle") => AttrSkillSingle, effect_time_subscription: false,
+        supports: super::attr_by_skill_target_count::supports, state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(106, "AttrSkillSingle"), &[EffectType::None as i32]));
+    (107, "AttrSkillMultiple") => AttrSkillMultiple, effect_time_subscription: false,
+        supports: super::attr_by_skill_target_count::supports, state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(107, "AttrSkillMultiple"), &[EffectType::None as i32]));
+    (739, "CreateHeroTempCards") => CreateHeroTempCards,
+        scoped_runtime: |context| super::add_sp_temp_card::hero_skill_subscriber_rule_ops(context.pool, context.subscriber, context.event?),
+        supports: super::add_sp_temp_card::supports_hero_skill,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(739, "CreateHeroTempCards"), &[EffectType::None as i32]));
     (302, "BeatBack") => BeatBack,
         event: EventKind::SkillAction, phase: HitPassives, frame: CausingFrame, actor: OpposingTeam,
         runtime: |context| super::riposte::holder_rule_ops(context.pool, context.subscriber, context.event?),
@@ -616,6 +657,11 @@ buff_act_definitions! {
         runtime_marker: BeforeChanges(EventSource),
         runtime: |context| super::rebound::rule_ops(context.managers, context.subscriber, context.event?),
         supports: super::rebound::supports, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(303, "Rebound"), &[EffectType::Rebound as i32]));
+    (305, "AddToAttacker") => AddToAttacker,
+        runtime_marker: BeforeChanges(EventSource),
+        scoped_runtime: |context| super::add_to_target::scoped_rule_ops(context.managers, context.subscriber, context.event?, context.catalog, context.pool),
+        supports: |args| matches!(args, [buff_id] if *buff_id > 0),
+        wire: (super::wire::BuffActWireDefinition::new(DefinitionKey::new(305, "AddToAttacker"), &[], &[EffectType::Addtoattacker as i32], &[]));
     (401, "Dizzy") => Dizzy, effect_time_subscription: false,
         supports: |args| args.is_empty(), state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(401, "Dizzy"), &[EffectType::Dizzy as i32]));
     (402, "Petrified") => Petrified, event: EventKind::TargetAttacked, frame: CausingFrame,
@@ -633,28 +679,28 @@ buff_act_definitions! {
         publications: [
             EventKind::SkillCast => BeforePublish
         ],
-        scoped_runtime: |context| super::add_to_target::scoped_rule_ops(context.subscriber, context.event?, context.catalog, context.pool),
+        scoped_runtime: |context| super::add_to_target::scoped_rule_ops(context.managers, context.subscriber, context.event?, context.catalog, context.pool),
         supports: |_| true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(503, "AddToTarget"), &[EffectType::Addtotarget as i32]));
     (505, "DodgeSpecSkill") => DodgeSpecSkill, effect_time_subscription: false,
         events: [EventKind::AllyAction],
-        runtime: |context| super::dodge_spec_skill::expire_after_owner_action(context.subscriber, context.event?),
+        runtime: |context| super::dodge_spec_skill::expire_after_owner_action(context.managers, context.subscriber, context.event?),
         supports: super::dodge_spec_skill::supports_skill_slots, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(505, "DodgeSpecSkill"), &[EffectType::Dodgespecskill as i32]));
     (507, "DodgeSpecSkill2") => DodgeDamageType, effect_time_subscription: false,
         events: [EventKind::AllyAction],
-        runtime: |context| super::dodge_spec_skill::expire_after_owner_action(context.subscriber, context.event?),
+        runtime: |context| super::dodge_spec_skill::expire_after_owner_action(context.managers, context.subscriber, context.event?),
         supports: super::dodge_spec_skill::supports_damage_types, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(507, "DodgeSpecSkill2"), &[EffectType::Dodgespecskill2 as i32]));
     (510, "DamageNotMoreThan") => DamageNotMoreThan, effect_time_subscription: false,
         events: [EventKind::TargetAttacked],
-        runtime: |context| super::damage_not_more_than::consume_after_hit(context.subscriber, context.event?),
+        runtime: |context| super::damage_not_more_than::consume_after_hit(context.managers, context.subscriber, context.event?),
         supports: super::damage_not_more_than::supports, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(510, "DamageNotMoreThan"), &[EffectType::Damagenotmorethan as i32]));
     (509, "ImmunityExpointChange") => MoxieReductionImmunity,
         effect_time_subscription: false, supports: |args| args.is_empty(), state_consumer: true,
         wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(509, "ImmunityExpointChange"), &[EffectType::None as i32]));
     (518, "AddToTarget") => AddToTarget,
-        scoped_runtime: |context| super::add_to_target::scoped_rule_ops(context.subscriber, context.event?, context.catalog, context.pool),
+        scoped_runtime: |context| super::add_to_target::scoped_rule_ops(context.managers, context.subscriber, context.event?, context.catalog, context.pool),
         supports: |_| true;
     (519, "RealHurtFix") => RealHurtFix, effect_time_subscription: false,
-        supports: |args| matches!(args, [value] if *value != 0), state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(519, "RealHurtFix"), &[EffectType::Realhurtfix as i32]));
+        supports: |args| matches!(args, [value] if *value != 0), state_consumer: true, wire: (super::wire::BuffActWireDefinition::add_refresh(DefinitionKey::new(519, "RealHurtFix"), &[EffectType::Realhurtfix as i32]));
     (520, "RealHarmFix") => RealHarmFix, effect_time_subscription: false,
         supports: |args| matches!(args, [value] if *value != 0), state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(520, "RealHarmFix"), &[EffectType::Realharmfix as i32]));
     (522, "RealHarmSkillEffectFix") => RealHarmSkillEffectFix, effect_time_subscription: false, state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(522, "RealHarmSkillEffectFix"), &[EffectType::Realharmskilleffectfix as i32]));
@@ -664,10 +710,29 @@ buff_act_definitions! {
         transactions: [EventKind::BuffAdded, EventKind::BuffChanged, EventKind::BuffRemoved],
         frame: CausingFrame,
         transaction: super::ex_point_max_transaction_rule_ops, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(703, "ExPointMaxAdd"), &[]));
+    (832, "SpExPointMaxAdd") => SpExPointMaxAdd,
+        transactions: [EventKind::BuffAdded, EventKind::BuffChanged, EventKind::BuffRemoved],
+        frame: CausingFrame,
+        transaction: super::sp_ex_point_max_transaction_rule_ops,
+        supports: |args| match args {
+            [max_add] => *max_add > 0,
+            [max_add, ultimate_cost_offset] => *max_add > 0 && *ultimate_cost_offset >= 0,
+            _ => false,
+        },
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(832, "SpExPointMaxAdd"), &[]));
+    (833, "TransferAddExPoint") => TransferAddExPoint, effect_time_subscription: false,
+        supports: |args| args.is_empty(), state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(833, "TransferAddExPoint"), &[]));
     (607, "ExPointCardMove") => ExPointCardMove,
         effect_time_subscription: false, supports: |_| true, state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(607, "ExPointCardMove"), &[EffectType::Expointcardmove as i32]));
     (603, "ExPointCantAdd") => ExPointCantAdd,
         effect_time_subscription: false, supports: |_| true, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(603, "ExPointCantAdd"), &[EffectType::Expointcantadd as i32]));
+    (604, "BuffRoundAdd") => BuffRoundAdd, effect_time_subscription: false,
+        supports: super::buff_round_add::supports, state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(604, "BuffRoundAdd"), &[]));
+    (608, "BuffRoundAddByBuffTypeId") => BuffRoundAddByBuffTypeId, effect_time_subscription: false,
+        supports: super::buff_round_add::supports_type_id, state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(608, "BuffRoundAddByBuffTypeId"), &[]));
     (605, "ExPointDel") => ExPointDel,
         runtime: |context| super::ex_point_del::rule_ops(context.subscriber),
         supports: super::ex_point_del::supports, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(605, "ExPointDel"), &[]));
@@ -696,10 +761,16 @@ buff_act_definitions! {
     (721, "DotNoLimit") => DotNoLimit, runtime_marker: BeforeChanges(Owner),
         scoped_runtime: |context| super::dot_no_limit::rule_ops(context.managers, context.subscriber, context.event?),
         supports: |_| true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(721, "DotNoLimit"), &[EffectType::Dot as i32]));
+    (743, "ReboundBasedOnDamage") => ReboundBasedOnDamage, source: Owner,
+        multiplicity: OncePerActionTarget,
+        runtime_marker: BeforeChanges(EventSource, EffectType::Rebound as i32),
+        runtime: |context| super::rebound::damage_based_rule_ops(context.managers, context.subscriber, context.event?),
+        supports: super::rebound::supports_damage_based,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(743, "ReboundBasedOnDamage"), &[]));
     (795, "None") => TargetingTag,
         effect_time_subscription: false, supports: |_| true, state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(795, "None"), &[EffectType::None as i32]));
     (725, "AddToTarget") => AddToTarget,
-        runtime: |context| super::add_to_target::rule_ops(context.subscriber, context.event?, context.catalog, context.pool),
+        runtime: |context| super::add_to_target::rule_ops(context.managers, context.subscriber, context.event?, context.catalog, context.pool),
         supports: |_| true;
     (731, "CastChannel") => CastChannel,
         event: EventKind::RoundStart,
@@ -708,6 +779,11 @@ buff_act_definitions! {
     (726, "Burn") => Burn, stat_read: OnTrigger,
         runtime: |context| Some(super::damage_over_time::damage_rule_ops(context.managers, context.pool, context.determinism, context.subscriber)),
         supports: |_| true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(726, "Burn"), &[EffectType::Burn as i32]));
+    (728, "ChangeRemoveBuffUseSkillParam") => ChangeRemoveBuffUseSkillParam,
+        effect_time_subscription: false,
+        supports: super::change_remove_buff_use_skill_param::supports,
+        state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(728, "ChangeRemoveBuffUseSkillParam"), &[]));
     (748, "UseDamageSkillAddToTarget") => UseDamageSkillAddToTarget,
         events: [EventKind::SkillCast],
         publications: [
@@ -777,6 +853,10 @@ buff_act_definitions! {
         wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(764, "CareerRestraint"), &[EffectType::Careerrestraint as i32]));
     (765, "CareerRatioFix") => CareerRatioFix, effect_time_subscription: false,
         supports: super::career_ratio_fix::supports, state_consumer: true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(765, "CareerRatioFix"), &[EffectType::None as i32]));
+    (745, "AddToBuffEntity") => AddToBuffEntity,
+        runtime: |context| super::add_to_buff_entity::rule_ops(context.subscriber, context.event?),
+        supports: super::add_to_buff_entity::supports,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(745, "AddToBuffEntity"), &[]));
     (766, "AddToBuffEntity2") => AddToBuffEntity2,
         runtime: |context| super::add_to_buff_entity_2::rule_ops(context.subscriber, context.event?),
         supports: super::add_to_buff_entity_2::supports;
@@ -822,8 +902,9 @@ buff_act_definitions! {
         effect_time_subscription: false, transactions: [EventKind::HpLost],
         transaction: super::toughness::transaction_rule_ops,
         supports: |args| args.is_empty(),
-        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1111, "ToughnessOverflowRecord"), &[]));
+        wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(1111, "ToughnessOverflowRecord"), &[EffectType::None as i32]));
     (806, "ExPointOverflowBank") => ExPointOverflowBank,
+        events: [EventKind::ExPointChanged],
         scoped_runtime: |context| super::ex_point_overflow_bank::rule_ops(context.managers, context.subscriber, context.event?),
         supports: |_| true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(806, "ExPointOverflowBank"), &[EffectType::Expointoverflowbank as i32]));
     (1149, "DeviceExPointOverflowBank") => ExPointOverflowBank,
@@ -884,6 +965,22 @@ buff_act_definitions! {
         transactions: [EventKind::BuffAdded, EventKind::BuffChanged, EventKind::BuffRemoved],
         publication: BeforePublish, frame: CausingFrame,
         transaction: super::each_change_attr::transaction_rule_ops, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(834, "EachChangeAttr"), &[EffectType::None as i32]));
+    (836, "ContractCastChannel") => ContractCastChannel,
+        transactions: [EventKind::BuffAdded],
+        publication: BeforePublish, frame: CausingFrame,
+        runtime: |context| super::contract_cast_channel::rule_ops(context.managers, context.catalog, context.subscriber, context.event?),
+        transaction: super::contract_cast_channel::grant_transaction_rule_ops,
+        supports: super::contract_cast_channel::supports,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(836, "ContractCastChannel"), &[]));
+    (837, "NoneCastChannel") => NoneCastChannel, effect_time_subscription: false,
+        supports: |args| args.is_empty(), state_consumer: true,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(837, "NoneCastChannel"), &[]));
+    (838, "CountContinueChannel") => CountContinueChannel,
+        event: EventKind::BuffStateChanged,
+        runtime: |context| super::count_continue_channel::rule_ops(context.subscriber, context.event?),
+        supports: super::count_continue_channel::supports,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(838, "CountContinueChannel"), &[])
+            .with_initial_private_state(super::wire::InitialPrivateStateRule::FourthArgument));
     (861, "FixTempAttrByBuffLayer") => FixTempAttrByBuffLayer, stat_read: OnTrigger,
         supports: super::fix_temp_attr_by_buff_layer::supports, state_consumer: true,
         wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(861, "FixTempAttrByBuffLayer"), &[EffectType::None as i32]));
@@ -996,7 +1093,7 @@ buff_act_definitions! {
         wire: (super::wire::BuffActWireDefinition::add_refresh(DefinitionKey::new(933, "SubBuff"), &[EffectType::None as i32]));
     (928, "AddToTarget") => AddToAttackTargets,
         event: EventKind::SkillAction, phase: AfterDamage,
-        runtime: |context| super::add_to_target::rule_ops(context.subscriber, context.event?, context.catalog, context.pool),
+        runtime: |context| super::add_to_target::rule_ops(context.managers, context.subscriber, context.event?, context.catalog, context.pool),
         supports: |_| true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(928, "AddToTarget"), &[EffectType::Addtotarget as i32]));
     (929, "AddCardRecordByRound") => AddCardRecordByRound,
         event: EventKind::ActionQueueCommitted, publication: BeforePublish,
@@ -1070,7 +1167,7 @@ buff_act_definitions! {
         supports: |_| true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1027, "AddBuffByChargingTimes"), &[EffectType::None as i32]));
     (1028, "RealDamageKill") => RealDamageKill, event: super::real_damage_kill::EVENT,
         runtime: |context| super::real_damage_kill::rule_ops(context.managers, context.pool, context.subscriber),
-        supports: super::real_damage_kill::supports, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1028, "RealDamageKill"), &[]).with_initial_state(super::wire::InitialStateRule::CurrentHpPermille));
+        supports: super::real_damage_kill::supports, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1028, "RealDamageKill"), &[]).with_initial_state(super::wire::InitialStateRule::SourceAttackThreshold));
     (1029, "AddAttrByOtherBuffLayer") => AddAttrByOtherBuffLayer,
         effect_time_subscription: false,
         supports: super::add_attr_by_other_buff_layer::supports, state_consumer: true,
@@ -1088,10 +1185,15 @@ buff_act_definitions! {
         runtime: |context| Some(super::special_count_continue_channel::rule_ops(context.managers, context.subscriber)),
         supports: |_| true, wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(1003, "SpecialCountContinueChannelBuff"), &[EffectType::None as i32]));
     (1002, "SpecialCountCastChannel") => SpecialCountCastChannel,
-        runtime: |context| super::special_count_cast_channel::rule_ops(context.subscriber, context.event?, context.catalog),
-        supports: |args| matches!(args, [skill_id, ..] if *skill_id > 0);
+        scoped_runtime: |context| super::special_count_cast_channel::scoped_rule_ops(context.subscriber, context.event?, context.catalog),
+        supports: |args| matches!(args, [skill_id, ..] if *skill_id > 0),
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1002, "SpecialCountCastChannel"), &[]));
     (1004, "AddAttrBySpecialCount") => AddAttrBySpecialCount;
-    (1031, "ConsumeBuffAddBuffContinueChannel") => ConsumeBuffAddBuffContinueChannel;
+    (1031, "ConsumeBuffAddBuffContinueChannel") => ConsumeBuffAddBuffContinueChannel,
+        runtime: |context| super::consume_buff_add_buff_continue_channel::rule_ops(context.managers, context.subscriber, context.event?),
+        supports: super::consume_buff_add_buff_continue_channel::supports,
+        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1031, "ConsumeBuffAddBuffContinueChannel"), &[])
+            .with_embedded_initial_state(super::wire::InitialStateRule::StringCounter));
     (1032, "FixElectricUpgrade") => FixElectricUpgrade,
         effect_time_subscription: false,
         supports: super::fix_electric_upgrade::supports, state_consumer: true,
@@ -1205,7 +1307,7 @@ buff_act_definitions! {
     (1102, "ToughnessRecover") => ToughnessRecover,
         runtime: |context| super::toughness::recover_rule_ops(context.subscriber),
         supports: |args| matches!(args, [config_effect] if *config_effect >= 0),
-        wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1102, "ToughnessRecover"), &[EffectType::Toughnessrecover as i32]));
+        wire: (super::wire::BuffActWireDefinition::add(DefinitionKey::new(1102, "ToughnessRecover"), &[EffectType::None as i32]));
     (1127, "TeamExElectricTransConsumeValueAttr") => TeamExElectricTransConsumeValueAttr,
         effect_time_subscription: false, stat_read: OnGrant,
         supports: super::electric_transform::supports_team_attribute, state_consumer: true, wire: (super::wire::BuffActWireDefinition::all(DefinitionKey::new(1127, "TeamExElectricTransConsumeValueAttr"), &[]).with_initial_state(super::wire::InitialStateRule::GrantValue));
@@ -1285,6 +1387,10 @@ pub fn kind(opcode: i32, type_name: &str) -> Option<BuffActKind> {
 pub fn reserves_trigger_child_uid(key: DefinitionKey) -> bool {
     find(key.opcode, key.type_name)
         .is_some_and(|definition| definition.runtime.reserves_trigger_child_uid)
+}
+
+pub fn owns_duration(opcode: i32, type_name: &str) -> bool {
+    find(opcode, type_name).is_some_and(|definition| definition.runtime.owns_duration)
 }
 
 pub fn runtime_marker(key: DefinitionKey) -> Option<RuntimeMarker> {

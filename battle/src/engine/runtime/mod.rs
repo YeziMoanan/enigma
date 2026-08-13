@@ -5,10 +5,14 @@ use sonettobuf::{
     RedealCardInfoPush, UseCardStatistics,
 };
 
-use crate::engine::{
-    manager::BattleManagers,
-    round::{outcome::battle_outcome, state::RoundState},
-    skill::effect::SkillEffectCatalog,
+use crate::{
+    catalog::BattleCatalog,
+    engine::{
+        fight::versions::AbsorbHurtMapLayout,
+        manager::BattleManagers,
+        round::{outcome::battle_outcome, state::RoundState},
+        skill::effect::SkillEffectCatalog,
+    },
 };
 
 use self::determinism::RoundDeterminism;
@@ -35,6 +39,7 @@ pub use self::cloth_skill::ClothSkillType;
 /// only at explicit response boundaries.
 #[derive(Debug, Clone, Default)]
 pub struct BattleRuntime {
+    catalog_data: Option<BattleCatalog>,
     fight: Fight,
     managers: BattleManagers,
     catalog: SkillEffectCatalog,
@@ -42,9 +47,11 @@ pub struct BattleRuntime {
     round_state: RoundState,
     determinism: RoundDeterminism,
     pending_redeal: Option<RedealCardInfoPush>,
-    pending_wave_push: Option<Fight>,
+    // These owners already ran RoundStartCondition/100 while entering the wave.
+    wave_entry_condition_uids: Vec<i64>,
     cloth_skill_uses: HashMap<i32, usize>,
     objectives: objective::ObjectiveProgress,
+    absorb_hurt_map_layout: AbsorbHurtMapLayout,
 }
 
 impl BattleRuntime {
@@ -66,7 +73,11 @@ impl BattleRuntime {
 
     /// Evaluates the current terminal or wave outcome from manager-owned state.
     pub fn outcome(&self) -> BattleOutcome {
-        let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
         battle_outcome(&self.fight, &pool, &self.managers)
     }
 
@@ -76,6 +87,14 @@ impl BattleRuntime {
 
     pub fn fight_version(&self) -> i32 {
         self.fight.version.unwrap_or_default()
+    }
+
+    /// Preserves the absorb-map schema already established by an authoritative opening round.
+    pub fn inherit_absorb_hurt_map_layout(&mut self, round: &FightRound) -> Result<(), String> {
+        if let Some(layout) = observed_absorb_hurt_map_layout(round)? {
+            self.absorb_hurt_map_layout = layout;
+        }
+        Ok(())
     }
 
     /// Returns the synchronized fight state and most recently committed round for reconnect.
@@ -122,6 +141,10 @@ impl BattleRuntime {
         self.determinism.enqueue_next_ai_card_snapshot(cards);
     }
 
+    pub fn seed_crystal_cards(&mut self, cards: impl IntoIterator<Item = CardInfo>) {
+        self.determinism.enqueue_crystal_cards(cards);
+    }
+
     pub fn seed_hidden_crits(
         &mut self,
         skill_id: i32,
@@ -130,6 +153,10 @@ impl BattleRuntime {
     ) {
         self.determinism
             .enqueue_hidden_crits(skill_id, source_uid, choices);
+    }
+
+    pub fn seed_random_skills(&mut self, skills: impl IntoIterator<Item = i32>) {
+        self.determinism.enqueue_random_skills(skills);
     }
 
     pub fn conduit_operations(&self) -> Vec<sonettobuf::FightDeviceOper> {
@@ -190,34 +217,38 @@ impl BattleRuntime {
         skills: impl IntoIterator<Item = crate::engine::fight::rules::OwnedBattleSkill>,
     ) {
         let skills = skills.into_iter().collect::<Vec<_>>();
-        self.catalog.extend_roots_and_warn(
-            config::configs::get(),
-            skills.iter().map(|skill| skill.skill_id),
-            std::iter::empty(),
-        );
+        self.catalog_data
+            .expect("battle runtime was not constructed with a catalog")
+            .extend_skill_roots(
+                &mut self.catalog,
+                skills.iter().map(|skill| skill.skill_id),
+                std::iter::empty(),
+            );
         self.managers.battle_rule.extend_owned_skills(skills);
     }
 
     /// Builds a runtime by seeding every manager and exact skill catalog from a fight.
-    pub fn new(fight: Fight) -> Self {
-        Self::new_with_ex_attributes(fight, std::iter::empty())
+    pub fn new(catalog: BattleCatalog, fight: Fight) -> Self {
+        Self::new_with_ex_attributes(catalog, fight, std::iter::empty())
     }
 
     pub fn new_with_ex_attributes(
+        catalog: BattleCatalog,
         fight: Fight,
         ex_attributes: impl IntoIterator<Item = (i64, HeroExAttribute)>,
     ) -> Self {
-        Self::new_with_attributes(fight, ex_attributes, std::iter::empty())
+        Self::new_with_attributes(catalog, fight, ex_attributes, std::iter::empty())
     }
 
     /// Builds a runtime and applies persisted extended and special attributes.
     pub fn new_with_attributes(
+        catalog: BattleCatalog,
         fight: Fight,
         ex_attributes: impl IntoIterator<Item = (i64, HeroExAttribute)>,
         sp_attributes: impl IntoIterator<Item = (i64, HeroSpAttribute)>,
     ) -> Self {
-        let mut managers = BattleManagers::seeded(&fight);
-        if let Some(route) = config::configs::get().activity128_battle(
+        let mut managers = BattleManagers::seeded_with_catalog(catalog, &fight);
+        if let Some(target_model_ids) = catalog.boss_rush_target_models(
             fight.episode_id.unwrap_or_default(),
             fight.battle_id.unwrap_or_default(),
         ) && let Some(target_uid) = fight.defender.as_ref().and_then(|team| {
@@ -227,7 +258,7 @@ impl BattleRuntime {
                 .find(|entity| {
                     entity
                         .model_id
-                        .is_some_and(|model_id| route.target_model_ids.contains(&model_id))
+                        .is_some_and(|model_id| target_model_ids.contains(&model_id))
                 })
                 .and_then(|entity| entity.uid)
         }) {
@@ -243,22 +274,24 @@ impl BattleRuntime {
             managers.attribute.override_sp(uid, &attributes);
         }
         managers.attribute.sync_emitter_average(&fight);
-        let round_state = RoundState::start(&fight);
+        let round_state = RoundState::seeded(catalog, &fight);
         let determinism =
             RoundDeterminism::with_seed(fight.battle_id.unwrap_or_default().max(0) as u64);
-        let catalog = SkillEffectCatalog::from_fight(config::configs::get(), &fight);
+        let skill_catalog = catalog.skill_effects_for_fight(&fight);
 
         Self {
+            catalog_data: Some(catalog),
             fight,
             managers,
-            catalog,
+            catalog: skill_catalog,
             round: None,
             round_state,
             determinism,
             pending_redeal: None,
-            pending_wave_push: None,
+            wave_entry_condition_uids: Vec::new(),
             cloth_skill_uses: HashMap::new(),
             objectives: Default::default(),
+            absorb_hurt_map_layout: AbsorbHurtMapLayout::default(),
         }
     }
 }
@@ -266,9 +299,70 @@ impl BattleRuntime {
 fn project_result(
     result: drain::DrainResult,
     fight_version: i32,
+    absorb_hurt_map_layout: AbsorbHurtMapLayout,
 ) -> Result<Vec<sonettobuf::FightStep>, String> {
-    crate::engine::packet::timeline::project_for_version(&result.frames, fight_version)
-        .map_err(|error| format!("{error:?}"))
+    let projected = if absorb_hurt_map_layout == AbsorbHurtMapLayout::default() {
+        crate::engine::packet::timeline::project_for_version(&result.frames, fight_version)
+    } else {
+        crate::engine::packet::timeline::project_for_version_with_absorb_map_layout(
+            &result.frames,
+            fight_version,
+            absorb_hurt_map_layout,
+        )
+    };
+    projected.map_err(|error| format!("{error:?}"))
+}
+
+fn observed_absorb_hurt_map_layout(
+    round: &FightRound,
+) -> Result<Option<AbsorbHurtMapLayout>, String> {
+    fn visit(
+        steps: &[sonettobuf::FightStep],
+        observed: &mut Option<AbsorbHurtMapLayout>,
+    ) -> Result<(), String> {
+        for step in steps {
+            for effect in &step.act_effect {
+                if let Some(param) = effect
+                    .hurt_info
+                    .as_ref()
+                    .and_then(|hurt| hurt.absorb_hurt_param.as_deref())
+                {
+                    let map =
+                        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(param)
+                            .map_err(|error| format!("invalid absorbHurtParam: {error}"))?;
+                    let has_string =
+                        |key| matches!(map.get(key), Some(serde_json::Value::String(_)));
+                    let layout = match map.len() {
+                        2 if has_string("reduceTeamShareShieldBuffMap")
+                            && has_string("reduceShieldBuffMap") =>
+                        {
+                            AbsorbHurtMapLayout::TwoMaps
+                        }
+                        3 if has_string("reduceTeamShareShieldBuffMap")
+                            && has_string("reduceShieldBuffMap")
+                            && map.get("consumeFakeHpBuffMap")
+                                == Some(&serde_json::Value::String(String::new())) =>
+                        {
+                            AbsorbHurtMapLayout::ThreeMaps
+                        }
+                        _ => return Err("absorbHurtParam has an unsupported map layout".into()),
+                    };
+                    if observed.is_some_and(|current| current != layout) {
+                        return Err("opening round mixes absorbHurtParam layouts".into());
+                    }
+                    *observed = Some(layout);
+                }
+                if let Some(child) = effect.fight_step.as_ref() {
+                    visit(std::slice::from_ref(child), observed)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    let mut observed = None;
+    visit(&round.fight_step, &mut observed)?;
+    Ok(observed)
 }
 
 #[cfg(test)]

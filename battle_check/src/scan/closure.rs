@@ -4,6 +4,7 @@ use super::*;
 /// Diagnostics cannot make unsupported configuration runnable.
 pub(crate) fn scan_closure(
     db: &config::GameDB,
+    battle_catalog: battle::catalog::BattleCatalog,
     catalog: &mut SkillEffectCatalog,
     skills: &mut VecDeque<Pending>,
     buffs: &mut VecDeque<Pending>,
@@ -15,7 +16,7 @@ pub(crate) fn scan_closure(
             scan_skill(db, catalog, pending, skills, buffs, report);
         }
         while let Some(pending) = buffs.pop_front() {
-            scan_buff(db, pending, skills, buffs, report);
+            scan_buff(db, battle_catalog, pending, skills, buffs, report);
         }
     }
 }
@@ -257,6 +258,7 @@ pub(super) fn enqueue_monster_skills(
 
 fn scan_buff(
     db: &config::GameDB,
+    battle_catalog: battle::catalog::BattleCatalog,
     pending: Pending,
     skills: &mut VecDeque<Pending>,
     buffs: &mut VecDeque<Pending>,
@@ -276,6 +278,14 @@ fn scan_buff(
         "Buff id={} type={} path={}",
         pending.id, buff.type_id, pending.path
     ));
+    let handler_owns_duration = buff.features.split('|').any(|raw| {
+        let Some(act_id) = split_ids(raw).first().copied() else {
+            return false;
+        };
+        db.buff_act
+            .get(act_id)
+            .is_some_and(|act| buff_act_registry::owns_duration(act.id, &act.r#type))
+    });
     match BuffPolicy::try_for_buff_id(pending.id) {
         Ok(policy) => {
             report.explain(format!(
@@ -323,13 +333,29 @@ fn scan_buff(
                         .join(", ")
                 ));
             }
+            if policy.lifetime.duration > 0
+                && !handler_owns_duration
+                && !battle::engine::skill::buff_act::effect_time::supports_duration_policy(
+                    policy.lifetime.take_stage,
+                )
+            {
+                report.gap_at(
+                    CapabilityKey::new("effect-time", policy.lifetime.take_stage, "BuffDuration"),
+                    "MissingBuffDurationRoute",
+                    format!("{} > buff {}", pending.path, pending.id),
+                );
+                report.error(format!(
+                    "MissingBuffDurationRoute path={} buff={} duration={} takeStage={}",
+                    pending.path, pending.id, policy.lifetime.duration, policy.lifetime.take_stage,
+                ));
+            }
         }
         Err(error) => report.error(format!(
             "InvalidBuffPolicy path={} buff={} reason={error:?}",
             pending.path, pending.id
         )),
     }
-    for linked_buff_id in halo::carriers(pending.id)
+    for linked_buff_id in halo::carriers(battle_catalog, pending.id)
         .into_iter()
         .filter_map(|carrier| carrier.linked_buff_id)
     {
@@ -559,6 +585,15 @@ fn scan_buff(
                     }
                 }
                 Some(BuffActKind::SpecialCountCastChannel) => {
+                    if let Some(&skill_id) = values.get(1) {
+                        enqueue(
+                            skills,
+                            skill_id,
+                            format!("{} > buff {}", pending.path, pending.id),
+                        );
+                    }
+                }
+                Some(BuffActKind::CountContinueChannel) => {
                     if let Some(&skill_id) = values.get(1) {
                         enqueue(
                             skills,

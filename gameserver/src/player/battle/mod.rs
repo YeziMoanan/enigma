@@ -164,7 +164,7 @@ struct BattleCheckpoint {
     chapter_id: i32,
     start_request: StartDungeonRequest,
     seed: u64,
-    tower_context: Option<::battle::tower::BattleContext>,
+    tower_context: Option<crate::logic::battle_setup::tower::BattleContext>,
     act229_context: Option<Act229BattleContext>,
 }
 
@@ -199,7 +199,7 @@ pub struct ActiveBattle {
     pub ai_deck: Vec<sonettobuf::CardInfo>,
     pub(crate) seed: u64,
     pub(crate) start_request: Option<StartDungeonRequest>,
-    pub(crate) tower_context: Option<::battle::tower::BattleContext>,
+    pub(crate) tower_context: Option<crate::logic::battle_setup::tower::BattleContext>,
     pub(crate) act229_context: Option<Act229BattleContext>,
     pub(crate) rounds: Vec<CommittedRound>,
     pub(crate) pending_cloth_skill_opers: Vec<UseClothSkillOperRecord>,
@@ -252,13 +252,16 @@ impl ActiveBattle {
             .fight_group
             .as_ref()
             .ok_or(AppError::InvalidRequest)?;
-        let built = ::battle::dungeon::build_fight(
+        let built = crate::logic::battle_setup::dungeon::build_fight(
             pool,
             player_id,
             episode_id,
             battle_id,
-            use_record,
             fight_group,
+            ::battle::dungeon::FightOptions {
+                is_balance: request.is_balance.unwrap_or(false),
+                use_record,
+            },
             request.params.as_deref(),
         )
         .await?;
@@ -271,7 +274,7 @@ impl ActiveBattle {
         player_id: i64,
         request: StartDungeonRequest,
         built: ::battle::dungeon::BuiltFight,
-        tower_context: Option<::battle::tower::BattleContext>,
+        tower_context: Option<crate::logic::battle_setup::tower::BattleContext>,
     ) -> Result<Self, AppError> {
         let episode_id = request.episode_id.ok_or(AppError::InvalidRequest)?;
         let seed = initial_battle_seed(
@@ -306,7 +309,7 @@ impl ActiveBattle {
         player_id: i64,
         request: StartDungeonRequest,
         built: ::battle::dungeon::BuiltFight,
-        tower_context: Option<::battle::tower::BattleContext>,
+        tower_context: Option<crate::logic::battle_setup::tower::BattleContext>,
         act229_context: Option<Act229BattleContext>,
         seed: Option<u64>,
     ) -> Result<Self, AppError> {
@@ -334,7 +337,7 @@ impl ActiveBattle {
     fn prepare_from_built(
         request: StartDungeonRequest,
         built: ::battle::dungeon::BuiltFight,
-        tower_context: Option<::battle::tower::BattleContext>,
+        tower_context: Option<crate::logic::battle_setup::tower::BattleContext>,
         act229_context: Option<Act229BattleContext>,
         seed: Option<u64>,
     ) -> Result<Self, AppError> {
@@ -395,7 +398,7 @@ impl ActiveBattle {
         battle_id: i32,
         request: StartDungeonRequest,
         built: ::battle::dungeon::BuiltFight,
-        tower_context: Option<::battle::tower::BattleContext>,
+        tower_context: Option<crate::logic::battle_setup::tower::BattleContext>,
         act229_context: Option<Act229BattleContext>,
         seed: u64,
     ) -> Result<Self, AppError> {
@@ -417,6 +420,7 @@ impl ActiveBattle {
             .and_then(|team| team.assist_boss.as_ref())
             .and_then(|boss| boss.level);
         let mut runtime = ::battle::engine::runtime::BattleRuntime::new_with_attributes(
+            ::battle::catalog::BattleCatalog::new(config::configs::get()),
             built.fight,
             built.ex_attributes,
             built.sp_attributes,
@@ -477,24 +481,30 @@ impl ActiveBattle {
             })?;
         let use_record = checkpoint.start_request.use_record.unwrap_or(false);
         let built = if let Some(context) = checkpoint.tower_context {
-            ::battle::tower::build_fight(
+            crate::logic::battle_setup::tower::build_fight(
                 pool,
                 player_id,
                 episode_id,
                 record.battle_id,
-                use_record,
                 fight_group,
+                ::battle::dungeon::FightOptions {
+                    is_balance: checkpoint.start_request.is_balance.unwrap_or(false),
+                    use_record,
+                },
                 context,
             )
             .await?
         } else {
-            ::battle::dungeon::build_fight(
+            crate::logic::battle_setup::dungeon::build_fight(
                 pool,
                 player_id,
                 episode_id,
                 record.battle_id,
-                use_record,
                 fight_group,
+                ::battle::dungeon::FightOptions {
+                    is_balance: checkpoint.start_request.is_balance.unwrap_or(false),
+                    use_record,
+                },
                 checkpoint.start_request.params.as_deref(),
             )
             .await?

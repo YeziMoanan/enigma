@@ -7,86 +7,44 @@ pub(super) fn numeric_ids(raw: &str) -> impl Iterator<Item = i32> + '_ {
         .filter(|id| *id > 0)
 }
 
-pub(super) fn configured_effect_id_for_db(db: &GameDB, skill_id: i32) -> i32 {
-    let configured_skill_id =
-        if db.skill.get(skill_id).is_some() || db.skill_effect.get(skill_id).is_some() {
-            skill_id
-        } else {
-            configured_card_rank_fallback(db, skill_id).unwrap_or(skill_id)
-        };
-    db.skill
-        .get(configured_skill_id)
-        .map(|skill| skill.skill_effect)
-        .filter(|id| *id != 0)
-        .unwrap_or(configured_skill_id)
-}
-
-fn configured_card_rank_fallback(db: &GameDB, skill_id: i32) -> Option<i32> {
-    for character in db.character.iter() {
-        for group in [1, 2] {
-            let skills = crate::engine::entity::skill::parse_skill_group(&character.skill, group);
-            let Some(index) = skills.iter().position(|candidate| *candidate == skill_id) else {
-                continue;
-            };
-            return skills[..index]
-                .iter()
-                .rev()
-                .copied()
-                .find(|candidate| db.skill.get(*candidate).is_some());
-        }
-    }
-    None
-}
-
 pub fn configured_effect_id(skill_id: i32) -> i32 {
-    config::try_get()
-        .map(|db| configured_effect_id_for_db(db, skill_id))
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.skill_effect_id(skill_id))
         .unwrap_or(skill_id)
 }
 
-fn configured_effect(skill_id: i32) -> Option<&'static config::skill_effect::SkillEffect> {
-    let db = config::try_get()?;
-    let effect_id = configured_effect_id(skill_id);
-    db.skill_effect.get(effect_id)
-}
-
 pub fn configured_extra_kind(skill_id: i32) -> i32 {
-    configured_effect(skill_id)
-        .map(|effect| effect.is_extra)
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.skill_extra_kind(skill_id))
         .unwrap_or_default()
 }
 
 pub fn configured_big_skill_point(skill_id: i32) -> i32 {
-    configured_effect(skill_id)
-        .map(|effect| effect.big_skill_point)
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.skill_big_skill_point(skill_id))
         .unwrap_or_default()
 }
 
 pub fn configured_is_big_skill(skill_id: i32) -> bool {
-    configured_effect(skill_id).is_some_and(|effect| effect.is_big_skill != 0)
+    crate::catalog::BattleCatalog::try_global()
+        .is_some_and(|catalog| catalog.skill_is_big(skill_id))
 }
 
 pub fn configured_skill_type(skill_id: i32) -> i32 {
-    configured_effect(skill_id)
-        .map(|effect| effect.r#type)
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.skill_type(skill_id))
         .unwrap_or_default()
 }
 
 pub fn configured_effect_tag(skill_id: i32) -> i32 {
-    configured_effect(skill_id)
-        .map(|effect| effect.effect_tag)
+    crate::catalog::BattleCatalog::try_global()
+        .map(|catalog| catalog.skill_effect_tag(skill_id))
         .unwrap_or_default()
 }
 
 pub fn configured_is_attack(skill_id: i32) -> bool {
-    configured_effect(skill_id).is_some_and(|effect| {
-        effect.damage_rate > 0
-            || matches!(
-                effect.effect_tag,
-                tag if tag == SkillEffectTag::RealityDamage as i32
-                    || tag == SkillEffectTag::MentalDamage as i32
-            )
-    })
+    crate::catalog::BattleCatalog::try_global()
+        .is_some_and(|catalog| catalog.skill_is_attack(skill_id))
 }
 
 pub(super) fn rule_issue(db: &GameDB, effect_id: i32, slot: u8, raw: &str) -> RuleIssue {
@@ -120,7 +78,9 @@ pub(super) fn rule_issue(db: &GameDB, effect_id: i32, slot: u8, raw: &str) -> Ru
 pub fn global() -> &'static SkillEffectCatalog {
     use std::sync::OnceLock;
     static CATALOG: OnceLock<SkillEffectCatalog> = OnceLock::new();
-    CATALOG.get_or_init(|| SkillEffectCatalog::from_game_db(config::configs::get()))
+    CATALOG.get_or_init(|| {
+        SkillEffectCatalog::from_game_db(crate::catalog::BattleCatalog::global().game_data())
+    })
 }
 
 pub(super) struct RawSlot<'a> {

@@ -1,12 +1,19 @@
 use crate::engine::{
     damage::{AttackPlan, DamageRateTerm, handler as damage},
-    manager::{BattleManagers, buff::ActiveBuffFeature, hp::HpCommand},
+    manager::{
+        BattleManagers,
+        buff::{ActiveBuffFeature, BuffCommand, BuffGrant},
+        hp::HpCommand,
+    },
     runtime::determinism::RoundDeterminism,
     skill::{
         action::{SkillInvocation, SkillModifiers},
         behavior::rate,
         effect::SkillEffectCatalog,
-        rule::{CommandOrigin, DefinitionKey, RuleDomain, output::RuleOp},
+        rule::{
+            CommandOrigin, DefinitionKey, RuleDomain,
+            output::{BattleCommand, RuleOp},
+        },
         target::{TargetContext, TargetPool, TargetRequest, TargetResolver},
     },
 };
@@ -283,6 +290,7 @@ fn additional_damage(
         .iter()
         .filter_map(|modifier| {
             crate::engine::skill::buff_act::additional_damage::configured(
+                managers.catalog(),
                 modifier.buff_id,
                 source_uid,
                 source_uid,
@@ -369,6 +377,11 @@ pub(super) fn additional_damage_activation(
     .collect()
 }
 
+pub(super) fn split_excess_crit_conversion(excess_crit: i32, conversion_rate: i32) -> (i32, i32) {
+    let numerator = i64::from(excess_crit) * i64::from(conversion_rate);
+    ((numerator / 1000) as i32, (numerator % 1000) as i32)
+}
+
 pub(super) fn damage_ops(
     invocation: &SkillInvocation,
     managers: &BattleManagers,
@@ -425,9 +438,21 @@ pub(super) fn damage_ops(
             &managers.buff,
             &managers.hp,
         );
+    let target_count_damage_bonus =
+        crate::engine::skill::buff_act::attr_by_skill_target_count::owner_attribute_delta(
+            managers,
+            source_uid,
+            execution.context.damage_target_count_kind,
+            crate::engine::entity::attr::AttrId::DmgBonus,
+        );
+    let source_damage_type = pool
+        .entity(source_uid)
+        .map(|entity| entity.damage_type)
+        .unwrap_or_default();
     let mut damage_commands = Vec::new();
     let mut additional_damage_commands = Vec::new();
     let mut avoided = Vec::new();
+    let mut hit_targets = Vec::new();
     let mut crit_count = 0;
     let inherent_assassinate = execution.context.active_skill_assassinate;
     for (index, target_uid) in targets.into_iter().enumerate() {
@@ -435,7 +460,7 @@ pub(super) fn damage_ops(
             && let Some(feature) = crate::engine::skill::buff_act::dodge_spec_skill::avoidance(
                 managers,
                 target_uid,
-                pool.skill_slot(source_uid, skill_id),
+                pool.skill_slot(managers, source_uid, skill_id),
                 pool.entity(source_uid)
                     .map(|entity| entity.damage_type)
                     .unwrap_or_default(),
@@ -500,10 +525,29 @@ pub(super) fn damage_ops(
                 &managers.hp,
             );
         let mut attack_attributes = target_modifiers.attack_attributes.clone();
+        if target_count_damage_bonus != 0 {
+            attack_attributes.push((
+                crate::engine::entity::attr::AttrId::DmgBonus,
+                target_count_damage_bonus,
+            ));
+        }
+        let mut linked_attack_attributes = attack_attributes.clone();
+        let incoming_reduction =
+            crate::engine::skill::buff_act::incoming_target_attack_attribute_delta(
+                managers,
+                target_uid,
+                source_damage_type,
+                crate::engine::entity::attr::AttrId::DmgTakenReduction,
+            );
+        if incoming_reduction != 0 {
+            attack_attributes.push((
+                crate::engine::entity::attr::AttrId::DmgTakenReduction,
+                incoming_reduction,
+            ));
+        }
         // Linked damage keeps the triggering attack's shared damage lane.
         // Inherent Assassination belongs to its attacker, while a target
         // trigger converts the whole incoming attack, including linked hits.
-        let mut linked_attack_attributes = attack_attributes.clone();
         let assassination = crate::engine::skill::buff_act::assassination::target_modifier(
             managers,
             source_uid,
@@ -547,7 +591,8 @@ pub(super) fn damage_ops(
         }
         let excess_crit =
             damage::excess_crit_rate(source_uid, target_uid, pool, managers, &attack_attributes);
-        let converted = excess_crit * crit_conversion_rate / 1000;
+        let (converted, critical_multiplier_remainder) =
+            split_excess_crit_conversion(excess_crit, crit_conversion_rate);
         if crate::engine::diagnostics::enabled(crate::engine::diagnostics::TraceArea::Damage) {
             let crit_chance = damage::crit_chance(source_uid, target_uid, pool, managers)
                 + target_modifiers
@@ -559,7 +604,7 @@ pub(super) fn damage_ops(
                     })
                     .sum::<i32>();
             eprintln!(
-                "crit chance skill={skill_id} source={source_uid} target={target_uid} chance={crit_chance} excess={excess_crit} conversion_rate={crit_conversion_rate} converted={converted}"
+                "crit chance skill={skill_id} source={source_uid} target={target_uid} chance={crit_chance} excess={excess_crit} conversion_rate={crit_conversion_rate} converted={converted} conversion_remainder={critical_multiplier_remainder}"
             );
         }
         if converted != 0 {
@@ -614,6 +659,8 @@ pub(super) fn damage_ops(
                 attack_attributes: attack_attributes.clone(),
                 career_ratio_bonus: target_modifiers.career_ratio_bonus,
                 attack_career: target_modifiers.attack_career,
+                additional_attack_career: target_modifiers.additional_attack_career,
+                critical_multiplier_remainder,
                 is_conduit: managers.conduit.owns_skill(source_uid, skill_id),
                 is_crit,
                 assassinate: assassination.assassinate,
@@ -629,7 +676,7 @@ pub(super) fn damage_ops(
                 buffs: &managers.buff,
                 target_buffs: &managers.buff,
                 hp: &managers.hp,
-                fields: Some(&managers.field),
+                fields: Some((&managers.field, managers.catalog())),
                 emitter: None,
                 team_inspiration: 0,
             },
@@ -638,6 +685,7 @@ pub(super) fn damage_ops(
                 key: DefinitionKey::new(skill_id, "SkillDamage"),
             },
         ) {
+            hit_targets.push(target_uid);
             if let HpCommand::Damage(damage) = &mut command {
                 damage.ignore_riposte = target_modifiers.ignore_riposte;
             }
@@ -654,7 +702,7 @@ pub(super) fn damage_ops(
                 target_uid,
                 damage::crit_chance(additional.credited_source_uid, target_uid, pool, managers),
             );
-            let additional_attributes = linked_attack_attributes
+            let mut additional_attributes = linked_attack_attributes
                 .iter()
                 .copied()
                 .filter(|(attr, _)| {
@@ -669,6 +717,23 @@ pub(super) fn damage_ops(
                 )
                 })
                 .collect::<Vec<_>>();
+            let additional_damage_type = pool
+                .entity(additional.credited_source_uid)
+                .map(|entity| entity.damage_type)
+                .unwrap_or_default();
+            let incoming_reduction =
+                crate::engine::skill::buff_act::incoming_target_attack_attribute_delta(
+                    managers,
+                    target_uid,
+                    additional_damage_type,
+                    crate::engine::entity::attr::AttrId::DmgTakenReduction,
+                );
+            if incoming_reduction != 0 {
+                additional_attributes.push((
+                    crate::engine::entity::attr::AttrId::DmgTakenReduction,
+                    incoming_reduction,
+                ));
+            }
             if let Some(mut command) = damage::resolve_additional_damage_command(
                 damage::DamageRequest {
                     source_uid: additional.credited_source_uid,
@@ -685,6 +750,8 @@ pub(super) fn damage_ops(
                     attack_attributes: &additional_attributes,
                     career_ratio_bonus: target_modifiers.career_ratio_bonus,
                     attack_career: target_modifiers.attack_career,
+                    additional_attack_career: target_modifiers.additional_attack_career,
+                    critical_multiplier_remainder,
                     is_conduit: false,
                     is_crit: additional_is_crit,
                     extra_skill_kind: execution.context.extra_skill_kind,
@@ -696,7 +763,7 @@ pub(super) fn damage_ops(
                     buffs: &managers.buff,
                     target_buffs: &managers.buff,
                     hp: &managers.hp,
-                    fields: Some(&managers.field),
+                    fields: Some((&managers.field, managers.catalog())),
                     emitter: None,
                     team_inspiration: 0,
                 },
@@ -727,6 +794,29 @@ pub(super) fn damage_ops(
     if execution.planned_crits.is_none() {
         execution.record_crits(crit_count);
     }
+    let mut after_damage = rend
+        .as_ref()
+        .map(|rend| rend.after_damage_rule_ops())
+        .unwrap_or_default();
+    after_damage.extend(
+        execution
+            .modifiers
+            .after_damage_buffs
+            .iter()
+            .flat_map(|modifier| {
+                hit_targets.iter().map(|target_uid| {
+                    RuleOp::Command(BattleCommand::Buff(BuffCommand::Grant(BuffGrant {
+                        origin: modifier.origin,
+                        source_uid,
+                        target_uid: *target_uid,
+                        buff_id: modifier.buff_id,
+                        amount: Some(modifier.amount),
+                        occurrences: 1,
+                        child_uid_reservations: 0,
+                    })))
+                })
+            }),
+    );
     DamageOps {
         buff_act_frame_owner: rend.as_ref().and_then(|rend| rend.frame_owner()),
         before_damage: rend
@@ -735,9 +825,7 @@ pub(super) fn damage_ops(
             .unwrap_or_default(),
         damage: damage_commands,
         additional_damage: ordered_additional_damage,
-        after_damage: rend
-            .map(|rend| rend.after_damage_rule_ops())
-            .unwrap_or_default(),
+        after_damage,
         main_target,
         avoided,
     }
@@ -783,7 +871,7 @@ fn damage_targets(
     };
     let base_count = catalog
         .target_limit(effect_skill_id)
-        .max(crate::engine::skill::target::request::target_count(request.code).max(0) as usize)
+        .max(managers.catalog().target_count(request.code).max(0) as usize)
         .max(1);
     let behavior_extra_count = execution.context.additional_skill_target_count.max(0) as usize;
     let extra_count =

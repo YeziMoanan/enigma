@@ -26,6 +26,8 @@ pub enum SkillExecutionMode {
     Nested,
     Active,
     DirectBig,
+    Device,
+    DeviceCard,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -208,55 +210,57 @@ mod invocation_tests {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillRateAmount {
     Fixed(i32),
-    GaugeRaw {
+    GaugeCurrent {
         key: crate::engine::manager::gauge::GaugeKey,
         limit: i32,
         factor: i32,
         count: i32,
-        divisor: i32,
     },
 }
 
 impl SkillRateAmount {
-    pub const fn gauge_raw(
+    pub const fn gauge_current(
         key: crate::engine::manager::gauge::GaugeKey,
         limit: i32,
         factor: i32,
         count: i32,
-        divisor: i32,
     ) -> Self {
-        Self::GaugeRaw {
+        Self::GaugeCurrent {
             key,
             limit,
             factor,
             count,
-            divisor,
         }
     }
 
     pub const fn fixed_value(self) -> Option<i32> {
         match self {
             Self::Fixed(value) => Some(value),
-            Self::GaugeRaw { .. } => None,
+            Self::GaugeCurrent { .. } => None,
         }
     }
 
     pub fn resolve(self, gauges: &crate::engine::manager::gauge::GaugeManager) -> i32 {
         match self {
             Self::Fixed(value) => value,
-            Self::GaugeRaw {
+            Self::GaugeCurrent {
                 key,
                 limit,
                 factor,
                 count,
-                divisor,
-            } if limit >= 0 && factor >= 0 && count >= 0 && divisor > 0 => {
-                let raw = i64::from(gauges.raw_value(key).unwrap_or_default().clamp(0, limit));
-                (raw * i64::from(factor) * i64::from(count) / i64::from(divisor))
+            } if limit >= 0 && factor >= 0 && count >= 0 => {
+                let current = i64::from(
+                    gauges
+                        .get(key)
+                        .map(|state| state.current)
+                        .unwrap_or_default()
+                        .clamp(0, limit),
+                );
+                (current * i64::from(factor) * i64::from(count))
                     .try_into()
                     .unwrap_or(i32::MAX)
             }
-            Self::GaugeRaw { .. } => 0,
+            Self::GaugeCurrent { .. } => 0,
         }
     }
 }
@@ -316,6 +320,13 @@ pub struct AdditionalDamageModifier {
     pub buff_id: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AfterDamageBuffModifier {
+    pub origin: CommandOrigin,
+    pub buff_id: i32,
+    pub amount: i32,
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SkillModifiers {
     pub rates: Vec<SkillRateModifier>,
@@ -326,7 +337,9 @@ pub struct SkillModifiers {
     pub excess_crit_conversion_rate: i32,
     pub career_ratio_bonus: i32,
     pub attack_career: Option<i32>,
+    pub additional_attack_career: Option<i32>,
     pub additional_damage: Vec<AdditionalDamageModifier>,
+    pub after_damage_buffs: Vec<AfterDamageBuffModifier>,
     pub consume_team_injury_count_round: Option<DefinitionKey>,
 }
 
@@ -344,7 +357,12 @@ impl SkillModifiers {
         self.excess_crit_conversion_rate += other.excess_crit_conversion_rate;
         self.career_ratio_bonus += other.career_ratio_bonus;
         self.attack_career = self.attack_career.or(other.attack_career);
+        self.additional_attack_career = self
+            .additional_attack_career
+            .or(other.additional_attack_career);
         self.additional_damage.append(&mut other.additional_damage);
+        self.after_damage_buffs
+            .append(&mut other.after_damage_buffs);
         self.consume_team_injury_count_round = self
             .consume_team_injury_count_round
             .or(other.consume_team_injury_count_round);

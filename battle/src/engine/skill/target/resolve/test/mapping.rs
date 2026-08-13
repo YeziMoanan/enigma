@@ -21,6 +21,44 @@ fn overlapping_enemy_codes_keep_their_exact_rules() {
 }
 
 #[test]
+fn target_309_is_the_selected_bound_ally() {
+    assert_eq!(target_rule(309), Some(TargetRule::BoundAlly));
+    assert_eq!(targets_enemy(309), Some(false));
+}
+
+#[test]
+fn target_203_selects_the_event_source() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![entity_at(10, 1)],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![entity_at(-10, 1)],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+
+    assert_eq!(
+        resolve_code_with_context(
+            203,
+            -10,
+            &pool,
+            &mut RoundDeterminism::default(),
+            TargetContext {
+                runtime_target_uid: -10,
+                event_source_uid: 10,
+                ..Default::default()
+            },
+        ),
+        vec![10]
+    );
+}
+
+#[test]
 fn adjacent_front_and_behind_targets_keep_their_direction() {
     init_config();
     let fight = Fight {

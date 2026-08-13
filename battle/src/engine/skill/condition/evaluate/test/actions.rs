@@ -1,6 +1,119 @@
 use super::*;
 
 #[test]
+fn hand_skill_presence_reads_the_committed_spelldock() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let condition = exact_condition(710301, "PerHandCardHasSkillId", &["118353040"]);
+    let matches = |managers: &BattleManagers| {
+        conditions_match(
+            std::slice::from_ref(&condition),
+            10,
+            &[10],
+            Some(managers),
+            &pool,
+            TargetContext::default(),
+        )
+    };
+
+    assert!(!matches(&managers));
+    managers.card.add_to_hand(sonettobuf::CardInfo {
+        uid: Some(10),
+        skill_id: Some(118353040),
+        ..Default::default()
+    });
+    assert!(matches(&managers));
+}
+
+#[test]
+fn round_incantation_rank_count_reads_only_allied_played_cards() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    uid: Some(10),
+                    current_hp: Some(100),
+                    ..Default::default()
+                },
+                FightEntityInfo {
+                    uid: Some(11),
+                    current_hp: Some(100),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(-1),
+                current_hp: Some(100),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    managers.card.reset(
+        vec![
+            sonettobuf::CardInfo {
+                uid: Some(10),
+                skill_id: Some(30950112),
+                ..Default::default()
+            },
+            sonettobuf::CardInfo {
+                uid: Some(11),
+                skill_id: Some(30950111),
+                ..Default::default()
+            },
+            sonettobuf::CardInfo {
+                uid: Some(-1),
+                skill_id: Some(30950113),
+                ..Default::default()
+            },
+        ],
+        3,
+    );
+    while !managers.card.hand().is_empty() {
+        managers.card.play_card(0, None, None, None).unwrap();
+    }
+    let condition = exact_condition(622304, "RoundUseSkillLevel", &["2", "2"]);
+    let matches = |managers: &BattleManagers| {
+        conditions_match(
+            std::slice::from_ref(&condition),
+            10,
+            &[10],
+            Some(managers),
+            &pool,
+            TargetContext::default(),
+        )
+    };
+
+    assert!(!matches(&managers));
+    managers.card.add_to_hand(sonettobuf::CardInfo {
+        uid: Some(11),
+        skill_id: Some(30950122),
+        ..Default::default()
+    });
+    managers.card.play_card(0, None, None, None).unwrap();
+    assert!(matches(&managers));
+}
+
+#[test]
 fn owner_incantation_rank_rejects_an_ally_action() {
     init_config();
     let condition = ParsedCondition {
@@ -32,7 +145,7 @@ fn owner_incantation_rank_rejects_an_ally_action() {
 }
 
 #[test]
-fn synthetic_emitter_is_not_an_active_incantation_user() {
+fn completed_active_use_skill_requires_an_active_execution_mode_and_real_source() {
     init_config();
     let fight = Fight {
         attacker: Some(FightTeam {
@@ -46,14 +159,12 @@ fn synthetic_emitter_is_not_an_active_incantation_user() {
         ..Default::default()
     };
     let pool = TargetPool::from_fight(&fight);
-    let matches = |kind, active_skill_source_uid, extra_skill_kind| {
+    let matches = |condition: &ParsedCondition,
+                   active_skill_source_uid,
+                   extra_skill_kind,
+                   active_skill_mode| {
         condition_matches(
-            &ParsedCondition {
-                opcode: 502212,
-                type_name: String::new(),
-                kind,
-                raw_args: Vec::new(),
-            },
+            condition,
             10,
             &[10],
             None,
@@ -61,33 +172,82 @@ fn synthetic_emitter_is_not_an_active_incantation_user() {
             TargetContext {
                 active_skill_source_uid,
                 active_skill_is_attack: true,
+                active_skill_mode,
                 extra_skill_kind,
                 direct_skill_body: true,
                 ..Default::default()
             },
         )
     };
+    let completed = exact_condition(502212, "ActiveUseSkill", &["0"]);
 
     assert!(matches(
-        ParsedConditionKind::ActiveUseSkill { slot: 0 },
+        &completed,
         10,
-        0
+        0,
+        crate::engine::skill::action::SkillExecutionMode::Active,
     ));
-    assert!(!matches(
-        ParsedConditionKind::ActiveUseSkill { slot: 0 },
+    assert!(matches(
+        &completed,
         10,
-        crate::engine::skill::condition::extra::ExtraSkillKind::FollowUp.id()
+        0,
+        crate::engine::skill::action::SkillExecutionMode::DirectBig,
     ));
-    assert!(matches(ParsedConditionKind::UseHurtSkill, 10, 0));
-    assert!(!matches(
-        ParsedConditionKind::ActiveUseSkill { slot: 0 },
-        crate::engine::manager::emitter::UID,
-        0
+    assert!(matches(
+        &completed,
+        10,
+        0,
+        crate::engine::skill::action::SkillExecutionMode::Device,
     ));
     assert!(!matches(
-        ParsedConditionKind::UseHurtSkill,
+        &completed,
+        10,
+        0,
+        crate::engine::skill::action::SkillExecutionMode::DeviceCard,
+    ));
+    assert!(!matches(
+        &completed,
+        10,
+        0,
+        crate::engine::skill::action::SkillExecutionMode::Nested,
+    ));
+    assert!(!matches(
+        &completed,
+        10,
+        crate::engine::skill::condition::extra::ExtraSkillKind::FollowUp.id(),
+        crate::engine::skill::action::SkillExecutionMode::Active,
+    ));
+    for opcode in [502203, 502208, 502210] {
+        assert!(matches(
+            &exact_condition(opcode, "ActiveUseSkill", &["0"]),
+            10,
+            0,
+            crate::engine::skill::action::SkillExecutionMode::DeviceCard,
+        ));
+        assert!(matches(
+            &exact_condition(opcode, "ActiveUseSkill", &["0"]),
+            10,
+            0,
+            crate::engine::skill::action::SkillExecutionMode::Device,
+        ));
+    }
+    assert!(matches(
+        &exact_condition(501212, "UseHurtSkill", &[]),
+        10,
+        0,
+        crate::engine::skill::action::SkillExecutionMode::Device,
+    ));
+    assert!(!matches(
+        &completed,
         crate::engine::manager::emitter::UID,
-        0
+        0,
+        crate::engine::skill::action::SkillExecutionMode::Active,
+    ));
+    assert!(!matches(
+        &exact_condition(501212, "UseHurtSkill", &[]),
+        crate::engine::manager::emitter::UID,
+        0,
+        crate::engine::skill::action::SkillExecutionMode::Active,
     ));
 }
 
@@ -128,6 +288,7 @@ fn hero_round_interval_alternates_from_its_configured_start_round() {
 #[test]
 fn use_ex_skill_checks_the_active_skill_payload() {
     init_config();
+    let managers = BattleManagers::default();
     let pool = TargetPool::from_fight(&Fight {
         attacker: Some(FightTeam {
             entitys: vec![FightEntityInfo {
@@ -151,7 +312,7 @@ fn use_ex_skill_checks_the_active_skill_payload() {
             &condition,
             10,
             &[10],
-            None,
+            Some(&managers),
             &pool,
             TargetContext {
                 active_skill_id,
@@ -168,6 +329,7 @@ fn use_ex_skill_checks_the_active_skill_payload() {
 #[test]
 fn negated_use_ex_skill_matches_basic_incantations_only() {
     init_config();
+    let managers = BattleManagers::default();
     let pool = TargetPool::from_fight(&Fight {
         attacker: Some(FightTeam {
             entitys: vec![FightEntityInfo {
@@ -191,7 +353,7 @@ fn negated_use_ex_skill_matches_basic_incantations_only() {
             &condition,
             10,
             &[10],
-            None,
+            Some(&managers),
             &pool,
             TargetContext {
                 active_skill_id,
@@ -207,6 +369,7 @@ fn negated_use_ex_skill_matches_basic_incantations_only() {
 #[test]
 fn use_ex_skill_does_not_treat_an_enhanced_basic_skill_as_an_ultimate() {
     init_config();
+    let managers = BattleManagers::default();
     let pool = TargetPool::from_fight(&Fight {
         attacker: Some(FightTeam {
             entitys: vec![FightEntityInfo {
@@ -230,7 +393,7 @@ fn use_ex_skill_does_not_treat_an_enhanced_basic_skill_as_an_ultimate() {
             &condition,
             10,
             &[10],
-            None,
+            Some(&managers),
             &pool,
             TargetContext {
                 active_skill_id,
@@ -246,6 +409,7 @@ fn use_ex_skill_does_not_treat_an_enhanced_basic_skill_as_an_ultimate() {
 #[test]
 fn teammate_ex_skill_requires_the_other_ally_as_runtime_source() {
     init_config();
+    let managers = BattleManagers::default();
     let pool = TargetPool::from_fight(&Fight {
         attacker: Some(FightTeam {
             entitys: vec![
@@ -275,7 +439,7 @@ fn teammate_ex_skill_requires_the_other_ally_as_runtime_source() {
             &condition,
             10,
             &[10],
-            None,
+            Some(&managers),
             &pool,
             TargetContext {
                 active_skill_source_uid,
@@ -293,6 +457,7 @@ fn teammate_ex_skill_requires_the_other_ally_as_runtime_source() {
 #[test]
 fn target_use_ex_skill_requires_the_selected_runtime_actor() {
     init_config();
+    let managers = BattleManagers::default();
     let pool = TargetPool::from_fight(&Fight {
         attacker: Some(FightTeam {
             entitys: vec![
@@ -322,7 +487,7 @@ fn target_use_ex_skill_requires_the_selected_runtime_actor() {
             &condition,
             10,
             condition_targets,
-            None,
+            Some(&managers),
             &pool,
             TargetContext {
                 active_skill_source_uid,

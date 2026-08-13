@@ -6,9 +6,9 @@ use std::{
 
 use battle::engine::{runtime::BattleRuntime, skill::effect::catalog};
 use battle_preview::{
-    begin_round_inputs, canonical_comparison, expand_compressed_fight_steps, first_diff_path,
-    normalize_live_json, preview_attributes, preview_output_text,
-    render_json_with_capture_conventions, tower_plan_id,
+    begin_round_inputs, canonical_comparison, captured_opening_determinism,
+    expand_compressed_fight_steps, first_diff_path, normalize_live_json, preview_attributes,
+    preview_output_text, render_json_with_capture_conventions, tower_plan_id,
 };
 use sonettobuf::{BeginRoundReply, BeginRoundRequest, Fight, FightRound, FightStep};
 
@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run() -> anyhow::Result<()> {
-    init_config()?;
+    let db = init_config()?;
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
     let input_root = root.join("battles");
@@ -43,7 +43,7 @@ fn run() -> anyhow::Result<()> {
 
     for input in inputs {
         let original_text = fs::read_to_string(&input)?;
-        let (generated, original) = generate_reply(&input)?;
+        let (generated, original) = generate_reply(db, &input)?;
         if battle::engine::diagnostics::enabled(battle::engine::diagnostics::TraceArea::Damage)
             && let Some(generated_round) = generated.round.as_ref()
         {
@@ -81,10 +81,12 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn init_config() -> anyhow::Result<()> {
-    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/excel2json");
+fn init_config() -> anyhow::Result<&'static config::GameDB> {
+    let data = env::var_os("ENIGMA_BATTLE_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/excel2json"));
     config::init(data.to_str().unwrap())?;
-    Ok(())
+    Ok(config::configs::get())
 }
 
 fn captured_start_reply(round_path: &Path) -> anyhow::Result<serde_json::Value> {
@@ -102,17 +104,20 @@ fn captured_start_reply(round_path: &Path) -> anyhow::Result<serde_json::Value> 
     Ok(value)
 }
 
-fn generate_reply(path: &Path) -> anyhow::Result<(BeginRoundReply, serde_json::Value)> {
+fn generate_reply(
+    db: &'static config::GameDB,
+    path: &Path,
+) -> anyhow::Result<(BeginRoundReply, serde_json::Value)> {
     let mut original: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)?;
     expand_compressed_fight_steps(&mut original)?;
-    let round = replay_to_round(path)?;
+    let round = replay_to_round(db, path)?;
 
     Ok((BeginRoundReply { round: Some(round) }, original))
 }
 
 /// Replays captured requests through `BattleRuntime` from the captured start-state fixture.
 /// Later captured replies are comparison evidence and never supply generated round results.
-fn replay_to_round(path: &Path) -> anyhow::Result<FightRound> {
+fn replay_to_round(db: &'static config::GameDB, path: &Path) -> anyhow::Result<FightRound> {
     let round_index = round_index(path)?;
     let value = captured_start_reply(path)?;
     let fight = value.get("fight").cloned().ok_or_else(|| {
@@ -122,15 +127,31 @@ fn replay_to_round(path: &Path) -> anyhow::Result<FightRound> {
         )
     })?;
     let fight: Fight = serde_json::from_value(fight)?;
+    let captured_start_round: FightRound = serde_json::from_value(
+        value
+            .get("round")
+            .cloned()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "capture has no round"))?,
+    )?;
     let (ex_attributes, sp_attributes) = preview_attributes(&fight, path)?;
     let tower_rule_skills = tower_plan_id(path)
-        .map(|plan_id| {
-            battle::tower::system_plan_rule_skills(config::configs::get(), &fight, plan_id)
-        })
+        .map(|plan_id| battle::tower::system_plan_rule_skills(db, &fight, plan_id))
         .unwrap_or_default();
-    let mut runtime = BattleRuntime::new_with_attributes(fight, ex_attributes, sp_attributes);
+    let opening_determinism = captured_opening_determinism(db, &fight, &captured_start_round);
+    let mut runtime = BattleRuntime::new_with_attributes(
+        battle::catalog::BattleCatalog::new(db),
+        fight,
+        ex_attributes,
+        sp_attributes,
+    );
+    runtime
+        .inherit_absorb_hurt_map_layout(&captured_start_round)
+        .map_err(anyhow::Error::msg)?;
     runtime.extend_battle_rule_skills(tower_rule_skills);
-    let mut round_reply = runtime.start_round().map_err(io::Error::other)?;
+    let mut round_reply = runtime
+        .start_round_with_determinism(opening_determinism)
+        .map_err(io::Error::other)?;
+    let mut previous_captured_round = captured_start_round;
     replay_cloth_input(path, 0, &mut runtime)?;
     if battle::engine::diagnostics::enabled(battle::engine::diagnostics::TraceArea::Damage)
         && let Some(captured) = value.get("round").cloned()
@@ -154,10 +175,12 @@ fn replay_to_round(path: &Path) -> anyhow::Result<FightRound> {
         let request_path = path.with_file_name(request_name);
         let request = begin_round_request(&request_path)?;
         let captured = captured_round(&path.with_file_name(reply_name))?;
+        validate_captured_round_continuity(&previous_captured_round, &captured)?;
         report_rule_issues(&captured);
         seed_captured_randomness(&mut runtime, &captured);
         round_reply = runtime.advance_round(request).map_err(io::Error::other)?;
         replay_cloth_input(path, index, &mut runtime)?;
+        previous_captured_round = captured;
     }
 
     Ok(round_reply)
@@ -165,12 +188,20 @@ fn replay_to_round(path: &Path) -> anyhow::Result<FightRound> {
 
 fn seed_captured_randomness(runtime: &mut BattleRuntime, round: &FightRound) {
     runtime.seed_card_draws(round.team_a_cards2.clone());
+    runtime.seed_crystal_cards(
+        round
+            .before_cards1
+            .iter()
+            .filter(|card| card.temp_card.unwrap_or_default())
+            .cloned(),
+    );
     if runtime.fight_version() == 7 {
         runtime.seed_next_ai_cards(round.ai_use_cards.clone());
     }
     for ((skill_id, source_uid), choices) in captured_hidden_crits(round) {
         runtime.seed_hidden_crits(skill_id, source_uid, choices);
     }
+    runtime.seed_random_skills(captured_random_skill_choices(catalog::global(), round));
 }
 
 fn captured_hidden_crits(round: &FightRound) -> HashMap<(i32, i64), Vec<bool>> {
@@ -209,6 +240,36 @@ fn captured_hidden_crits(round: &FightRound) -> HashMap<(i32, i64), Vec<bool>> {
     choices
 }
 
+fn captured_random_skill_choices(
+    catalog: &battle::engine::skill::effect::SkillEffectCatalog,
+    round: &FightRound,
+) -> Vec<i32> {
+    fn visit(
+        catalog: &battle::engine::skill::effect::SkillEffectCatalog,
+        parent: &FightStep,
+        choices: &mut Vec<i32>,
+    ) {
+        let references = catalog.random_skill_references(parent.act_id.unwrap_or_default());
+        for effect in &parent.act_effect {
+            let Some(child) = effect.fight_step.as_ref() else {
+                continue;
+            };
+            if let Some(act_id) = child.act_id.filter(|act_id| *act_id > 0)
+                && references.contains(&act_id)
+            {
+                choices.push(act_id);
+            }
+            visit(catalog, child, choices);
+        }
+    }
+
+    let mut choices = Vec::new();
+    for step in &round.fight_step {
+        visit(catalog, step, &mut choices);
+    }
+    choices
+}
+
 fn replay_cloth_input(
     path: &Path,
     round_index: i32,
@@ -217,17 +278,40 @@ fn replay_cloth_input(
     let Some(parent) = path.parent() else {
         return Ok(());
     };
-    let input = parent.join(format!("UseClothSkillRequest_{round_index}.json"));
-    if !input.exists() {
-        return Ok(());
+    for input in cloth_input_paths(parent, round_index)? {
+        let mut request: serde_json::Value = serde_json::from_str(&fs::read_to_string(&input)?)?;
+        normalize_live_json(&mut request);
+        let request = serde_json::from_value(request)?;
+        runtime
+            .use_cloth_skill(request)
+            .ok_or_else(|| io::Error::other(format!("invalid cloth input: {}", input.display())))?;
     }
-    let mut request: serde_json::Value = serde_json::from_str(&fs::read_to_string(&input)?)?;
-    normalize_live_json(&mut request);
-    let request = serde_json::from_value(request)?;
-    runtime
-        .use_cloth_skill(request)
-        .ok_or_else(|| io::Error::other(format!("invalid cloth input: {}", input.display())))?;
     Ok(())
+}
+
+fn cloth_input_paths(parent: &Path, round_index: i32) -> io::Result<Vec<PathBuf>> {
+    let base_name = format!("UseClothSkillRequest_{round_index}");
+    let mut inputs = fs::read_dir(parent)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| is_cloth_input(path, &base_name))
+        .collect::<Vec<_>>();
+    inputs.sort();
+    Ok(inputs)
+}
+
+fn is_cloth_input(path: &Path, base_name: &str) -> bool {
+    path.file_stem()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name == base_name
+                || name
+                    .strip_prefix(base_name)
+                    .is_some_and(|suffix| suffix.starts_with('_'))
+        })
+        && path
+            .extension()
+            .is_some_and(|extension| extension == "json")
 }
 
 fn report_rule_issues(round: &FightRound) {
@@ -366,6 +450,23 @@ fn captured_round(path: &Path) -> anyhow::Result<FightRound> {
         )
     })?;
     Ok(serde_json::from_value(round)?)
+}
+
+fn validate_captured_round_continuity(previous: &FightRound, next: &FightRound) -> io::Result<()> {
+    match (previous.cur_round, next.cur_round) {
+        (Some(previous), Some(next_round))
+            if i64::from(next_round) != i64::from(previous) + 1
+                && !(next_round == previous && next.is_finish == Some(true)) =>
+        {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "captured round sequence is misaligned: previous round {previous}, next round {next_round}"
+                ),
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn round_index(path: &Path) -> anyhow::Result<i32> {

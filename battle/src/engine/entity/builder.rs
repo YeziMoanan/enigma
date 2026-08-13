@@ -1,109 +1,148 @@
 use anyhow::{Context, Result};
-use database::{
-    db::game::equipment::Equipment,
-    models::game::heros::{HeroData, visible_hero_skin},
-};
 use sonettobuf::{EnhanceInfoBox, EquipRecord, FightEntityInfo, HeroAttribute, PowerInfo};
+
+use crate::engine::manager::ex_point::ExPointKind;
 
 use super::{
     attr::Attr,
     destiny::Destiny,
+    input::{EquipmentBuildInput, HeroBuildInput},
     passive::Passive,
     skill::Skill,
-    stats::{StatInputs, Stats, rank_from_level},
+    stats::{BattleBalance, StatInputs, Stats, configured_rank},
 };
 
 pub struct EntityBuilder {
-    hero_data: HeroData,
-    equip: Option<Equipment>,
+    catalog: Option<crate::catalog::BattleCatalog>,
+    hero: HeroBuildInput,
+    equips: Vec<EquipmentBuildInput>,
+    stats: Option<Stats>,
     position: i32,
     team_type: i32,
     is_sub: bool,
 }
 
 impl EntityBuilder {
-    pub fn new(hero_data: HeroData, position: i32, team_type: i32, is_sub: bool) -> Self {
+    pub fn new(hero: HeroBuildInput, position: i32, team_type: i32, is_sub: bool) -> Self {
         Self {
-            hero_data,
-            equip: None,
+            catalog: None,
+            hero,
+            equips: Vec::new(),
+            stats: None,
             position,
             team_type,
             is_sub,
         }
     }
 
-    pub fn with_equip(mut self, equip: Equipment) -> Self {
-        self.equip = Some(equip);
+    pub fn with_equips(mut self, equips: Vec<EquipmentBuildInput>) -> Self {
+        self.equips = equips;
+        self
+    }
+
+    pub(crate) fn with_catalog(mut self, catalog: crate::catalog::BattleCatalog) -> Self {
+        self.catalog = Some(catalog);
+        self
+    }
+
+    pub(crate) fn with_stats(mut self, stats: Stats) -> Self {
+        self.stats = Some(stats);
+        self
+    }
+
+    pub fn with_balance(mut self, balance: BattleBalance, stats: Stats) -> Self {
+        let game = self
+            .catalog
+            .map(crate::catalog::BattleCatalog::game_data)
+            .unwrap_or_else(|| crate::catalog::BattleCatalog::global().game_data());
+        let inputs = balance.configured(game, StatInputs::from_build_input(&self.hero, None));
+        self.hero.level = inputs.level;
+        self.hero.rank = inputs.rank;
+        self.hero.talent = inputs.talent;
+        self.hero.talent_style = inputs.talent_style;
+        self.hero.talent_placements = inputs.talent_placements;
+        for equip in &mut self.equips {
+            equip.level = equip.level.max(balance.equip_level);
+        }
+        self.stats = Some(stats);
         self
     }
 
     pub fn build(self) -> FightEntityInfo {
-        let r = &self.hero_data.record;
-        let destiny = Destiny::get(r.destiny_stone, r.destiny_rank);
-        let attr = Attr::get(&self.hero_data, self.equip.as_ref());
-        let (sg1, sg2) = Skill::get(&self.hero_data, self.is_sub, destiny.as_ref());
-        let passives = Passive::get(
-            &self.hero_data,
-            self.equip
-                .as_ref()
-                .map(|equip| (equip.equip_id, equip.refine_lv)),
-            destiny.as_ref(),
-        );
+        let hero = &self.hero;
+        let game = self
+            .catalog
+            .map(crate::catalog::BattleCatalog::game_data)
+            .unwrap_or_else(|| crate::catalog::BattleCatalog::global().game_data());
+        let destiny = Destiny::exchanges(game, hero.destiny_stone, hero.destiny_rank);
+        let attr = self
+            .stats
+            .map(Stats::base)
+            .unwrap_or_else(|| Attr::get(hero, &self.equips));
+        let (sg1, sg2, configured_ex_skill) =
+            Skill::loadout(game, hero, self.is_sub, destiny.as_ref());
+        let ex_point_type = Self::ex_point_spec(game, hero.hero_id).0;
+        let ex_skill = Self::wire_ex_skill(ex_point_type, configured_ex_skill);
+        let passives = Passive::for_build(game, hero, &self.equips, destiny.as_ref());
         // Source attribution (Insight/Rank/Destiny/Psychube/Extra) is tracked
         // in `PassiveSkill` for downstream consumers; the wire format only
         // carries raw skill ids.
         let passive_skill_ids = passives.iter().map(|p| p.skill_id).collect();
+        let primary_equip_uid = self
+            .equips
+            .first()
+            .map(|equip| equip.uid)
+            .unwrap_or_default();
         let equips = self
-            .equip
-            .as_ref()
+            .equips
+            .iter()
             .map(|equip| EquipRecord {
                 equip_uid: Some(equip.uid),
                 equip_id: Some(equip.equip_id),
                 equip_lv: Some(equip.level),
-                refine_lv: Some(equip.refine_lv),
+                refine_lv: Some(equip.refine_level),
             })
-            .into_iter()
             .collect();
 
         FightEntityInfo {
-            uid: Some(r.uid),
-            model_id: Some(r.hero_id),
-            skin: Some(visible_hero_skin(r.hero_id, r.skin)),
+            uid: Some(hero.uid),
+            model_id: Some(hero.hero_id),
+            skin: Some(hero.skin),
             position: Some(self.position),
             entity_type: Some(1),
-            user_id: Some(r.user_id),
+            user_id: Some(hero.user_id),
             ex_point: Some(0),
-            level: Some(r.level),
+            level: Some(hero.level),
             current_hp: attr.hp,
             attr: Some(attr),
             base_attr: Some(attr),
             skill_group1: sg1,
             skill_group2: sg2,
             passive_skill: passive_skill_ids,
-            ex_skill: Some(Skill::get_ex(&self.hero_data, destiny.as_ref())),
+            ex_skill: Some(ex_skill),
             shield_value: Some(0),
             expoint_max_add: Some(0),
             buff_harm_statistic: Some(0),
-            equip_uid: Some(r.default_equip_uid),
+            equip_uid: Some(primary_equip_uid),
             trial_equip: Some(EquipRecord::default()),
-            ex_skill_level: Some(r.ex_skill_level),
-            power_infos: Self::hero_power_infos(r.hero_id),
+            ex_skill_level: Some(hero.ex_skill_level),
+            power_infos: Self::hero_power_infos(game, hero.hero_id),
             ex_skill_point_change: Some(0),
             team_type: Some(self.team_type),
             enhance_info_box: Some(EnhanceInfoBox {
-                uid: Some(r.uid),
+                uid: Some(hero.uid),
                 can_upgrade_ids: vec![],
                 upgraded_options: vec![],
             }),
             trial_id: Some(0),
-            career: Some(Self::career(r.hero_id)),
+            career: Some(Self::career(game, hero.hero_id)),
             status: Some(0),
             guard: Some(-1),
             sub_cd: Some(0),
-            ex_point_type: Some(Self::ex_point_type(r.hero_id)),
+            ex_point_type: Some(ex_point_type),
             equips,
-            destiny_stone: Some(r.destiny_stone),
-            destiny_rank: Some(r.destiny_rank),
+            destiny_stone: Some(hero.destiny_stone),
+            destiny_rank: Some(hero.destiny_rank),
             custom_unit_id: Some(0),
             ..Default::default()
         }
@@ -115,7 +154,23 @@ impl EntityBuilder {
         position: i32,
         team_type: i32,
     ) -> Result<(FightEntityInfo, Stats)> {
-        let tables = config::configs::get();
+        Self::configured_trial(
+            crate::catalog::BattleCatalog::global(),
+            trial_id,
+            uid,
+            position,
+            team_type,
+        )
+    }
+
+    pub(crate) fn configured_trial(
+        catalog: crate::catalog::BattleCatalog,
+        trial_id: i32,
+        uid: i64,
+        position: i32,
+        team_type: i32,
+    ) -> Result<(FightEntityInfo, Stats)> {
+        let tables = catalog.game_data();
         let trial = tables
             .hero_trial
             .get(trial_id)
@@ -124,7 +179,7 @@ impl EntityBuilder {
             .character
             .get(trial.hero_id)
             .with_context(|| format!("unknown trial character {}", trial.hero_id))?;
-        let rank = rank_from_level(trial.hero_id, trial.level);
+        let rank = configured_rank(tables, trial.hero_id, trial.level);
         let talent = tables
             .character_talent
             .iter()
@@ -136,7 +191,7 @@ impl EntityBuilder {
             .map(|row| row.talent_id)
             .max()
             .unwrap_or(1);
-        let stats = Stats::build(&StatInputs {
+        let inputs = StatInputs {
             hero_id: trial.hero_id,
             level: trial.level,
             rank,
@@ -145,20 +200,43 @@ impl EntityBuilder {
             equip_level: trial.equip_lv,
             talent,
             ..Default::default()
-        });
+        };
+        let linked_psychube = tables.linked_psychube_id(trial.hero_id, trial.equip_id);
+        let mut stats = Stats::configured(tables, &inputs);
+        if let Some(equip_id) = linked_psychube {
+            stats = stats
+                + Stats::equipment(
+                    tables,
+                    &StatInputs {
+                        equip_id,
+                        ..inputs.clone()
+                    },
+                );
+        }
         let attr = stats.base();
-        let (skill_group1, skill_group2, ex_skill) =
-            Skill::for_loadout(trial.hero_id, trial.ex_skill_lv);
-        let passive_skill = Passive::for_ranked_loadout(
+        let (skill_group1, skill_group2, configured_ex_skill) =
+            Skill::active_skills(tables, trial.hero_id, trial.ex_skill_lv);
+        let (ex_point_type, ex_point_max) = Self::ex_point_spec(tables, trial.hero_id);
+        let ex_skill = Self::wire_ex_skill(ex_point_type, configured_ex_skill);
+        let mut passive_skill = Passive::ranked(
+            tables,
             trial.hero_id,
             rank,
             trial.ex_skill_lv,
-            (trial.equip_id != 0).then_some((trial.equip_id, trial.equip_refine + 1)),
+            (trial.equip_id != 0).then_some((trial.equip_id, trial.equip_refine.max(1))),
             (trial.facets_id != 0).then_some((trial.facets_id, trial.facetslevel)),
-        )
-        .into_iter()
-        .map(|passive| passive.skill_id)
-        .collect();
+        );
+        if let Some(equip_id) = linked_psychube {
+            passive_skill.extend(Passive::psychube_from(
+                tables,
+                equip_id,
+                Some(trial.equip_refine.max(1)),
+            ));
+        }
+        let passive_skill = passive_skill
+            .into_iter()
+            .map(|passive| passive.skill_id)
+            .collect();
 
         Ok((
             FightEntityInfo {
@@ -192,7 +270,7 @@ impl EntityBuilder {
                     refine_lv: Some(trial.equip_refine),
                 }),
                 ex_skill_level: Some(trial.ex_skill_lv),
-                power_infos: Self::hero_power_infos(trial.hero_id),
+                power_infos: Self::hero_power_infos(tables, trial.hero_id),
                 ex_skill_point_change: Some(0),
                 team_type: Some(team_type),
                 enhance_info_box: Some(EnhanceInfoBox {
@@ -204,11 +282,11 @@ impl EntityBuilder {
                 status: Some(0),
                 guard: Some(-1),
                 sub_cd: Some(0),
-                ex_point_type: Some(Self::ex_point_type(trial.hero_id)),
+                ex_point_type: Some(ex_point_type),
                 destiny_stone: Some(trial.facets_id),
                 destiny_rank: Some(trial.facetslevel),
                 custom_unit_id: Some(0),
-                ex_point_max: Some(Self::ex_point_max(trial.hero_id)),
+                ex_point_max: Some(ex_point_max),
                 ..Default::default()
             },
             stats,
@@ -265,16 +343,15 @@ impl EntityBuilder {
         }
     }
 
-    fn ex_point_type(hero_id: i32) -> i32 {
-        Self::ex_point_spec(hero_id).0
+    fn wire_ex_skill(ex_point_type: i32, configured: i32) -> i32 {
+        if ExPointKind::from_wire(ex_point_type) == ExPointKind::DevicePower {
+            0
+        } else {
+            configured
+        }
     }
 
-    fn ex_point_max(hero_id: i32) -> i32 {
-        Self::ex_point_spec(hero_id).1
-    }
-
-    fn ex_point_spec(hero_id: i32) -> (i32, i32) {
-        let game = config::configs::get();
+    fn ex_point_spec(game: &config::GameDB, hero_id: i32) -> (i32, i32) {
         let spec = game
             .character_rank_replace
             .get(hero_id)
@@ -298,17 +375,12 @@ impl EntityBuilder {
         )
     }
 
-    fn career(hero_id: i32) -> i32 {
-        config::configs::get()
-            .character
-            .get(hero_id)
-            .map(|c| c.career)
-            .unwrap_or(0)
+    fn career(game: &config::GameDB, hero_id: i32) -> i32 {
+        game.character.get(hero_id).map(|c| c.career).unwrap_or(0)
     }
 
-    fn hero_power_infos(hero_id: i32) -> Vec<PowerInfo> {
-        config::configs::get()
-            .character
+    fn hero_power_infos(game: &config::GameDB, hero_id: i32) -> Vec<PowerInfo> {
+        game.character
             .get(hero_id)
             .into_iter()
             .flat_map(|c| parse_power_specs(&c.power_max))
@@ -329,4 +401,72 @@ fn parse_power_specs(spec: &str) -> Vec<(i32, i32)> {
             Some((power_id.parse().ok()?, max.parse().ok()?))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EntityBuilder;
+    use crate::engine::entity::{
+        input::{EquipmentBuildInput, HeroBuildInput},
+        stats::Stats,
+    };
+
+    #[test]
+    fn catalog_attached_builder_matches_the_legacy_entry_point() {
+        crate::test_support::init_config();
+        let hero = HeroBuildInput {
+            uid: 20_000_001,
+            user_id: 1,
+            hero_id: 3127,
+            skin: 312701,
+            level: 121,
+            rank: 4,
+            ex_skill_level: 3,
+            talent: 10,
+            ..Default::default()
+        };
+        let equips = vec![EquipmentBuildInput {
+            uid: 30_000_001,
+            equip_id: 1502,
+            level: 50,
+            break_level: 1,
+            refine_level: 1,
+        }];
+        let stats = Stats::build_for_loadout(&hero, &equips);
+        let legacy = EntityBuilder::new(hero.clone(), 1, 1, false)
+            .with_equips(equips.clone())
+            .build();
+        let explicit = EntityBuilder::new(hero, 1, 1, false)
+            .with_catalog(crate::catalog::BattleCatalog::new(
+                crate::test_support::game_data(),
+            ))
+            .with_equips(equips)
+            .with_stats(stats)
+            .build();
+
+        assert_eq!(explicit, legacy);
+    }
+
+    #[test]
+    fn device_power_trial_keeps_its_unique_skill_out_of_ex_skill() {
+        crate::test_support::init_config();
+
+        let legacy = EntityBuilder::trial(116385001, 10, 1, 1).unwrap();
+        let explicit = EntityBuilder::configured_trial(
+            crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+            116385001,
+            10,
+            1,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(explicit, legacy);
+        let (entity, _) = explicit;
+
+        assert_eq!(entity.model_id, Some(3149));
+        assert_eq!(entity.ex_point_type, Some(4));
+        assert_eq!(entity.ex_point_max, Some(100));
+        assert_eq!(entity.ex_skill, Some(0));
+    }
 }

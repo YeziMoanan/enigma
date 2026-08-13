@@ -19,13 +19,12 @@ pub use command::{
     CARD_ENERGY_CLEAR_ORIGIN, CARD_PLAY_ORIGIN, CardActionQueue, CardAddCrystal, CardAddGenerated,
     CardAddPrecast, CardAddTemporary, CardAddUniversal, CardChangeKind, CardChangeToTemporary,
     CardChanges, CardCommand, CardCommandError, CardConsumeForEffect, CardDraw, CardEnchantHand,
-    CardEnergyAllocation, CardEnergyChange, CardHandLimitChange, CardInsertUnnamed,
-    CardInvalidatePlayed, CardMarkTemporary, CardOpeningDraw, CardOwnerRemoval, CardPlay,
-    CardQueueUse, CardRankChange, CardRankFailure, CardRankResult, CardRecordCastChannel,
-    CardRedealKeepRanks, CardRefillOne, CardRefreshAiQueue, CardRemoveAiOwner,
-    CardReplaceOwnerSkills, CardSetAiQueue, CardSetTeamCards, CardSetUltimateAvailability,
-    CardSetup, CardUpdateUnnamed, CardUseUniversal, HandCardRankUp, QueuedCardRankChange,
-    QueuedCardRankUp, QueuedUseCard,
+    CardEnergyAllocation, CardEnergyChange, CardHandLimitChange, CardInvalidatePlayed,
+    CardMarkTemporary, CardOpeningDraw, CardOwnerRemoval, CardPlay, CardQueueUse, CardRankChange,
+    CardRankFailure, CardRankResult, CardRecordCastChannel, CardRedealKeepRanks, CardRefillOne,
+    CardRefreshAiQueue, CardRemoveAiOwner, CardRemoveOwner, CardReplaceOwnerSkills, CardSetAiQueue,
+    CardSetTeamCards, CardSetUltimateAvailability, CardSetup, CardUseUniversal, HandCardRankUp,
+    QueuedCardRankChange, QueuedCardRankUp, QueuedUseCard, TemporaryCardKind,
 };
 pub use deck::CardDeck;
 use deck::CardInstanceId;
@@ -50,7 +49,7 @@ pub struct CardManager {
     deck_num: i32,
     deck_capacity: i32,
     ai_queue: Vec<CardInfo>,
-    cleaned_ai_owners: HashSet<i64>,
+    cleaned_owners: HashSet<i64>,
     played: Vec<PlayedCard>,
     refilled: Vec<CardInfo>,
     rank_up: HashMap<(i64, i32), i32>,
@@ -69,6 +68,24 @@ pub struct CardRefill {
 }
 
 impl CardManager {
+    pub(crate) fn set_catalog(&mut self, catalog: crate::catalog::BattleCatalog) {
+        self.deck = std::mem::take(&mut self.deck).with_catalog(catalog);
+    }
+
+    fn skill_rank(&self, skill_id: i32) -> i32 {
+        self.deck
+            .catalog()
+            .map(|catalog| catalog.skill_rank(skill_id))
+            .unwrap_or_default()
+    }
+
+    fn card_skill_rank(&self, card: &CardInfo) -> i32 {
+        self.deck
+            .catalog()
+            .map(|catalog| catalog.card_skill_rank(card))
+            .unwrap_or_else(|| card.card_effect.unwrap_or_default())
+    }
+
     pub(crate) fn execute_command(
         &mut self,
         command: CardCommand,
@@ -83,7 +100,7 @@ impl CardManager {
             deck_num: 0,
             deck_capacity: 0,
             ai_queue: Vec::new(),
-            cleaned_ai_owners: HashSet::new(),
+            cleaned_owners: HashSet::new(),
             played: Vec::new(),
             refilled: Vec::new(),
             rank_up: HashMap::new(),
@@ -103,7 +120,7 @@ impl CardManager {
             deck_num: 0,
             deck_capacity: 0,
             ai_queue: Vec::new(),
-            cleaned_ai_owners: HashSet::new(),
+            cleaned_owners: HashSet::new(),
             played: Vec::new(),
             refilled: Vec::new(),
             rank_up: HashMap::new(),
@@ -125,7 +142,7 @@ impl CardManager {
             .iter()
             .enumerate()
             .filter(|(_, card)| self.is_registered_skill_card(owner_uid, card))
-            .map(|(index, card)| (index, crate::engine::entity::skill::card_skill_rank(card)))
+            .map(|(index, card)| (index, self.card_skill_rank(card)))
             .collect()
     }
 
@@ -180,7 +197,7 @@ impl CardManager {
 
     fn set_ai_queue(&mut self, cards: Vec<CardInfo>) {
         for owner_uid in cards.iter().filter_map(|card| card.uid) {
-            self.cleaned_ai_owners.remove(&owner_uid);
+            self.cleaned_owners.remove(&owner_uid);
         }
         self.ai_queue = cards;
     }
@@ -211,14 +228,30 @@ impl CardManager {
     }
 
     fn remove_ai_owner_cards(&mut self, owner_uid: i64) -> Option<Vec<i64>> {
-        if !self.cleaned_ai_owners.insert(owner_uid) {
+        if !self.cleaned_owners.insert(owner_uid) {
             return None;
         }
         self.ai_queue.retain(|card| card.uid != Some(owner_uid));
+        let catalog = self.deck.attached_catalog();
         let mut deck = CardDeck::new(std::mem::take(&mut self.ai_queue));
+        if let Some(catalog) = catalog {
+            deck = deck.with_catalog(catalog);
+        }
         let composed_owners = deck.compose_adjacent(&self.rank_up);
         self.ai_queue = deck.into_hand();
         Some(composed_owners)
+    }
+
+    fn remove_owner_cards(&mut self, owner_uid: i64, team_type: i32) -> Option<Vec<i64>> {
+        if team_type != 1 {
+            return self.remove_ai_owner_cards(owner_uid);
+        }
+        if !self.cleaned_owners.insert(owner_uid) {
+            return None;
+        }
+        self.deck.remove_owner_cards(owner_uid);
+        self.team_cards.retain(|card| card.uid != Some(owner_uid));
+        Some(Vec::new())
     }
 
     pub(crate) fn hand_mut(&mut self) -> &mut [CardInfo] {
@@ -235,7 +268,11 @@ impl CardManager {
         draw_pile: Vec<CardInfo>,
         deck_num: i32,
     ) {
+        let catalog = self.deck.attached_catalog();
         self.deck = CardDeck::with_draw_pile(hand, draw_pile);
+        if let Some(catalog) = catalog {
+            self.deck = std::mem::take(&mut self.deck).with_catalog(catalog);
+        }
         self.team_cards.clear();
         self.deck_num = deck_num;
         self.deck_capacity = deck_num;
@@ -338,18 +375,18 @@ impl CardManager {
     pub fn total_played_rank(&self) -> i32 {
         self.played
             .iter()
-            .map(|played| crate::engine::entity::skill::card_skill_rank(&played.card))
+            .map(|played| self.card_skill_rank(&played.card))
             .fold(0, i32::saturating_add)
     }
 
     pub fn resolving_ranks(&self) -> impl Iterator<Item = i32> + '_ {
         self.played
             .iter()
-            .map(|played| crate::engine::entity::skill::card_skill_rank(&played.card))
+            .map(|played| self.card_skill_rank(&played.card))
             .chain(
                 self.queued_use_cards
                     .iter()
-                    .map(|queued| crate::engine::entity::skill::card_skill_rank(&queued.card)),
+                    .map(|queued| self.card_skill_rank(&queued.card)),
             )
     }
 
@@ -382,17 +419,20 @@ impl CardManager {
     }
 
     pub fn resolve_played_ranks(&mut self) -> Vec<CardRankChange> {
+        let catalog = self.deck.catalog();
         self.played
             .iter_mut()
             .filter_map(|played| {
                 played.rank_change_pending.then(|| {
-                    let old_rank = crate::engine::entity::skill::skill_rank(
-                        played.card.skill_id.unwrap_or_default(),
-                    );
+                    let old_rank = catalog
+                        .map(|catalog| catalog.skill_rank(played.card.skill_id.unwrap_or_default()))
+                        .unwrap_or_default();
                     played.rank_change_pending = false;
                     played.card.skill_id = Some(played.skill_id);
-                    played.card.card_type =
-                        Some(crate::engine::entity::skill::skill_rank(played.skill_id));
+                    let new_rank = catalog
+                        .map(|catalog| catalog.skill_rank(played.skill_id))
+                        .unwrap_or_default();
+                    played.card.card_type = Some(new_rank);
                     let mut resolved_card = played.card.clone();
                     resolved_card.uid = Some(played.caster_uid);
                     CardRankChange {
@@ -400,8 +440,7 @@ impl CardManager {
                         card_index: played.card_index,
                         card: resolved_card,
                         rewritten: played.rewritten,
-                        rank_delta: crate::engine::entity::skill::skill_rank(played.skill_id)
-                            - old_rank,
+                        rank_delta: new_rank - old_rank,
                     }
                 })
             })
@@ -456,6 +495,7 @@ impl CardManager {
                 requested_delta: levels,
             });
         };
+        let catalog = self.deck.catalog();
         let owner_uid = self.played[played_index].card.uid.unwrap_or_default();
         let original = self.played[played_index]
             .card
@@ -466,12 +506,17 @@ impl CardManager {
             let next = if levels > 0 {
                 self.rank_up.get(&(owner_uid, skill_id)).copied()
             } else {
-                let current_rank = crate::engine::entity::skill::skill_rank(skill_id);
+                let current_rank = catalog
+                    .map(|catalog| catalog.skill_rank(skill_id))
+                    .unwrap_or_default();
                 if current_rank > 1 {
                     self.rank_up.iter().find_map(|((uid, lower), higher)| {
                         (*uid == owner_uid
                             && *higher == skill_id
-                            && crate::engine::entity::skill::skill_rank(*lower) == current_rank - 1)
+                            && catalog
+                                .map(|catalog| catalog.skill_rank(*lower))
+                                .unwrap_or_default()
+                                == current_rank - 1)
                             .then_some(*lower)
                     })
                 } else {
@@ -492,8 +537,12 @@ impl CardManager {
                 requested_delta: levels,
             });
         }
-        let old_rank = crate::engine::entity::skill::skill_rank(original);
-        let new_rank = crate::engine::entity::skill::skill_rank(skill_id);
+        let old_rank = catalog
+            .map(|catalog| catalog.skill_rank(original))
+            .unwrap_or_default();
+        let new_rank = catalog
+            .map(|catalog| catalog.skill_rank(skill_id))
+            .unwrap_or_default();
         let played = &mut self.played[played_index];
         played.skill_id = skill_id;
         played.card.skill_id = Some(skill_id);
@@ -524,8 +573,7 @@ impl CardManager {
             .get(&(owner_uid, skill_id))
             .copied()
             .ok_or(CardCommandError::InvalidCommand)?;
-        let rank_delta = crate::engine::entity::skill::skill_rank(next_skill_id)
-            - crate::engine::entity::skill::skill_rank(skill_id);
+        let rank_delta = self.skill_rank(next_skill_id) - self.skill_rank(skill_id);
         if rank_delta <= 0 {
             return Err(CardCommandError::InvalidCommand);
         }
@@ -608,7 +656,7 @@ impl CardManager {
         let owner_uid = target.uid.filter(|uid| *uid != 0)?;
         let target_skill = target.skill_id?;
         if universal.skill_id != Some(UniversalCardSkill::RankOne.id())
-            || crate::engine::entity::skill::card_skill_rank(target) != 1
+            || self.card_skill_rank(target) != 1
             || deck::has_enchant_type(target, EnchantedType::Lorenz)
         {
             return None;
@@ -622,6 +670,7 @@ impl CardManager {
     }
 
     fn redeal_keep_ranks(&mut self, replacements: Vec<CardInfo>) {
+        let catalog = self.deck.catalog();
         let mut replacements = replacements.into_iter();
         for card in self
             .deck
@@ -632,7 +681,9 @@ impl CardManager {
             let Some(mut replacement) = replacements.next() else {
                 break;
             };
-            let rank = crate::engine::entity::skill::card_skill_rank(card);
+            let rank = catalog
+                .map(|catalog| catalog.card_skill_rank(card))
+                .unwrap_or_else(|| card.card_effect.unwrap_or_default());
             let owner_uid = replacement.uid.unwrap_or_default();
             let mut skill_id = replacement.skill_id.unwrap_or_default();
             for _ in 1..rank {
@@ -727,9 +778,14 @@ impl CardManager {
     }
 
     pub fn add_basic_card_energy(&mut self, delta: i32, count: i32) {
+        let catalog = self.deck.catalog();
         for card in self.deck.hand_mut().iter_mut().filter(|card| {
             !card.temp_card.unwrap_or_default()
-                && (1..=3).contains(&crate::engine::entity::skill::card_skill_rank(card))
+                && (1..=3).contains(
+                    &catalog
+                        .map(|catalog| catalog.card_skill_rank(card))
+                        .unwrap_or_else(|| card.card_effect.unwrap_or_default()),
+                )
         }) {
             *card.energy.get_or_insert(0) += delta * count;
         }

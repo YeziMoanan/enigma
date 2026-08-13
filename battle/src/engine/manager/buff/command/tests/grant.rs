@@ -1,6 +1,234 @@
 use super::*;
 
 #[test]
+fn counted_channel_starts_from_its_configured_private_count() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut hp = HpManager::default();
+    hp.seed(&fight);
+    let mut manager = BuffManager::default();
+    manager.seed(&fight);
+
+    let added = manager
+        .execute(
+            &hp,
+            BuffCommand::Grant(BuffGrant {
+                origin: CommandOrigin {
+                    domain: RuleDomain::Behavior,
+                    key: DefinitionKey::new(1, "AddBuff"),
+                },
+                source_uid: 10,
+                target_uid: 10,
+                buff_id: 31000441,
+                amount: None,
+                occurrences: 1,
+                child_uid_reservations: 0,
+            }),
+        )
+        .unwrap()
+        .change
+        .added
+        .unwrap();
+
+    assert_eq!(added.buff.ex_info, Some(7));
+
+    let unsupported = manager
+        .execute(
+            &hp,
+            BuffCommand::Grant(BuffGrant {
+                origin: CommandOrigin {
+                    domain: RuleDomain::Behavior,
+                    key: DefinitionKey::new(1, "AddBuff"),
+                },
+                source_uid: 10,
+                target_uid: 10,
+                buff_id: 900045412,
+                amount: None,
+                occurrences: 1,
+                child_uid_reservations: 0,
+            }),
+        )
+        .unwrap()
+        .change
+        .added
+        .unwrap();
+
+    assert_eq!(unsupported.buff.ex_info, Some(0));
+}
+
+#[test]
+fn configured_round_bonus_extends_matching_buff_at_grant_time() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                buffs: vec![BuffInfo {
+                    buff_id: Some(72006),
+                    uid: Some(1),
+                    from_uid: Some(10),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut hp = HpManager::default();
+    hp.seed(&fight);
+    let mut manager = BuffManager::default();
+    manager.seed(&fight);
+
+    let added = manager
+        .execute(
+            &hp,
+            BuffCommand::Grant(BuffGrant {
+                origin: CommandOrigin {
+                    domain: RuleDomain::Behavior,
+                    key: DefinitionKey::new(1, "AddBuff"),
+                },
+                source_uid: 10,
+                target_uid: 10,
+                buff_id: 30630112,
+                amount: None,
+                occurrences: 1,
+                child_uid_reservations: 0,
+            }),
+        )
+        .unwrap()
+        .change
+        .added
+        .unwrap();
+
+    assert_eq!(added.buff.duration, Some(3));
+}
+
+#[test]
+fn configured_type_round_bonus_extends_matching_buff_at_grant_time() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    uid: Some(10),
+                    current_hp: Some(100),
+                    buffs: vec![BuffInfo {
+                        buff_id: Some(21241),
+                        uid: Some(1),
+                        from_uid: Some(10),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                FightEntityInfo {
+                    uid: Some(20),
+                    current_hp: Some(100),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut hp = HpManager::default();
+    hp.seed(&fight);
+    let mut manager = BuffManager::default();
+    manager.seed(&fight);
+
+    let added = manager
+        .execute(
+            &hp,
+            BuffCommand::Grant(BuffGrant {
+                origin: CommandOrigin {
+                    domain: RuleDomain::Behavior,
+                    key: DefinitionKey::new(1, "AddBuff"),
+                },
+                source_uid: 10,
+                target_uid: 20,
+                buff_id: 300704,
+                amount: None,
+                occurrences: 1,
+                child_uid_reservations: 0,
+            }),
+        )
+        .unwrap()
+        .change
+        .added
+        .unwrap();
+
+    assert_eq!(added.buff.duration, Some(3));
+}
+
+#[test]
+fn configured_type_round_bonus_scales_with_source_buff_count() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    uid: Some(10),
+                    current_hp: Some(100),
+                    buffs: vec![BuffInfo {
+                        buff_id: Some(11410011),
+                        uid: Some(1),
+                        from_uid: Some(10),
+                        layer: Some(2),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                FightEntityInfo {
+                    uid: Some(20),
+                    current_hp: Some(100),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut hp = HpManager::default();
+    hp.seed(&fight);
+    let mut manager = BuffManager::default();
+    manager.seed(&fight);
+
+    let added = manager
+        .execute(
+            &hp,
+            BuffCommand::Grant(BuffGrant {
+                origin: CommandOrigin {
+                    domain: RuleDomain::Behavior,
+                    key: DefinitionKey::new(1, "AddBuff"),
+                },
+                source_uid: 10,
+                target_uid: 20,
+                buff_id: 300704,
+                amount: None,
+                occurrences: 1,
+                child_uid_reservations: 0,
+            }),
+        )
+        .unwrap()
+        .change
+        .added
+        .unwrap();
+
+    assert_eq!(added.buff.duration, Some(4));
+}
+
+#[test]
 fn stateful_grant_markers_use_the_committed_buff_params() {
     crate::test_support::init_config();
     let mut manager = BuffManager::default();
@@ -34,79 +262,6 @@ fn stateful_grant_markers_use_the_committed_buff_params() {
         })
         .unwrap();
     assert_eq!(marker.effect_num, 10);
-}
-
-#[test]
-fn round_start_cleanup_preserves_private_state_owned_by_active_buffs() {
-    crate::test_support::init_config();
-    let hp = HpManager::default();
-    let mut manager = BuffManager::default();
-    manager.seed(&Fight {
-        version: Some(7),
-        attacker: Some(FightTeam {
-            entitys: vec![FightEntityInfo {
-                uid: Some(10),
-                current_hp: Some(100),
-                buffs: vec![BuffInfo {
-                    buff_id: Some(31430145),
-                    uid: Some(4),
-                    from_uid: Some(10),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }),
-        ..Default::default()
-    });
-    manager
-        .execute(
-            &hp,
-            BuffCommand::AccumulateActValue(BuffAccumulateActValue {
-                origin: CommandOrigin {
-                    domain: RuleDomain::BuffAct,
-                    key: DefinitionKey::new(1128, "RecordTeamExElectricTransConsumeValue"),
-                },
-                target_uid: 10,
-                buff_uid: 4,
-                act_id: 1128,
-                delta: 30,
-            }),
-        )
-        .unwrap();
-
-    manager
-        .execute(
-            &hp,
-            BuffCommand::CleanupRoundStart(BuffRoundStartCleanup::new()),
-        )
-        .unwrap();
-
-    assert_eq!(manager.act_value(4, 1128), 30);
-    let granted = manager
-        .execute(
-            &hp,
-            BuffCommand::Grant(BuffGrant {
-                origin: CommandOrigin {
-                    domain: RuleDomain::Behavior,
-                    key: DefinitionKey::new(1, "AddBuff"),
-                },
-                source_uid: 10,
-                target_uid: 10,
-                buff_id: 31430131,
-                amount: None,
-                occurrences: 1,
-                child_uid_reservations: 0,
-            }),
-        )
-        .unwrap()
-        .change
-        .added
-        .unwrap();
-    assert_eq!(
-        manager.grant_value(granted.buff.uid.unwrap(), 1127),
-        Some(600)
-    );
 }
 
 #[test]
@@ -641,6 +796,15 @@ fn static_control_immunity_rejects_without_consuming_the_carrier() {
     assert!(changes.change.removed.is_empty());
     assert!(manager.has_buff_id(-1, 5140006));
     assert!(!manager.has_buff_id(-1, 4010));
+    assert!(matches!(
+        changes.events().as_slice(),
+        [crate::engine::event::payload::BattleEvent::BuffRejected(rejected)]
+            if rejected.source_uid == -2
+                && rejected.target_uid == -1
+                && rejected.buff_id == 4010
+                && rejected.type_id > 0
+                && rejected.blocker_buff_id == 5140006
+    ));
 }
 
 #[test]

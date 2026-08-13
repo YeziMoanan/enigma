@@ -11,12 +11,14 @@ enum TargetRule {
     Logic,
     Fixed(i64),
     EventSubject,
+    EventSource,
     Source,
     Allies,
     AssistBoss,
     BossAllies,
     MainAllies,
     OtherAllies,
+    BoundAlly,
     RandomAllyByRng,
     RandomOtherAllyByRng,
     LowestHpPercentageAlly,
@@ -28,7 +30,6 @@ enum TargetRule {
     AdjacentAllies,
     AdjacentAlly(i32),
     RelativeAllies { before: bool, include_source: bool },
-    OddPositionAllies,
     AlliesWithBattleTag,
     AlliesWithMonsterLabel(i32),
     Runtime,
@@ -179,6 +180,7 @@ impl TargetResolver {
             }
             TargetRule::Fixed(uid) => vec![uid],
             TargetRule::EventSubject => runtime_target(context),
+            TargetRule::EventSource => event_source(context),
             TargetRule::Source => vec![source_uid],
             TargetRule::Allies => {
                 if crate::engine::fight::rules::is_side_uid(source_uid) {
@@ -191,6 +193,10 @@ impl TargetResolver {
             TargetRule::BossAllies => pool.boss_allies(source_uid),
             TargetRule::MainAllies => uids(pool.main_allies(source_uid)),
             TargetRule::OtherAllies => other_allies(pool, source_uid, context),
+            TargetRule::BoundAlly => managers
+                .and_then(|managers| managers.contract.bound_uid(source_uid))
+                .into_iter()
+                .collect(),
             TargetRule::RandomAllyByRng => random_ally_by_rng(pool.allies(source_uid), determinism),
             TargetRule::RandomOtherAllyByRng => random_ally_by_rng(
                 &pool
@@ -219,12 +225,6 @@ impl TargetResolver {
             } => {
                 allies_before_or_after(pool.allies(source_uid), source_uid, before, include_source)
             }
-            TargetRule::OddPositionAllies => pool
-                .allies(source_uid)
-                .iter()
-                .filter(|entity| matches!(entity.position, 1 | 3))
-                .map(|entity| entity.uid)
-                .collect(),
             TargetRule::AlliesWithBattleTag => request
                 .raw
                 .first()
@@ -492,6 +492,7 @@ pub fn targets_enemy(code: i32) -> Option<bool> {
         | TargetRule::BossAllies
         | TargetRule::MainAllies
         | TargetRule::OtherAllies
+        | TargetRule::BoundAlly
         | TargetRule::RandomAllyByRng
         | TargetRule::RandomOtherAllyByRng
         | TargetRule::LowestHpPercentageAlly
@@ -503,7 +504,6 @@ pub fn targets_enemy(code: i32) -> Option<bool> {
         | TargetRule::AdjacentAllies
         | TargetRule::AdjacentAlly(_)
         | TargetRule::RelativeAllies { .. }
-        | TargetRule::OddPositionAllies
         | TargetRule::AlliesWithBattleTag
         | TargetRule::AlliesWithMonsterLabel(_)
         | TargetRule::AlliesWithStatus
@@ -529,6 +529,7 @@ pub fn targets_enemy(code: i32) -> Option<bool> {
         TargetRule::Logic
         | TargetRule::Fixed(_)
         | TargetRule::EventSubject
+        | TargetRule::EventSource
         | TargetRule::Runtime
         | TargetRule::SelectedTarget
         | TargetRule::SynchronizationTarget => None,
@@ -545,6 +546,7 @@ fn target_rule(code: i32) -> Option<TargetRule> {
         1005 => TargetRule::BossAllies,
         101 => TargetRule::MainAllies,
         102 => TargetRule::OtherAllies,
+        309 => TargetRule::BoundAlly,
         106 => TargetRule::RandomAllyByRng,
         131 => TargetRule::RandomOtherAllyByRng,
         107 => TargetRule::LowestHpPercentageAlly,
@@ -574,14 +576,15 @@ fn target_rule(code: i32) -> Option<TargetRule> {
             include_source: false,
         },
         124 => TargetRule::AllyPosition(1),
-        127 => TargetRule::OddPositionAllies,
+        127 => TargetRule::AllyPosition(4),
         132 => TargetRule::AlliesWithBattleTag,
         1007 => TargetRule::AlliesWithMonsterLabel(7),
         1008 => TargetRule::AlliesWithMonsterLabel(8),
         1009 => TargetRule::AlliesWithMonsterLabel(9),
         1010 => TargetRule::AlliesWithMonsterLabel(10),
         1 => TargetRule::SelectedTarget,
-        203 | 204 | 205 | 233 | 303 | 1001 | 1002 => TargetRule::Runtime,
+        203 => TargetRule::EventSource,
+        204 | 205 | 233 | 303 | 1001 | 1002 => TargetRule::Runtime,
         7 => TargetRule::SynchronizationTarget,
         201 => TargetRule::SingleOrRandomEnemy,
         206 => TargetRule::RandomEnemyByRng,
@@ -668,6 +671,13 @@ fn runtime_target(context: TargetContext) -> Vec<i64> {
     } else {
         vec![context.runtime_target_uid]
     }
+}
+
+fn event_source(context: TargetContext) -> Vec<i64> {
+    (context.event_source_uid != 0)
+        .then_some(context.event_source_uid)
+        .into_iter()
+        .collect()
 }
 
 fn selected_target(pool: &TargetPool, source_uid: i64, context: TargetContext) -> Vec<i64> {

@@ -8,7 +8,7 @@ fn entity_info_projects_manager_owned_state() {
     };
 
     crate::test_support::init_config();
-    let mut runtime = BattleRuntime::new(Fight {
+    let mut runtime = runtime(Fight {
         attacker: Some(FightTeam {
             entitys: vec![FightEntityInfo {
                 uid: Some(10),
@@ -52,16 +52,71 @@ fn entity_info_projects_manager_owned_state() {
 }
 
 #[test]
-fn refill_and_player_move_compositions_grant_cloth_power() {
+fn third_wave_entity_info_uses_the_latest_authoritative_roster() {
     crate::test_support::init_config();
-    let power = crate::engine::round::power::ClothPower::for_fight(&Fight {
+    let (entitys, sub_entitys) =
+        crate::engine::fight::defender::Defender::build_wave_entities(161301, 3, 2, 0).unwrap();
+    let mut runtime = runtime(Fight {
+        battle_id: Some(1613),
+        episode_id: Some(10624),
+        version: Some(7),
+        cur_wave: Some(1),
+        defender: Some(FightTeam {
+            entitys,
+            sub_entitys,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    runtime
+        .managers
+        .advance_wave(&mut runtime.fight)
+        .unwrap()
+        .unwrap();
+    let third = runtime
+        .managers
+        .advance_wave(&mut runtime.fight)
+        .unwrap()
+        .unwrap();
+    let uid = third.entering_uids[0];
+    let expected = third
+        .fight
+        .defender
+        .as_ref()
+        .unwrap()
+        .entitys
+        .iter()
+        .find(|entity| entity.uid == Some(uid))
+        .unwrap();
+
+    assert_eq!(third.wave, 3);
+    assert!(expected.current_hp.unwrap_or_default() > 0);
+    assert_eq!(runtime.entity_info(uid).as_ref(), Some(expected));
+    assert_eq!(runtime.reconnect_state().0.cur_wave, Some(3));
+}
+
+#[test]
+fn refill_and_all_compositions_grant_cloth_power() {
+    crate::test_support::init_config();
+    let fight = Fight {
         attacker: Some(FightTeam {
             cloth_id: Some(1),
             ..Default::default()
         }),
         ..Default::default()
-    })
-    .unwrap();
+    };
+    let power = crate::catalog::BattleCatalog::new(crate::test_support::game_data())
+        .cloth_power(&fight)
+        .unwrap();
+    assert_eq!(
+        power,
+        crate::engine::round::power::ClothPower::for_fight(
+            crate::test_support::game_data(),
+            &fight,
+        )
+        .unwrap()
+    );
 
     assert_eq!(
         round::cloth_power_after_card_change(
@@ -70,7 +125,6 @@ fn refill_and_player_move_compositions_grant_cloth_power() {
             crate::engine::manager::card::CardChangeKind::Refilled,
             false,
             1,
-            false,
         ),
         17
     );
@@ -81,18 +135,6 @@ fn refill_and_player_move_compositions_grant_cloth_power() {
             crate::engine::manager::card::CardChangeKind::Composed,
             false,
             1,
-            false,
-        ),
-        15
-    );
-    assert_eq!(
-        round::cloth_power_after_card_change(
-            &power,
-            15,
-            crate::engine::manager::card::CardChangeKind::Composed,
-            false,
-            1,
-            true,
         ),
         17
     );
@@ -126,7 +168,7 @@ fn end_fight_statistics_project_owned_runtime_history() {
     };
 
     crate::test_support::init_config();
-    let mut runtime = BattleRuntime::new(Fight {
+    let mut runtime = runtime(Fight {
         attacker: Some(FightTeam {
             entitys: vec![FightEntityInfo {
                 uid: Some(10),

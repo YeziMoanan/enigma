@@ -7,6 +7,11 @@ enum RefillStage {
     RoundStart,
 }
 
+pub(super) struct OpeningRefillSeed<'a> {
+    pub(super) draws: Vec<sonettobuf::CardInfo>,
+    pub(super) ultimate_owner_uids: &'a [i64],
+}
+
 /// Refills the normal hand deficit, then resolves composition and replacement rules.
 pub fn run_round_refill(
     managers: &mut BattleManagers,
@@ -27,6 +32,7 @@ pub fn run_round_refill(
         team_type,
         RefillStage::AfterActions,
         Vec::new(),
+        &[],
     )
 }
 
@@ -49,6 +55,7 @@ pub(super) fn run_round_start_refill(
         team_type,
         RefillStage::RoundStart,
         Vec::new(),
+        &[],
     )
 }
 
@@ -59,7 +66,7 @@ pub(super) fn run_opening_hand_refill(
     determinism: &mut RoundDeterminism,
     context: TargetContext,
     hand_size: usize,
-    opening_draws: Vec<sonettobuf::CardInfo>,
+    seed: OpeningRefillSeed<'_>,
 ) -> Result<DrainResult, DrainError> {
     run_card_refill(
         managers,
@@ -70,7 +77,8 @@ pub(super) fn run_opening_hand_refill(
         hand_size,
         1,
         RefillStage::Opening,
-        opening_draws,
+        seed.draws,
+        seed.ultimate_owner_uids,
     )
 }
 
@@ -85,6 +93,7 @@ fn run_card_refill(
     team_type: i32,
     stage: RefillStage,
     opening_draws: Vec<sonettobuf::CardInfo>,
+    opening_ultimate_owner_uids: &[i64],
 ) -> Result<DrainResult, DrainError> {
     let mut opening_draws = opening_draws.into_iter();
     let mut result = begin_round_phase(RoundPhase::CardRefill);
@@ -142,8 +151,28 @@ fn run_card_refill(
     );
     append_round_phase(&mut result, composition);
     loop {
-        let ready_normal = if stage != RefillStage::Opening {
-            crate::engine::mechanic::card::CardMechanic.normal_ultimate_cards(pool, managers)
+        let needs_normal_card = match stage {
+            RefillStage::Opening => managers.card.hand().len() < hand_size,
+            RefillStage::AfterActions | RefillStage::RoundStart => {
+                crate::engine::mechanic::card::CardMechanic.refill_hand_len(managers, pool)
+                    < hand_size
+            }
+        };
+        let ready_normal = if stage == RefillStage::Opening || needs_normal_card {
+            let ready =
+                crate::engine::mechanic::card::CardMechanic.normal_ultimate_cards(pool, managers);
+            if stage == RefillStage::Opening {
+                ready
+                    .into_iter()
+                    .filter(|card| {
+                        card.uid.is_some_and(|owner_uid| {
+                            opening_ultimate_owner_uids.contains(&owner_uid)
+                        })
+                    })
+                    .collect()
+            } else {
+                ready
+            }
         } else {
             Vec::new()
         };
@@ -159,13 +188,6 @@ fn run_card_refill(
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
-        };
-        let needs_normal_card = match stage {
-            RefillStage::Opening => managers.card.hand().len() < hand_size,
-            RefillStage::AfterActions | RefillStage::RoundStart => {
-                crate::engine::mechanic::card::CardMechanic.refill_hand_len(managers, pool)
-                    < hand_size
-            }
         };
         if !needs_normal_card
             && ready_normal.is_empty()
@@ -207,7 +229,8 @@ fn run_card_refill(
             .filter(|card| {
                 pool.entity(card.uid.unwrap_or_default())
                     .is_none_or(|entity| {
-                        !crate::engine::mechanic::card::CardMechanic.is_ultimate(card, entity)
+                        !crate::engine::mechanic::card::CardMechanic
+                            .is_ultimate(managers, card, entity)
                     })
             })
             .cloned()
@@ -241,9 +264,9 @@ fn run_card_refill(
         let is_ultimate = pool
             .entity(card.uid.unwrap_or_default())
             .is_some_and(|entity| {
-                crate::engine::mechanic::card::CardMechanic.is_ultimate(&card, entity)
+                crate::engine::mechanic::card::CardMechanic.is_ultimate(managers, &card, entity)
             });
-        let is_device = crate::engine::mechanic::card::CardMechanic.is_device_card(&card);
+        let is_device = crate::engine::mechanic::card::CardMechanic.is_device_card(managers, &card);
         if is_ultimate
             && !ready_ultimates
                 .iter()
@@ -322,6 +345,21 @@ fn run_card_refill(
         append_round_phase(&mut result, summary);
     }
     Ok(result)
+}
+
+pub fn run_post_action_refill_settlement(
+    managers: &mut BattleManagers,
+    pool: &TargetPool,
+    catalog: &SkillEffectCatalog,
+    determinism: &mut RoundDeterminism,
+    context: TargetContext,
+) -> Result<DrainResult, DrainError> {
+    let replenishment = buff_act::ex_point_overflow_bank::replenishment_rule_ops(managers);
+    if replenishment.is_empty() {
+        Ok(DrainResult::default())
+    } else {
+        drain::run_buff_act_ops(managers, pool, catalog, determinism, context, replenishment)
+    }
 }
 
 /// Emits the semantic round-deal cue without mutating card storage.

@@ -37,6 +37,7 @@ pub fn run_command_group(
                 frame_group: None,
                 independent_parent_group: None,
                 frame_owner: None,
+                subscriber_owner_uid: None,
             }
         })
         .collect::<VecDeque<_>>();
@@ -76,28 +77,6 @@ pub fn run_setup_schedule(
         result.frames.extend(stage_result.frames);
     }
     Ok(result)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn run_setup_schedule_for_owners(
-    managers: &mut BattleManagers,
-    pool: &TargetPool,
-    catalog: &SkillEffectCatalog,
-    determinism: &mut RoundDeterminism,
-    context: TargetContext,
-    schedule: &[(SetupStage, i32)],
-    owner_uids: &[i64],
-) -> Result<DrainResult, DrainError> {
-    run_setup_schedule_with_container(
-        managers,
-        pool,
-        catalog,
-        determinism,
-        context,
-        schedule,
-        Some(owner_uids),
-        SetupFrameContainer::Standalone,
-    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -218,6 +197,7 @@ fn run_setup_schedule_with_container(
             std::iter::empty(),
             |_| Vec::new(),
             owner_uids,
+            false,
             frame_container,
         )?;
         result.outcomes.extend(stage_result.outcomes);

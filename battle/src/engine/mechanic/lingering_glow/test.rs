@@ -37,12 +37,16 @@ fn round_start_bonus_snapshots_remaining_pool_then_depletes_half() {
                 FightEntityInfo {
                     uid: Some(11),
                     current_hp: Some(100),
-                    buffs: vec![BuffInfo {
-                        uid: Some(22),
-                        buff_id: Some(30810301),
-                        from_uid: Some(11),
-                        ..Default::default()
-                    }],
+                    buffs: [30810301, 30810302, 30810303]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, buff_id)| BuffInfo {
+                            uid: Some(22 + index as i64),
+                            buff_id: Some(buff_id),
+                            from_uid: Some(11),
+                            ..Default::default()
+                        })
+                        .collect(),
                     ..Default::default()
                 },
             ],
@@ -81,7 +85,7 @@ fn round_start_bonus_snapshots_remaining_pool_then_depletes_half() {
         1,
     );
 
-    assert_eq!(ops.len(), 5);
+    assert_eq!(ops.len(), 9);
     assert!(ops[..2].iter().all(|op| matches!(
         op,
         RuleOp::Command(BattleCommand::Buff(BuffCommand::GrantChild(
@@ -96,45 +100,102 @@ fn round_start_bonus_snapshots_remaining_pool_then_depletes_half() {
             ..
         }))
     ));
-    assert!(matches!(
-        ops[3],
-        RuleOp::Command(BattleCommand::Buff(BuffCommand::SetInternalState(
-            BuffSetState {
-                target_uid: 11,
-                buff_uid: 22,
-                act_info: Some(ref info),
-                ..
-            }
-        ))) if info[0].act_id == Some(1062) && info[0].param == [1_125]
-    ));
-    assert!(matches!(
-        ops[4],
-        RuleOp::BuffActInfoMarker(BuffActInfoMarkerResult {
-            target_uid: 11,
-            act_id: 1062,
-            ref params,
-            ..
-        }) if params == &[1_125]
-    ));
-    let RuleOp::Command(BattleCommand::Buff(counter)) = ops[3].clone() else {
-        panic!("counter state command")
-    };
-    managers.execute_buff(counter).unwrap();
+    assert_eq!(
+        ops.iter()
+            .filter_map(|op| match op {
+                RuleOp::BuffActInfoMarker(BuffActInfoMarkerResult {
+                    buff_uid,
+                    act_id: 1062,
+                    params,
+                    ..
+                }) => Some((*buff_uid, params.as_slice())),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![(22, &[1_125][..]), (23, &[1_125][..]), (24, &[1_125][..])]
+    );
+    for op in &ops {
+        if let RuleOp::Command(BattleCommand::Buff(BuffCommand::SetInternalState(state))) = op {
+            managers
+                .execute_buff(BuffCommand::SetInternalState(state.clone()))
+                .unwrap();
+        }
+    }
     let next = round_start_attribute_rule_ops_for_team(
         &managers,
         crate::engine::skill::effect::catalog::global(),
         1,
     );
-    assert!(matches!(
-        next[4],
-        RuleOp::BuffActInfoMarker(BuffActInfoMarkerResult { ref params, .. })
-            if params == &[2_250]
-    ));
+    assert_eq!(
+        next.iter()
+            .filter_map(|op| match op {
+                RuleOp::BuffActInfoMarker(BuffActInfoMarkerResult { params, .. }) => {
+                    Some(params.as_slice())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![&[2_250][..], &[2_250][..], &[2_250][..]]
+    );
     assert_eq!(managers.gauge.get(key(1)).unwrap().current, 45);
 }
 
 #[test]
-fn activation_change_and_crystals_keep_separate_owners() {
+fn direct_lingering_glow_gain_uses_the_active_team_modifier() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                buffs: vec![BuffInfo {
+                    uid: Some(20),
+                    buff_id: Some(31270410),
+                    from_uid: Some(10),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut managers = BattleManagers::seeded(&fight);
+    let origin = crate::engine::skill::rule::CommandOrigin {
+        domain: crate::engine::skill::rule::RuleDomain::Behavior,
+        key: crate::engine::skill::rule::DefinitionKey::new(60191, "BloodPoolValueChange"),
+    };
+    managers
+        .execute_gauge(GaugeCommand::new(
+            origin,
+            key(1),
+            GaugeOperation::Enable { max: Some(750) },
+        ))
+        .unwrap();
+
+    let ops = value_change_rule_ops(
+        &managers,
+        GaugeCommand::new(origin, key(1), GaugeOperation::ChangeValue { delta: 20 })
+            .with_raw_delta(20_000)
+            .with_progress_raw_delta(20_000),
+    );
+
+    assert!(matches!(
+        ops.as_slice(),
+        [RuleOp::Command(BattleCommand::Gauge(GaugeCommand {
+            operation: GaugeOperation::AccumulateRawValue {
+                amount: 21_600,
+                stream: 60191,
+            },
+            raw_delta: Some(21_600),
+            progress_raw_delta: Some(21_600),
+            ..
+        }))]
+    ));
+}
+
+#[test]
+fn activation_counter_floors_raw_progress_and_crystals_keep_separate_owners() {
     let mut catalog = SkillEffectCatalog::default();
     catalog.insert(ParsedSkillEffect {
         skill_id: 31340163,
@@ -203,13 +264,13 @@ fn activation_change_and_crystals_keep_separate_owners() {
         visible_counter_info(&managers.gauge, &features, 1)
             .unwrap()
             .current,
-        2
+        1
     );
     assert_eq!(
-        runtime.decrement_counter_info(&features, 1).unwrap().value,
+        runtime.decrement_counter_infos(&features, 1)[0].value,
         3_332
     );
-    assert!(managers.emanation.select(10, 101));
+    assert!(managers.emanation.select(10, 110));
     assert_eq!(managers.emanation.counts(10), [1, 1, 0]);
     assert_eq!(managers.emanation.choose(10, 0), Some(0));
 }
@@ -260,7 +321,7 @@ fn ready_cast_is_derived_from_the_subscriber_and_current_state() {
             source_buff_id: 31340003,
         },
     ));
-    assert!(managers.emanation.select(10, 20));
+    assert!(managers.emanation.select(10, 2));
     let use_skill = crate::engine::skill::subscriber::BuffActSubscriber {
         owner_uid: 10,
         source_uid: 10,

@@ -116,6 +116,43 @@ pub fn dispatch_event_phase(
     )
 }
 
+pub fn dispatch_skill_event_phase(
+    pool: &TargetPool,
+    managers: &BattleManagers,
+    catalog: &SkillEffectCatalog,
+    determinism: &mut crate::engine::runtime::determinism::RoundDeterminism,
+    owner_skill: (i64, i32),
+    event: &BattleEvent,
+    publication: crate::engine::event::subscription::PublicationPhase,
+) -> Result<DispatchBatch, SubscriberError> {
+    let (owner_uid, skill_id) = owner_skill;
+    let skills = catalog
+        .compiled_subscription_lanes(skill_id)
+        .map_err(|route| SubscriberError::UncompiledRoute { skill_id, route })?
+        .into_iter()
+        .filter(|(_, key)| event.subscription_kinds().any(|event| event == key.event))
+        .map(|(slot_index, key)| SkillSubscriber {
+            owner_uid,
+            skill_id,
+            slot_index: Some(slot_index),
+            key,
+        })
+        .collect();
+    let mut subscribers = subscriber::EventSubscribers {
+        skills,
+        buff_acts: Vec::new(),
+    };
+    retain_publication(&mut subscribers, publication);
+    Ok(dispatch_subscribers(
+        subscribers,
+        pool,
+        managers,
+        catalog,
+        determinism,
+        event,
+    ))
+}
+
 fn dispatch_subscribers(
     subscribers: subscriber::EventSubscribers,
     pool: &TargetPool,
@@ -239,6 +276,9 @@ fn skill_subscriber_observes_action(
         crate::engine::skill::condition::registry::SkillActionObserver::Actor => {
             subscriber.owner_uid == action.source_uid
         }
+        crate::engine::skill::condition::registry::SkillActionObserver::AttackTarget => {
+            action.is_attack && action.target_uids.contains(&subscriber.owner_uid)
+        }
         crate::engine::skill::condition::registry::SkillActionObserver::Team => {
             pool.source_is_attacker(subscriber.owner_uid)
                 == pool.source_is_attacker(action.source_uid)
@@ -250,8 +290,7 @@ fn skill_subscriber_observes_action(
         crate::engine::skill::condition::registry::SkillActionObserver::AllyOfAttackedTarget => {
             action.is_attack
                 && action.attacked_target_uids.iter().any(|target_uid| {
-                    *target_uid != subscriber.owner_uid
-                        && pool.entity(*target_uid).is_some()
+                    pool.entity(*target_uid).is_some()
                         && pool.source_is_attacker(*target_uid)
                             == pool.source_is_attacker(subscriber.owner_uid)
                 })
@@ -640,7 +679,7 @@ mod tests {
         ));
 
         action.attacked_target_uids = vec![10];
-        assert!(!skill_subscriber_observes_action(
+        assert!(skill_subscriber_observes_action(
             &pool,
             &subscriber(10),
             &action

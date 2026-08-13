@@ -15,7 +15,7 @@ enum BuffIncludeType {
     PermanentMechanicCarrier = 5,
     SharedTypeFamily = 6,
     ReapplyReserve = 7,
-    StateCarrier = 8,
+    KeepExistingTypeFamily = 8,
     Count = 9,
     Stacked = 10,
     Layer = 11,
@@ -55,7 +55,7 @@ impl BuffIncludeType {
             5 => Self::PermanentMechanicCarrier,
             6 => Self::SharedTypeFamily,
             7 => Self::ReapplyReserve,
-            8 => Self::StateCarrier,
+            8 => Self::KeepExistingTypeFamily,
             9 => Self::Count,
             10 => Self::Stacked,
             11 => Self::Layer,
@@ -78,7 +78,7 @@ impl BuffIncludeType {
             Self::PermanentMechanicCarrier => "PermanentMechanicCarrier",
             Self::SharedTypeFamily => "SharedTypeFamily",
             Self::ReapplyReserve => "ReapplyReserve",
-            Self::StateCarrier => "ExclusiveTypeState",
+            Self::KeepExistingTypeFamily => "KeepExistingTypeFamily",
             Self::Count => "Count",
             Self::Stacked => "Stacked",
             Self::Layer => "Layer",
@@ -117,7 +117,7 @@ pub(super) struct BuffDefinition {
 impl BuffDefinition {
     pub(super) fn include_entry_name(include_type: i32, value: i32) -> String {
         let name = if include_type == BuffIncludeType::ReapplyReserve.id() && value > 0 {
-            "ValueBearingType7"
+            "SameTypeCapacity"
         } else {
             BuffIncludeType::from_id(include_type)
                 .map(BuffIncludeType::name)
@@ -132,60 +132,64 @@ impl BuffDefinition {
 
     pub fn get(buff_id: i32) -> Option<Self> {
         static DEFINITIONS: OnceLock<HashMap<i32, BuffDefinition>> = OnceLock::new();
-        let db = config::try_get()?;
+        let db = crate::catalog::BattleCatalog::try_global()?.game_data();
         DEFINITIONS
             .get_or_init(|| {
                 db.skill_buff
                     .all()
                     .iter()
-                    .map(|row| {
-                        let effective_type_id = if row.type_id != 0 {
-                            row.type_id
-                        } else {
-                            row.id
-                        };
-                        let buff_type = db.skill_bufftype.get(effective_type_id);
-                        let include_types = buff_type
-                            .map(|row| row.include_types.as_str())
-                            .unwrap_or_default();
-                        let exclude_types = buff_type
-                            .map(|row| row.exclude_types.as_str())
-                            .unwrap_or_default();
-                        let take_stage = buff_type.map(|row| row.take_stage).unwrap_or_default();
-                        let features = row.features.as_str();
-                        let status_id = buff_type.map(|row| row.r#type).unwrap_or(row.is_good_buff);
-                        let include_entries = parse_include_entries(include_types);
-                        let include_types_valid = include_entries.is_ok();
-                        (
-                            row.id,
-                            Self {
-                                id: row.id,
-                                type_id: row.type_id,
-                                group: buff_type.map(|row| row.group).unwrap_or_default(),
-                                is_no_show: row.is_no_show != 0,
-                                status_id,
-                                status: BuffStatus::from_id(status_id),
-                                duration: row.during_time,
-                                count: row.effect_count,
-                                exclude_buff_ids: parse_exclude_buff_ids(exclude_types),
-                                exclude_status_ids: parse_exclude_status_ids(exclude_types),
-                                include_entries: include_entries.unwrap_or_default(),
-                                include_types_valid,
-                                attribute_deltas: parse_attribute_deltas(features),
-                                features: super::feature::resolve_features(features),
-                                has_features: !features.trim().is_empty(),
-                                act_common_params: initial_act_common_params(features),
-                                take_stage,
-                                take_act: buff_type
-                                    .map(|row| row.take_act.clone())
-                                    .unwrap_or_default(),
-                            },
-                        )
-                    })
+                    .map(|row| (row.id, Self::from_row(db, row)))
                     .collect()
             })
             .get(&buff_id)
             .cloned()
+    }
+
+    pub(super) fn configured(game: &config::GameDB, buff_id: i32) -> Option<Self> {
+        game.skill_buff
+            .get(buff_id)
+            .map(|row| Self::from_row(game, row))
+    }
+
+    fn from_row(game: &config::GameDB, row: &config::skill_buff::SkillBuff) -> Self {
+        let effective_type_id = if row.type_id != 0 {
+            row.type_id
+        } else {
+            row.id
+        };
+        let buff_type = game.skill_bufftype.get(effective_type_id);
+        let include_types = buff_type
+            .map(|row| row.include_types.as_str())
+            .unwrap_or_default();
+        let exclude_types = buff_type
+            .map(|row| row.exclude_types.as_str())
+            .unwrap_or_default();
+        let features = row.features.as_str();
+        let status_id = buff_type.map(|row| row.r#type).unwrap_or(row.is_good_buff);
+        let include_entries = parse_include_entries(include_types);
+        let include_types_valid = include_entries.is_ok();
+        Self {
+            id: row.id,
+            type_id: row.type_id,
+            group: buff_type.map(|row| row.group).unwrap_or_default(),
+            is_no_show: row.is_no_show != 0,
+            status_id,
+            status: BuffStatus::from_id(status_id),
+            duration: row.during_time,
+            count: row.effect_count,
+            exclude_buff_ids: parse_exclude_buff_ids(exclude_types),
+            exclude_status_ids: parse_exclude_status_ids(exclude_types),
+            include_entries: include_entries.unwrap_or_default(),
+            include_types_valid,
+            attribute_deltas: parse_attribute_deltas(game, features),
+            features: super::feature::resolve_features_from(Some(game), features),
+            has_features: !features.trim().is_empty(),
+            act_common_params: initial_act_common_params(game, features),
+            take_stage: buff_type.map(|row| row.take_stage).unwrap_or_default(),
+            take_act: buff_type
+                .map(|row| row.take_act.clone())
+                .unwrap_or_default(),
+        }
     }
 
     pub fn effective_type_id(&self) -> i32 {
@@ -231,6 +235,11 @@ impl BuffDefinition {
         &self.features
     }
 
+    #[cfg(test)]
+    pub(super) fn replace_features_for_test(&mut self, features: Vec<ResolvedBuffFeature>) {
+        self.features = features;
+    }
+
     pub(super) fn take_action(&self) -> Option<super::BuffTakeAction> {
         super::BuffTakeAction::parse(&self.take_act)
     }
@@ -263,6 +272,50 @@ impl BuffDefinition {
             .collect()
     }
 
+    pub(super) fn marker_effect_num(
+        &self,
+        game: &config::GameDB,
+        effect_type: i32,
+        act_common_params: Option<&str>,
+    ) -> i32 {
+        use sonettobuf::effect_type_enum::EffectType;
+
+        if effect_type == EffectType::Exskillpointchange as i32 {
+            return super::active_feature(
+                Some(game),
+                0,
+                0,
+                true,
+                &sonettobuf::BuffInfo {
+                    buff_id: Some(self.id),
+                    count: Some(1),
+                    layer: Some(1),
+                    ..Default::default()
+                },
+                Some(self),
+            )
+            .iter()
+            .filter(|feature| {
+                crate::engine::skill::buff_act::is_kind(feature, BuffActKind::ExSkillPointChange)
+            })
+            .filter_map(|feature| feature.values.get(1))
+            .copied()
+            .sum();
+        }
+        if ![
+            EffectType::Fixattrteamenergy as i32,
+            EffectType::Fixattrteamenergyandbuff as i32,
+        ]
+        .contains(&effect_type)
+        {
+            return 0;
+        }
+        act_common_params
+            .and_then(|raw| raw.split('#').nth(1))
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_default()
+    }
+
     pub(super) fn state_snapshot_wire(&self, params: Option<&str>) -> Vec<(i32, Option<String>)> {
         self.features
             .iter()
@@ -274,6 +327,31 @@ impl BuffDefinition {
                     .map(move |effect_type| (effect_type, wire.snapshot_reserve_str(params)))
             })
             .collect()
+    }
+
+    pub(super) fn state_snapshot_effect_num(
+        &self,
+        effect_type: i32,
+        before_params: Option<&str>,
+        after_params: Option<&str>,
+    ) -> i32 {
+        if effect_type != sonettobuf::effect_type_enum::EffectType::Expointoverflowbank as i32
+            || !self.features.iter().any(|feature| {
+                feature.kind
+                    == Some(
+                        crate::engine::skill::buff_act::registry::BuffActKind::ExPointOverflowBank,
+                    )
+            })
+        {
+            return 0;
+        }
+        let state = |params: Option<&str>| {
+            params
+                .and_then(|raw| raw.rsplit('#').next())
+                .and_then(|value| value.parse::<i32>().ok())
+                .unwrap_or_default()
+        };
+        state(after_params) - state(before_params)
     }
 
     pub(super) fn fanout_wire_markers(
@@ -336,6 +414,9 @@ impl BuffDefinition {
         self.features
             .iter()
             .filter_map(|feature| {
+                if !feature.arguments_supported {
+                    return None;
+                }
                 let definition = feature.wire?;
                 let act_id = feature.values.first().copied()?;
                 let (params, str_param, marker_team) = match definition.initial_state? {
@@ -368,6 +449,7 @@ impl BuffDefinition {
                             .to_string(),
                         0,
                     ),
+                    InitialStateRule::SourceAttackThreshold => return None,
                     InitialStateRule::FirstArgument => (
                         vec![feature.values.get(1).copied().unwrap_or_default()],
                         String::new(),
@@ -378,6 +460,7 @@ impl BuffDefinition {
                         String::new(),
                         0,
                     ),
+                    InitialStateRule::StringCounter => (Vec::new(), "0".to_owned(), 0),
                     InitialStateRule::GrantValue => return None,
                 };
                 Some(super::BuffActInfoMarkerResult {
@@ -390,6 +473,16 @@ impl BuffDefinition {
                 })
             })
             .collect()
+    }
+
+    pub(super) fn projects_initial_wire_state(&self, act_id: i32) -> bool {
+        self.features.iter().any(|feature| {
+            feature.arguments_supported
+                && feature.values.first() == Some(&act_id)
+                && feature
+                    .wire
+                    .is_some_and(|wire| wire.initial_state.is_some() && wire.initial_state_marker)
+        })
     }
 
     pub(super) fn has_effect_count(&self) -> bool {
@@ -408,27 +501,43 @@ impl BuffDefinition {
         &self.attribute_deltas
     }
 
-    pub(super) fn initial_grant_value_act_info(
+    pub(super) fn initial_planned_act_info(
         &self,
+        source_attack: Option<i32>,
         grant_values: &[(i32, i32)],
     ) -> Option<Vec<sonettobuf::BuffActInfo>> {
         let values = self
             .features
             .iter()
-            .filter(|feature| {
-                feature.wire.and_then(|wire| wire.initial_state)
-                    == Some(crate::engine::skill::buff_act::wire::InitialStateRule::GrantValue)
-            })
             .filter_map(|feature| {
+                use crate::engine::skill::buff_act::wire::InitialStateRule;
+
+                let initial_state = feature.wire?.initial_state?;
                 let act_id = *feature.values.first()?;
-                let value = grant_values
-                    .iter()
-                    .find_map(|(actual, value)| (*actual == act_id).then_some(*value))?;
-                Some(sonettobuf::BuffActInfo {
-                    act_id: Some(act_id),
-                    param: vec![value],
-                    str_param: Some(String::new()),
-                })
+                match initial_state {
+                    InitialStateRule::SourceAttackThreshold => Some(sonettobuf::BuffActInfo {
+                        act_id: Some(act_id),
+                        param: Vec::new(),
+                        str_param: Some(
+                            crate::engine::skill::buff_act::real_damage_kill::initial_source_attack_threshold(
+                                source_attack?,
+                                feature.values.get(1..)?,
+                            )?
+                            .to_string(),
+                        ),
+                    }),
+                    InitialStateRule::GrantValue => {
+                        let value = grant_values
+                            .iter()
+                            .find_map(|(actual, value)| (*actual == act_id).then_some(*value))?;
+                        Some(sonettobuf::BuffActInfo {
+                            act_id: Some(act_id),
+                            param: vec![value],
+                            str_param: Some(String::new()),
+                        })
+                    }
+                    _ => None,
+                }
             })
             .collect::<Vec<_>>();
         (!values.is_empty()).then_some(values)
@@ -497,10 +606,20 @@ impl BuffDefinition {
     pub(super) fn reserves_child_after_first_apply(&self) -> bool {
         !self.has_include_type(BuffIncludeType::OwnUid)
             && self.has_features
+            && !self
+                .features
+                .iter()
+                .any(|feature| feature.kind == Some(BuffActKind::ExtraValueElectricTransform))
             && ((self.has_include_type(BuffIncludeType::Stacked)
                 && !self.is_no_show
                 && self.status == BuffStatus::Special)
-                || (self.uses_stack_layer() && self.is_no_show && self.stack_max_layer() == 3))
+                || (self.uses_stack_layer()
+                    && self.is_no_show
+                    && self.stack_max_layer() == 3
+                    && !self
+                        .features
+                        .iter()
+                        .any(|feature| feature.kind == Some(BuffActKind::Attr))))
     }
 
     pub(super) fn reserves_child_before_explicit_layer_apply(&self) -> bool {
@@ -559,21 +678,26 @@ impl BuffDefinition {
         self.has_include_type(BuffIncludeType::SharedTypeFamily)
     }
 
+    pub(super) fn keeps_existing_type_family(&self) -> bool {
+        self.has_include_type(BuffIncludeType::KeepExistingTypeFamily)
+    }
+
+    pub(super) fn matches_type_family(&self) -> bool {
+        self.uses_shared_type_family() || self.keeps_existing_type_family()
+    }
+
     pub(super) fn unresolved_include_entries(&self) -> Vec<(i32, i32)> {
         self.include_entries
             .iter()
             .filter_map(|(include_type, value)| {
                 match *include_type {
-                    1 | 2 | 3 | 4 | 10 | 11 | 12 | 14 | 15 | 16 | 17 => false,
+                    1 | 2 | 3 | 4 | 6 | 10 | 11 | 12 | 14 | 15 | 16 | 17 => false,
                     kind if kind == BuffIncludeType::PermanentMechanicCarrier.id() => false,
-                    kind if kind == BuffIncludeType::SharedTypeFamily.id() => {
-                        self.status != BuffStatus::Shield
-                    }
-                    kind if kind == BuffIncludeType::ReapplyReserve.id() => *value != 0,
+                    kind if kind == BuffIncludeType::ReapplyReserve.id() => false,
                     kind if kind == BuffIncludeType::GroupCapacity.id() => {
                         self.shared_group_capacity().is_none()
                     }
-                    kind if kind == BuffIncludeType::StateCarrier.id() => true,
+                    kind if kind == BuffIncludeType::KeepExistingTypeFamily.id() => false,
                     kind if kind == BuffIncludeType::Count.id() => true,
                     _ => true,
                 }
@@ -652,6 +776,7 @@ impl BuffDefinition {
     pub(super) fn reapplies_as_new(&self) -> bool {
         let timed_copy = self.has_include_type(BuffIncludeType::SeparateTimedCopies);
         self.shared_group_capacity().is_some()
+            || self.same_type_capacity().is_some()
             || self.capped_separate_copy_limit().is_some()
             || self.reapplies_consumable_charge()
             || (!self.uses_stack_layer()
@@ -674,6 +799,15 @@ impl BuffDefinition {
             .iter()
             .find_map(|(include_type, value)| {
                 (*include_type == BuffIncludeType::CappedSeparateCopies.id() && *value > 0)
+                    .then_some(*value)
+            })
+    }
+
+    pub(super) fn same_type_capacity(&self) -> Option<i32> {
+        self.include_entries
+            .iter()
+            .find_map(|(include_type, value)| {
+                (*include_type == BuffIncludeType::ReapplyReserve.id() && *value > 0)
                     .then_some(*value)
             })
     }
@@ -729,10 +863,6 @@ impl BuffDefinition {
         !self.uses_stack_layer() && !self.uses_typed_count()
     }
 
-    pub(super) fn cleans_up_at_round_start(&self) -> bool {
-        self.duration == 1 && !self.has_features && self.count == 0 && self.replaces_existing_copy()
-    }
-
     fn has_attr_feature(&self, attr_id: AttrId) -> bool {
         self.features.iter().any(|feature| {
             feature.kind == Some(BuffActKind::Attr)
@@ -782,7 +912,7 @@ fn parse_exclude_values(raw: &str, expected_prefix: &str) -> Vec<i32> {
         .collect()
 }
 
-fn parse_attribute_deltas(features: &str) -> Vec<(AttrId, i32)> {
+fn parse_attribute_deltas(game: &config::GameDB, features: &str) -> Vec<(AttrId, i32)> {
     features
         .split('|')
         .filter_map(|feature| {
@@ -792,8 +922,9 @@ fn parse_attribute_deltas(features: &str) -> Vec<(AttrId, i32)> {
                 .collect::<Vec<i32>>();
             match values.as_slice() {
                 [act_id, attr_id, value]
-                    if config::try_get()
-                        .and_then(|db| db.buff_act.get(*act_id))
+                    if game
+                        .buff_act
+                        .get(*act_id)
                         .and_then(|act| {
                             crate::engine::skill::buff_act::registry::kind(*act_id, &act.r#type)
                         })
@@ -802,8 +933,9 @@ fn parse_attribute_deltas(features: &str) -> Vec<(AttrId, i32)> {
                     Some((AttrId::from_raw(*attr_id)?, *value))
                 }
                 [act_id, value]
-                    if config::try_get()
-                        .and_then(|db| db.buff_act.get(*act_id))
+                    if game
+                        .buff_act
+                        .get(*act_id)
                         .and_then(|act| {
                             crate::engine::skill::buff_act::registry::kind(*act_id, &act.r#type)
                         })
@@ -853,14 +985,14 @@ fn has_include_value(include_type: i32) -> bool {
     matches!(include_type, 7 | 10 | 11 | 12 | 13 | 14 | 15 | 17)
 }
 
-fn initial_act_common_params(features: &str) -> String {
+fn initial_act_common_params(game: &config::GameDB, features: &str) -> String {
     features
         .split('|')
         .map(str::trim)
         .filter(|raw| !raw.is_empty())
         .filter_map(|raw| raw.split('#').next()?.trim().parse::<i32>().ok())
         .find_map(|act_id| {
-            let act = config::try_get()?.buff_act.get(act_id)?;
+            let act = game.buff_act.get(act_id)?;
             match crate::engine::skill::buff_act::registry::kind(act_id, &act.r#type)? {
                 crate::engine::skill::buff_act::registry::BuffActKind::EzioBigSkill => {
                     Some(format!("{act_id}#1,0,0"))

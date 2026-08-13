@@ -9,7 +9,7 @@ use crate::engine::{
 use super::{
     ActiveBuff, BuffActInfoMarkerResult, BuffAddArgs, BuffDefinition, BuffDeleteReason,
     BuffManager, BuffMarkerResult, BuffPolicy, BuffReplaceResult, BuffRoute,
-    BuffShieldRemoveResult, BuffStatus, count_or_layer,
+    BuffShieldRemoveResult, BuffStatus, count_or_layer_from,
     grant_plan::{GrantAction, LayerRefreshPlan, PlannedFanout, PlannedFanoutRefresh},
     typed_count_repeat,
     uid_policy::{self, UidAllocationPlan},
@@ -190,6 +190,22 @@ pub struct BuffChangeDuration {
     pub delta: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuffRefreshDuration {
+    pub origin: CommandOrigin,
+    pub target_uid: i64,
+    pub buff_uid: i64,
+    pub minimum_duration: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuffRefreshDurationBySelector {
+    pub origin: CommandOrigin,
+    pub target_uid: i64,
+    pub selector: BuffSelector,
+    pub minimum_duration: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuffSpecialCount {
     pub origin: CommandOrigin,
@@ -222,8 +238,6 @@ pub struct BuffDurationAdvance {
 
 const ROUND_START_DURATION_SYNC_KEY: crate::engine::skill::rule::DefinitionKey =
     crate::engine::skill::rule::DefinitionKey::new(0, "RoundStartDurationSync");
-const ROUND_START_CLEANUP_KEY: crate::engine::skill::rule::DefinitionKey =
-    crate::engine::skill::rule::DefinitionKey::new(0, "RoundStartCleanup");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuffRoundStartDurationSync {
@@ -243,28 +257,6 @@ impl BuffRoundStartDurationSync {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BuffRoundStartCleanup {
-    pub origin: CommandOrigin,
-}
-
-impl BuffRoundStartCleanup {
-    pub fn new() -> Self {
-        Self {
-            origin: CommandOrigin {
-                domain: RuleDomain::Lifecycle,
-                key: ROUND_START_CLEANUP_KEY,
-            },
-        }
-    }
-}
-
-impl Default for BuffRoundStartCleanup {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl BuffDurationAdvance {
     pub fn new(take_stage: i32, owner_uids: Vec<i64>, buff_uids: Option<Vec<i64>>) -> Option<Self> {
         let definition = crate::engine::skill::buff_act::effect_time::find(take_stage)?;
@@ -279,15 +271,29 @@ impl BuffDurationAdvance {
         })
     }
 
-    pub fn for_event(event: &BattleEvent) -> Option<Self> {
-        let BattleEvent::SkillAction(action) = event else {
-            return None;
+    pub fn for_event(event: &BattleEvent) -> Vec<Self> {
+        let (take_stages, owner_uid) = match event {
+            BattleEvent::SkillAction(action) => (
+                crate::engine::skill::buff_act::effect_time::duration_stage_for_skill_phase(
+                    action.phase,
+                )
+                .into_iter()
+                .collect::<Vec<_>>(),
+                action.source_uid,
+            ),
+            BattleEvent::AllyAction(action) => (
+                crate::engine::skill::buff_act::effect_time::duration_stages_for_event(
+                    crate::engine::event::kind::EventKind::AllyAction,
+                )
+                .collect::<Vec<_>>(),
+                action.source_uid,
+            ),
+            _ => return Vec::new(),
         };
-        let take_stage =
-            crate::engine::skill::buff_act::effect_time::duration_stage_for_skill_phase(
-                action.phase,
-            )?;
-        Self::new(take_stage, vec![action.source_uid], None)
+        take_stages
+            .into_iter()
+            .filter_map(|take_stage| Self::new(take_stage, vec![owner_uid], None))
+            .collect()
     }
 }
 
@@ -320,12 +326,13 @@ pub enum BuffCommand {
     SetStateSnapshot(BuffSetState),
     AccumulateActValue(BuffAccumulateActValue),
     ChangeDuration(BuffChangeDuration),
+    RefreshDuration(BuffRefreshDuration),
+    RefreshDurationBySelector(BuffRefreshDurationBySelector),
     AddSpecialCount(BuffSpecialCount),
     ReserveChildUids(BuffChildUidReservation),
     ReserveGrantUid(BuffGrantUidReservation),
     AdvanceDuration(BuffDurationAdvance),
     SyncRoundStartDuration(BuffRoundStartDurationSync),
-    CleanupRoundStart(BuffRoundStartCleanup),
 }
 
 #[derive(Debug, Clone)]
@@ -416,7 +423,6 @@ enum BuffPlanAction {
     ReserveGrantUid(GrantUidReservationPlan),
     AdvanceDuration(Vec<super::lifecycle::BuffDurationPlan>),
     SyncRoundStartDuration(Vec<super::lifecycle::BuffLifecyclePlan>),
-    CleanupRoundStart(Vec<super::lifecycle::BuffLifecyclePlan>),
 }
 
 #[derive(Debug, Clone)]

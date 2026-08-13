@@ -11,6 +11,7 @@ pub(super) struct ResolvedBuffFeature {
     pub effect_time: i32,
     pub effect_condition: i32,
     pub kind: Option<crate::engine::skill::buff_act::registry::BuffActKind>,
+    pub arguments_supported: bool,
     pub stat_read_timing: crate::engine::skill::buff_act::registry::StatReadTiming,
     pub wire: Option<&'static crate::engine::skill::buff_act::wire::BuffActWireDefinition>,
 }
@@ -60,6 +61,7 @@ pub struct BuffPassiveSkillLink {
 }
 
 pub(super) fn active_feature(
+    game: Option<&config::GameDB>,
     owner_uid: i64,
     team_type: i32,
     owner_alive: bool,
@@ -72,36 +74,38 @@ pub(super) fn active_feature(
     let buff_id = buff.buff_id.unwrap_or_default();
     let mut visited = vec![buff_id];
     active_features_for_definition(
-        owner_uid,
-        team_type,
-        owner_alive,
+        (owner_uid, team_type, owner_alive),
         buff,
         buff_id,
         definition,
+        game,
         &mut visited,
     )
 }
 
 fn active_features_for_definition(
-    owner_uid: i64,
-    team_type: i32,
-    owner_alive: bool,
+    owner: (i64, i32, bool),
     buff: &BuffInfo,
     feature_buff_id: i32,
     definition: &BuffDefinition,
+    game: Option<&config::GameDB>,
     visited: &mut Vec<i32>,
 ) -> Vec<ActiveBuffFeature> {
+    let (owner_uid, team_type, owner_alive) = owner;
     if definition.has_effect_count() && buff.count.unwrap_or_default() <= 0 {
         return Vec::new();
     }
     let mut output = Vec::new();
     for feature in definition.features() {
+        if !feature.arguments_supported {
+            continue;
+        }
         output.push(ActiveBuffFeature {
             owner_uid,
             source_uid: buff.from_uid.unwrap_or_default(),
             buff_uid: buff.uid.unwrap_or_default(),
             buff_id: feature_buff_id,
-            amount: super::count_or_layer(buff),
+            amount: super::count_or_layer_from(buff, Some(definition)),
             team_type,
             owner_alive,
             act_type: feature.act_type.clone(),
@@ -119,17 +123,17 @@ fn active_features_for_definition(
         if visited.contains(&child_buff_id) {
             continue;
         }
-        let Some(child) = BuffDefinition::get(child_buff_id) else {
+        let Some(child) = game.and_then(|game| BuffDefinition::configured(game, child_buff_id))
+        else {
             continue;
         };
         visited.push(child_buff_id);
         output.extend(active_features_for_definition(
-            owner_uid,
-            team_type,
-            owner_alive,
+            owner,
             buff,
             child_buff_id,
             &child,
+            game,
             visited,
         ));
         visited.pop();
@@ -187,16 +191,25 @@ pub(super) fn hp_max_add_rate(
 }
 
 pub(super) fn passive_skill_links(
+    game: Option<&config::GameDB>,
     owner_uid: i64,
     features: &[ResolvedBuffFeature],
     amount: i32,
 ) -> Vec<BuffPassiveSkillLink> {
     let mut output = Vec::new();
-    collect_passive_skill_links(owner_uid, features, amount, &mut Vec::new(), &mut output);
+    collect_passive_skill_links(
+        game,
+        owner_uid,
+        features,
+        amount,
+        &mut Vec::new(),
+        &mut output,
+    );
     output
 }
 
 fn collect_passive_skill_links(
+    game: Option<&config::GameDB>,
     owner_uid: i64,
     features: &[ResolvedBuffFeature],
     amount: i32,
@@ -229,16 +242,25 @@ fn collect_passive_skill_links(
         if visited.contains(&child_buff_id) {
             continue;
         }
-        let Some(child) = BuffDefinition::get(child_buff_id) else {
+        let Some(child) = game.and_then(|game| BuffDefinition::configured(game, child_buff_id))
+        else {
             continue;
         };
         visited.push(child_buff_id);
-        collect_passive_skill_links(owner_uid, child.features(), amount, visited, output);
+        collect_passive_skill_links(game, owner_uid, child.features(), amount, visited, output);
         visited.pop();
     }
 }
 
+#[cfg(test)]
 pub(super) fn resolve_features(raw_features: &str) -> Vec<ResolvedBuffFeature> {
+    resolve_features_from(config::try_get(), raw_features)
+}
+
+pub(super) fn resolve_features_from(
+    game: Option<&config::GameDB>,
+    raw_features: &str,
+) -> Vec<ResolvedBuffFeature> {
     raw_features
         .split('|')
         .map(str::trim)
@@ -251,9 +273,14 @@ pub(super) fn resolve_features(raw_features: &str) -> Vec<ResolvedBuffFeature> {
                 .collect::<Vec<_>>();
             let act = values
                 .first()
-                .and_then(|act_id| config::try_get()?.buff_act.get(*act_id));
+                .and_then(|act_id| game?.buff_act.get(*act_id));
             let registered = act.and_then(|act| {
                 crate::engine::skill::buff_act::registry::find(act.id, &act.r#type)
+            });
+            let arguments_supported = registered.is_some_and(|definition| {
+                definition
+                    .supports
+                    .is_none_or(|supports| supports(values.get(1..).unwrap_or_default()))
             });
             ResolvedBuffFeature {
                 raw: raw.to_owned(),
@@ -262,6 +289,7 @@ pub(super) fn resolve_features(raw_features: &str) -> Vec<ResolvedBuffFeature> {
                 effect_time: act.map(|act| act.effect_time).unwrap_or_default(),
                 effect_condition: act.map(|act| act.effect_condition).unwrap_or_default(),
                 kind: registered.map(|definition| definition.kind),
+                arguments_supported,
                 stat_read_timing: registered
                     .map(|definition| definition.state.read_timing)
                     .unwrap_or(crate::engine::skill::buff_act::registry::StatReadTiming::None),
@@ -287,9 +315,11 @@ mod tests {
         };
 
         let definition = BuffDefinition::get(301).unwrap();
-        assert!(active_feature(1, 1, true, &buff(0), Some(&definition)).is_empty());
+        assert!(
+            active_feature(config::try_get(), 1, 1, true, &buff(0), Some(&definition)).is_empty()
+        );
         assert_eq!(
-            active_feature(1, 1, true, &buff(1), Some(&definition))[0].amount,
+            active_feature(config::try_get(), 1, 1, true, &buff(1), Some(&definition))[0].amount,
             1
         );
     }
@@ -299,6 +329,21 @@ mod tests {
         let feature = resolve_features("879#1#300#1,2").remove(0);
 
         assert_eq!(feature.values, vec![879, 1, 300, 1, 2]);
+    }
+
+    #[test]
+    fn unsupported_feature_arguments_do_not_become_active() {
+        crate::test_support::init_config();
+        let mut definition = BuffDefinition::get(31_000_161).unwrap();
+        definition.replace_features_for_test(resolve_features("832#-7"));
+        let buff = BuffInfo {
+            buff_id: Some(31_000_161),
+            count: Some(1),
+            layer: Some(1),
+            ..Default::default()
+        };
+
+        assert!(active_feature(config::try_get(), 1, 1, true, &buff, Some(&definition)).is_empty());
     }
 
     #[test]
@@ -314,7 +359,7 @@ mod tests {
             ..Default::default()
         };
 
-        let features = active_feature(10, 1, true, &buff, Some(&definition));
+        let features = active_feature(config::try_get(), 10, 1, true, &buff, Some(&definition));
 
         assert!(
             features
@@ -327,7 +372,7 @@ mod tests {
                 .any(|feature| { feature.buff_id == 31260201 && feature.act_id() == Some(865) })
         );
         assert_eq!(
-            passive_skill_links(10, definition.features(), 1),
+            passive_skill_links(config::try_get(), 10, definition.features(), 1),
             vec![BuffPassiveSkillLink {
                 owner_uid: 10,
                 runtime_target_uid: 10,

@@ -168,6 +168,141 @@ fn round_refill_commits_draw_compose_moxie_and_deck_count_in_order() {
 }
 
 #[test]
+fn overflow_bank_replenishes_only_after_actions_in_buff_owned_wire_order() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                model_id: Some(3127),
+                current_hp: Some(100),
+                ex_point: Some(4),
+                buffs: vec![BuffInfo {
+                    uid: Some(20),
+                    buff_id: Some(31270400),
+                    from_uid: Some(10),
+                    act_common_params: Some("806#1".to_owned()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+
+    run_round_start_refill(
+        &mut managers,
+        &pool,
+        &SkillEffectCatalog::default(),
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        0,
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(managers.ex_point.get(10), 4);
+    assert_eq!(
+        managers
+            .buff
+            .snapshot(10, 20)
+            .unwrap()
+            .act_common_params
+            .as_deref(),
+        Some("806#1")
+    );
+
+    run_round_refill(
+        &mut managers,
+        &pool,
+        &SkillEffectCatalog::default(),
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        0,
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(managers.ex_point.get(10), 4);
+    assert_eq!(
+        managers
+            .buff
+            .snapshot(10, 20)
+            .unwrap()
+            .act_common_params
+            .as_deref(),
+        Some("806#1")
+    );
+
+    let mut result = run_post_action_refill_settlement(
+        &mut managers,
+        &pool,
+        &SkillEffectCatalog::default(),
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+    )
+    .unwrap();
+    append(&mut result, run_round_deal(1));
+
+    assert_eq!(managers.ex_point.get(10), 5);
+    assert_eq!(
+        managers
+            .buff
+            .snapshot(10, 20)
+            .unwrap()
+            .act_common_params
+            .as_deref(),
+        Some("806#0")
+    );
+    let steps = crate::engine::packet::timeline::project(&result.frames).unwrap();
+    let effects = steps
+        .iter()
+        .flat_map(|step| step.act_effect.iter())
+        .collect::<Vec<_>>();
+    let release_index = effects
+        .iter()
+        .position(|effect| {
+            effect
+                .fight_step
+                .as_ref()
+                .is_some_and(|step| step.act_id == Some(31270400))
+        })
+        .unwrap();
+    let release = effects[release_index].fight_step.as_ref().unwrap();
+    assert_eq!(
+        release
+            .act_effect
+            .iter()
+            .map(|effect| (effect.effect_type, effect.effect_num))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                Some(sonettobuf::effect_type_enum::EffectType::Expointchange as i32),
+                Some(1)
+            ),
+            (
+                Some(sonettobuf::effect_type_enum::EffectType::Expointoverflowbank as i32),
+                Some(-1)
+            )
+        ]
+    );
+    let marker = &release.act_effect[1];
+    let snapshot = marker.buff.as_ref().expect("bank marker carries state");
+    assert_eq!(snapshot.buff_id, Some(31270400));
+    assert_eq!(snapshot.act_common_params.as_deref(), Some("806#0"));
+    let deal_index = effects
+        .iter()
+        .position(|effect| {
+            effect.effect_type == Some(sonettobuf::effect_type_enum::EffectType::Dealcard2 as i32)
+        })
+        .unwrap();
+    assert!(release_index < deal_index);
+}
+
+#[test]
 fn round_refill_recycles_an_exhausted_draw_pile_and_finishes_the_hand() {
     init_config();
     let fight = Fight {
@@ -468,7 +603,7 @@ fn round_refill_uses_one_normal_slot_for_a_unique_ultimate() {
 }
 
 #[test]
-fn round_start_refill_adds_a_newly_ready_ultimate_to_a_full_hand() {
+fn round_start_refill_waits_for_a_deficit_before_adding_a_newly_ready_ultimate() {
     init_config();
     let fight = Fight {
         version: Some(7),
@@ -547,7 +682,111 @@ fn round_start_refill_adds_a_newly_ready_ultimate_to_a_full_hand() {
             .iter()
             .filter_map(|card| card.skill_id)
             .collect::<Vec<_>>(),
-        vec![100, 900]
+        vec![100]
+    );
+}
+
+#[test]
+fn opening_refill_defers_an_ultimate_made_ready_during_setup() {
+    init_config();
+    let fight = Fight {
+        version: Some(7),
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                ex_point: Some(4),
+                ex_skill: Some(900),
+                skill_group1: vec![100],
+                passive_skill: vec![40],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let mut catalog = SkillEffectCatalog::default();
+    let mut slot = SkillEffectSlot::new(
+        ParsedBehavior::from_spec(BehaviorSpec::new(20002, "AddExPoint"), vec![1], Vec::new()),
+        TargetRequest::self_only(),
+    );
+    slot.conditions = vec![ParsedCondition {
+        opcode: 100,
+        type_name: "None".to_owned(),
+        kind: ParsedConditionKind::None(NoneMode::RoundStart),
+        raw_args: Vec::new(),
+    }];
+    slot.compiled_route = ConditionRoute::compile(&slot.conditions);
+    catalog.insert(ParsedSkillEffect {
+        skill_id: 40,
+        slots: vec![slot],
+    });
+
+    run_start(
+        managers.catalog(),
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        CardSetup {
+            hand: vec![CardInfo {
+                uid: Some(10),
+                skill_id: Some(100),
+                ..Default::default()
+            }],
+            draw_pile: Vec::new(),
+            deck_num: 0,
+        },
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(managers.ex_point.get(10), 5);
+    assert_eq!(
+        managers
+            .card
+            .hand()
+            .iter()
+            .filter_map(|card| card.skill_id)
+            .collect::<Vec<_>>(),
+        vec![100]
+    );
+
+    managers
+        .execute_card(CardCommand::Play(CardPlay {
+            origin: CARD_PLAY_ORIGIN,
+            hand_index: 0,
+            target_uid: None,
+            chosen_skill_id: None,
+            choice: None,
+            recorded_skill: None,
+        }))
+        .unwrap();
+    run_round_start_refill(
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext {
+            current_round: 2,
+            ..Default::default()
+        },
+        1,
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(
+        managers
+            .card
+            .hand()
+            .iter()
+            .filter_map(|card| card.skill_id)
+            .collect::<Vec<_>>(),
+        vec![900]
     );
 }
 

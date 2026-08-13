@@ -1,6 +1,6 @@
-use crate::engine::fight::versions::HurtInfoWireLayout;
+use crate::engine::fight::versions::{AbsorbHurtMapLayout, HurtInfoWireLayout};
 use crate::engine::manager::{
-    ex_point::{ExPointApplyResult, ExPointKind},
+    ex_point::{ExPointApplyResult, ExPointKind, ExPointMaxApplyResult, ExPointMaxWire},
     hp::DamageEffectKind,
 };
 
@@ -9,6 +9,26 @@ use super::*;
 #[test]
 fn clear_universal_card_is_owned_by_the_player_team() {
     assert_eq!(EffectPacket::clear_universal_card().team_type, Some(1));
+}
+
+#[test]
+fn special_moxie_cap_projects_the_captured_snapshot() {
+    let effect = EffectPacket::ex_point_max(ExPointMaxApplyResult {
+        target_uid: -1,
+        before: 5,
+        requested_delta: 7,
+        applied_delta: 7,
+        after: 12,
+        wire: ExPointMaxWire::Special {
+            max_add: 7,
+            ultimate_cost_offset: 3,
+        },
+    });
+
+    assert_eq!(effect.target_id, Some(-1));
+    assert_eq!(effect.effect_type, Some(EffectType::Spexpointmaxadd as i32));
+    assert_eq!(effect.effect_num, Some(0));
+    assert_eq!(effect.reserve_str.as_deref(), Some("7#3"));
 }
 
 #[test]
@@ -40,6 +60,7 @@ fn hp_change_uses_damage_or_heal_effect_type() {
             display_amount: None,
         },
         HurtInfoWireLayout::Version6,
+        AbsorbHurtMapLayout::default(),
     );
     let heal = EffectPacket::hp_with_hurt_info_layout(
         HpChange {
@@ -55,6 +76,7 @@ fn hp_change_uses_damage_or_heal_effect_type() {
             display_amount: None,
         },
         HurtInfoWireLayout::Version6,
+        AbsorbHurtMapLayout::default(),
     );
     let overheal = EffectPacket::hp_with_hurt_info_layout(
         HpChange {
@@ -70,6 +92,7 @@ fn hp_change_uses_damage_or_heal_effect_type() {
             display_amount: Some(2),
         },
         HurtInfoWireLayout::Version6,
+        AbsorbHurtMapLayout::default(),
     );
 
     assert_eq!(damage.effect_type, Some(EffectType::Damage as i32));
@@ -109,6 +132,7 @@ fn crit_is_encoded_by_effect_type() {
             display_amount: None,
         },
         HurtInfoWireLayout::Version6,
+        AbsorbHurtMapLayout::default(),
     );
 
     assert_eq!(damage.effect_type, Some(EffectType::Crit as i32));
@@ -177,6 +201,7 @@ fn version7_damage_projects_committed_toughness_delta() {
             broke: false,
         }),
         HurtInfoWireLayout::Version7,
+        AbsorbHurtMapLayout::default(),
     );
 
     let hurt = effect.hurt_info.unwrap();
@@ -232,6 +257,7 @@ fn fully_absorbed_buff_damage_keeps_its_exact_buff_act_opcode() {
         },
         None,
         HurtInfoWireLayout::Version6,
+        AbsorbHurtMapLayout::default(),
     );
 
     assert_eq!(effect.effect_num, Some(0));
@@ -267,6 +293,7 @@ fn assassinate_is_carried_by_the_damage_change() {
             display_amount: Some(500),
         },
         HurtInfoWireLayout::Version6,
+        AbsorbHurtMapLayout::default(),
     );
 
     assert_eq!(effect.hurt_info.unwrap().assassinate, Some(true));

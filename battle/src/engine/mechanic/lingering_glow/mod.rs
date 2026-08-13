@@ -17,8 +17,7 @@ use crate::engine::{
     mechanic::{
         bloodtithe,
         heat_scale::{
-            self, HeatScaleCast, HeatScaleCounterInfo, HeatScaleCreate, HeatScaleUseSkillInfo,
-            ready_cast_selection,
+            self, HeatScaleCast, HeatScaleCreate, HeatScaleUseSkillInfo, ready_cast_selection,
         },
     },
     skill::{
@@ -125,17 +124,15 @@ pub fn round_start_attribute_rule_ops_for_team(
         let Some(state) = managers.gauge.get(key(create.team)) else {
             continue;
         };
-        let Some((buff_id, act_id)) = heat_scale::attribute_buff() else {
+        let Some(attribute_buff) = managers.catalog().lingering_glow_attribute_buff() else {
             continue;
         };
+        let buff_id = attribute_buff.buff_id;
+        let act_id = attribute_buff.origin.key.opcode;
         if state.current <= 0 {
             continue;
         }
-        let Some(buff_origin) =
-            buff_act::configured_command_origin(act_id, BuffActKind::AttrByHeatScale)
-        else {
-            continue;
-        };
+        let buff_origin = attribute_buff.origin;
         let remaining = state.current / 2;
         let depleted = state.current - remaining;
         let targets = managers
@@ -181,11 +178,11 @@ pub fn round_start_attribute_rule_ops_for_team(
             .attributed_to(0, GaugeKind::LingeringGlow.shared_pool_config_effect())
             .with_raw_delta(-depleted_raw),
         )));
-        if let Some(counter) = heat_scale::decr_counter_info(depleted_raw, &features, team) {
-            let Some(counter_origin) = buff_act::configured_command_origin(
-                counter.act_id,
-                BuffActKind::HeatScaleDecrCounter,
-            ) else {
+        for counter in heat_scale::decr_counter_infos(depleted_raw, &features, team) {
+            let Some(counter_origin) = managers
+                .catalog()
+                .buff_act_origin(counter.act_id, BuffActKind::HeatScaleDecrCounter)
+            else {
                 continue;
             };
             let mut act_info = managers
@@ -244,8 +241,6 @@ pub fn burn_or_halo_rule_op(
         source_team,
         target_uid,
         buff_uid,
-        alive_enemy_index,
-        alive_enemy_count,
         ..
     } = added;
     let key = key(source_team);
@@ -254,19 +249,15 @@ pub fn burn_or_halo_rule_op(
         .iter()
         .find(|feature| feature.owner_uid == target_uid && feature.buff_uid == buff_uid)?;
     let gain = heat_scale::burn_or_halo_gain(features, added)?;
-    let value_delta = gauges
-        .plan_raw_contributions(key, &vec![gain.raw_amount; alive_enemy_count])?
-        .get(alive_enemy_index)
-        .copied()?;
     Some(LingeringGlowInput {
         raw_delta: gain.raw_amount,
         output: RuleOp::Command(BattleCommand::Gauge(
             GaugeCommand::new(
                 buff_act::feature_command_origin(trigger)?,
                 key,
-                GaugeOperation::ApplyRawContribution {
-                    raw_amount: gain.raw_amount,
-                    value_delta,
+                GaugeOperation::AccumulateRawValue {
+                    amount: gain.raw_amount,
+                    stream: trigger.act_id()?,
                 },
             )
             .attributed_to(
@@ -279,9 +270,34 @@ pub fn burn_or_halo_rule_op(
 }
 
 pub fn value_change_rule_ops(
-    _managers: &crate::engine::manager::BattleManagers,
-    command: GaugeCommand,
+    managers: &crate::engine::manager::BattleManagers,
+    mut command: GaugeCommand,
 ) -> Vec<RuleOp> {
+    if let GaugeOperation::ChangeValue { delta } = command.operation
+        && delta >= 0
+        && let Some(raw_delta) = command.raw_delta
+        && raw_delta > 0
+    {
+        let GaugeOwner::Team(team) = command.key.owner else {
+            return Vec::new();
+        };
+        let modifier = heat_scale::lingering_glow_gain_modifier(
+            &managers.buff.active_features(&managers.hp),
+            team,
+        );
+        let adjusted_raw = (i64::from(raw_delta)
+            * i64::from(1_000_i32.saturating_add(modifier.max(-1_000)))
+            / 1_000)
+            .clamp(0, i64::from(i32::MAX)) as i32;
+        command.operation = GaugeOperation::AccumulateRawValue {
+            amount: adjusted_raw,
+            stream: command.origin.key.opcode.max(1),
+        };
+        command.raw_delta = Some(adjusted_raw);
+        if command.progress_raw_delta.is_some() {
+            command.progress_raw_delta = Some(adjusted_raw);
+        }
+    }
     vec![RuleOp::Command(BattleCommand::Gauge(command))]
 }
 
@@ -292,7 +308,7 @@ pub fn visible_counter_info(
 ) -> Option<HeatScaleUseSkillInfo> {
     let listener = heat_scale::use_skill_info(0, features, team)?;
     let raw = gauges.accumulated_raw_value(key(team), listener.buff_uid, listener.act_id)?;
-    let current = raw.saturating_add(500) / 1000;
+    let current = raw / 1000;
     heat_scale::use_skill_info(current, features, team)
 }
 
@@ -429,12 +445,12 @@ impl LingeringGlowRuntime {
             .unwrap_or_default()
     }
 
-    pub fn decrement_counter_info(
+    pub fn decrement_counter_infos(
         &self,
         features: &[ActiveBuffFeature],
         team: i32,
-    ) -> Option<HeatScaleCounterInfo> {
-        heat_scale::decr_counter_info(self.raw_value(team), features, team)
+    ) -> Vec<heat_scale::HeatScaleCounterInfo> {
+        heat_scale::decr_counter_infos(self.raw_value(team), features, team)
     }
 }
 

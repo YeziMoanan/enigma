@@ -5,7 +5,7 @@ use crate::engine::{
     event::{kind::EventKind, payload::BattleEvent},
     manager::{
         BattleManagers,
-        buff::{BuffCommand, BuffDurationAdvance, BuffRoundStartCleanup},
+        buff::{BuffCommand, BuffDurationAdvance},
         card::{
             CARD_ENERGY_CLEAR_ORIGIN, CARD_PLAY_ORIGIN, CardCommand, CardInvalidatePlayed,
             CardRefillOne, CardRefreshAiQueue, CardSetup,
@@ -22,7 +22,7 @@ use crate::engine::{
         executor::RuleOutcome,
         record::{
             CardInvalidReason, FrameItem, FrameOwner, FrameTrigger, RoundCue, RoundPhase,
-            SemanticFrame, SetupSide, push_attributed_cue, push_cue, push_cues,
+            SemanticFrame, push_attributed_cue, push_cue, push_cues,
         },
     },
     skill::{
@@ -86,8 +86,6 @@ fn opening_setup(version: i32) -> Vec<(SetupStage, i32)> {
     setup
 }
 
-const ROUND_START_INDEPENDENT_SETUP: &[(SetupStage, i32)] = &[(SetupStage::EnterBattleStatic, 0)];
-
 const ROUND_START_SETTLEMENT_SETUP: &[(SetupStage, i32)] = &[(SetupStage::RoundStart, 3)];
 
 const ROUND_START_THRESHOLD_SETUP: &[(SetupStage, i32)] = &[(SetupStage::RoundStart, 4)];
@@ -122,6 +120,7 @@ pub use start::*;
 use start::{RoundStartSettlementPlan, raspberry_losses, run_round_start_owner_settlement};
 
 pub fn run_wave_start_triggers(
+    battle_catalog: crate::catalog::BattleCatalog,
     managers: &mut BattleManagers,
     pool: &TargetPool,
     catalog: &SkillEffectCatalog,
@@ -129,11 +128,7 @@ pub fn run_wave_start_triggers(
     context: TargetContext,
     wave: i32,
 ) -> Result<DrainResult, DrainError> {
-    let actions = crate::engine::fight::trigger::wave_start_actions(
-        config::configs::get(),
-        context.battle_id,
-        wave,
-    )?;
+    let actions = battle_catalog.wave_start_actions(context.battle_id, wave)?;
     if actions.is_empty() {
         return Ok(DrainResult::default());
     }
@@ -325,8 +320,11 @@ pub fn run_ai_actions(
                 },
             );
             let is_ultimate = pool.entity(choice.source_uid).is_some_and(|entity| {
-                crate::engine::mechanic::card::CardMechanic
-                    .is_ultimate_skill(choice.skill_id, entity)
+                crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+                    managers,
+                    choice.skill_id,
+                    entity,
+                )
             });
             if let Some(delta) = card_play_resource_delta(
                 managers,
@@ -350,6 +348,28 @@ pub fn run_ai_actions(
             continue;
         }
         if card_skill_is_blocked(managers, catalog, choice.source_uid, choice.skill_id) {
+            push_attributed_cue(
+                &mut result.frames,
+                choice.source_uid,
+                RoundCue::CardInvalid {
+                    card_index,
+                    team_type: managers
+                        .buff
+                        .team_type(choice.source_uid)
+                        .unwrap_or_default(),
+                    reason: CardInvalidReason::Default,
+                },
+            );
+            continue;
+        }
+        if let Some(entity) = pool.entity(choice.source_uid)
+            && crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(
+                managers,
+                choice.skill_id,
+                entity,
+            )
+            && !crate::engine::mechanic::card::CardMechanic.ultimate_ready(managers, entity)
+        {
             push_attributed_cue(
                 &mut result.frames,
                 choice.source_uid,
@@ -438,7 +458,7 @@ pub fn run_promotions(
     context: TargetContext,
     promotions: impl IntoIterator<Item = crate::engine::fight::reserve::Promotion>,
 ) -> Result<DrainResult, DrainError> {
-    let pool = TargetPool::from_fight(fight);
+    let pool = TargetPool::from_fight_with_catalog(managers.catalog(), fight);
     let mut result = DrainResult::default();
     for promotion in promotions {
         let entering_uid = promotion.entering_uid;
@@ -543,27 +563,32 @@ pub fn run_wave_entry_setup(
     owner_uids: &[i64],
 ) -> Result<DrainResult, DrainError> {
     let mut result = begin_round_phase(RoundPhase::EntityEntrySetup);
-    let next = drain::run_setup_stage_for_owners(
-        managers,
-        pool,
-        catalog,
-        determinism,
-        context,
-        SetupStage::EnterFight,
-        0,
-        owner_uids,
-    )?;
-    result.outcomes.extend(next.outcomes);
-    result.events.extend(next.events);
-    let root = result
-        .frames
-        .first_mut()
-        .expect("entry-setup phase has a root");
-    for frame in next.frames {
-        if matches!(frame.owner, FrameOwner::SetupSide(_)) {
-            root.items.extend(frame.items);
-        } else {
-            root.items.push(FrameItem::Child(Box::new(frame)));
+    for (stage, priority) in [
+        (SetupStage::EnterFight, 0),
+        (SetupStage::RoundStartCondition, 100),
+    ] {
+        let next = drain::run_setup_stage_for_owners(
+            managers,
+            pool,
+            catalog,
+            determinism,
+            context,
+            stage,
+            priority,
+            owner_uids,
+        )?;
+        result.outcomes.extend(next.outcomes);
+        result.events.extend(next.events);
+        let root = result
+            .frames
+            .first_mut()
+            .expect("entry-setup phase has a root");
+        for frame in next.frames {
+            if matches!(frame.owner, FrameOwner::SetupSide(_)) {
+                root.items.extend(frame.items);
+            } else {
+                root.items.push(FrameItem::Child(Box::new(frame)));
+            }
         }
     }
     Ok(result)

@@ -4,7 +4,7 @@ use sonettobuf::{
 
 use crate::engine::{
     manager::{
-        buff::{BuffCommand, BuffGrant, CommandOrigin},
+        buff::{BuffCommand, BuffGrant, BuffRemove, BuffRemoveSelector, CommandOrigin},
         conduit::ConduitCommand,
         ex_point::{
             ExPointChange, ExPointChanges, ExPointCommand, ExPointConfigureSynchronization,
@@ -59,6 +59,60 @@ fn hero_sp_attributes_only_include_living_defenders() {
             .collect::<Vec<_>>(),
         vec![-2]
     );
+}
+
+#[test]
+fn hero_sp_attributes_project_active_playmode_immunity_until_removed() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        version: Some(7),
+        defender: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(-1),
+                model_id: Some(1),
+                team_type: Some(2),
+                current_hp: Some(100),
+                attr: Some(HeroAttribute {
+                    hp: Some(100),
+                    ..Default::default()
+                }),
+                buffs: vec![BuffInfo {
+                    uid: Some(1),
+                    buff_id: Some(116362001),
+                    from_uid: Some(-1),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut managers = BattleManagers::seeded(&fight);
+
+    let projected_play_drop_rate = |managers: &BattleManagers| {
+        managers
+            .hero_sp_attributes(&fight)
+            .into_iter()
+            .find(|attribute| attribute.uid == Some(-1))
+            .and_then(|attribute| attribute.attribute)
+            .and_then(|attribute| attribute.play_drop_rate)
+    };
+
+    assert_eq!(projected_play_drop_rate(&managers), Some(300));
+
+    managers
+        .execute_buff(BuffCommand::Remove(BuffRemove {
+            origin: CommandOrigin {
+                domain: RuleDomain::Behavior,
+                key: DefinitionKey::new(1, "RemoveBuff"),
+            },
+            target_uid: -1,
+            selector: BuffRemoveSelector::ExactId(116362001),
+        }))
+        .unwrap();
+
+    assert_eq!(projected_play_drop_rate(&managers), Some(0));
 }
 
 #[test]
@@ -1011,6 +1065,83 @@ fn ex_point_cant_add_blocks_gains_but_allows_spending() {
         ExPointChanges::Value { change, .. }
             if change.applied_delta == -2 && change.after == 1
     ));
+}
+
+#[test]
+fn transfer_add_ex_point_redirects_only_gains_to_the_buff_source() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    uid: Some(10),
+                    ex_point: Some(0),
+                    current_hp: Some(100),
+                    attr: Some(HeroAttribute {
+                        hp: Some(100),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                FightEntityInfo {
+                    uid: Some(20),
+                    ex_point: Some(1),
+                    current_hp: Some(100),
+                    attr: Some(HeroAttribute {
+                        hp: Some(100),
+                        ..Default::default()
+                    }),
+                    buffs: vec![BuffInfo {
+                        uid: Some(1),
+                        buff_id: Some(31_000_171),
+                        from_uid: Some(10),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut managers = BattleManagers::seeded(&fight);
+    let origin = CommandOrigin {
+        domain: RuleDomain::BuffAct,
+        key: DefinitionKey::new(833, "TransferAddExPoint"),
+    };
+
+    let gained = managers
+        .execute_ex_point(ExPointCommand::Change(ExPointChange {
+            origin,
+            source_uid: 20,
+            target_uid: 20,
+            delta: 2,
+            config_effect: 0,
+            effect_type: 0,
+        }))
+        .unwrap();
+    assert!(matches!(
+        gained,
+        ExPointChanges::Value { change, .. }
+            if change.source_uid == 20
+                && change.target_uid == 10
+                && change.applied_delta == 2
+    ));
+    assert_eq!(managers.ex_point.get(10), 2);
+    assert_eq!(managers.ex_point.get(20), 1);
+
+    managers
+        .execute_ex_point(ExPointCommand::Spend(ExPointChange {
+            origin,
+            source_uid: 20,
+            target_uid: 20,
+            delta: -1,
+            config_effect: 0,
+            effect_type: 0,
+        }))
+        .unwrap();
+    assert_eq!(managers.ex_point.get(10), 2);
+    assert_eq!(managers.ex_point.get(20), 0);
 }
 
 #[test]

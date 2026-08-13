@@ -73,6 +73,19 @@ fn registry_requires_exact_id_and_type() {
     assert!(!has_destination(933, "SubBuff", &[0]));
     assert!(find(1028, "AddToTarget").is_none());
     assert!(find(999, "RealDamageKill").is_none());
+    assert_eq!(
+        find(728, "ChangeRemoveBuffUseSkillParam").unwrap().kind,
+        BuffActKind::ChangeRemoveBuffUseSkillParam
+    );
+    assert_eq!(
+        destination(728, "ChangeRemoveBuffUseSkillParam", &[1, 1]),
+        Some(BuffActDestination::StateConsumer)
+    );
+    assert_eq!(
+        destination(728, "ChangeRemoveBuffUseSkillParam", &[1, 2]),
+        None
+    );
+    assert!(find(728, "RemoveBuffUseSkill").is_none());
     assert!(reserves_trigger_child_uid(DefinitionKey::new(
         1053,
         "AttrByHeatScale"
@@ -275,6 +288,18 @@ fn damage_cap_is_an_exact_static_consumer_with_its_captured_marker() {
 }
 
 #[test]
+fn fixed_damage_accepts_zero_without_collapsing_identity() {
+    let definition = find(511, "FixedHurt").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::FixedHurt);
+    assert!(definition.state.consumer);
+    assert!(has_destination(511, "FixedHurt", &[0]));
+    assert!(has_destination(511, "FixedHurt", &[1]));
+    assert!(!has_destination(511, "FixedHurt", &[-1]));
+    assert!(find(511, "DamageNotMoreThan").is_none());
+}
+
+#[test]
 fn hp_loss_floor_is_an_exact_static_consumer() {
     let definition = find(1008, "BanLostLife").unwrap();
 
@@ -349,6 +374,66 @@ fn burn_damage_fix_is_an_exact_static_consumer_with_its_add_marker() {
 }
 
 #[test]
+fn real_hurt_fix_uses_only_its_captured_add_and_refresh_markers() {
+    let wire = super::super::wire::find(519, "RealHurtFix").unwrap();
+    let marker = sonettobuf::effect_type_enum::EffectType::Realhurtfix as i32;
+
+    assert_eq!(
+        wire.markers(super::super::wire::WirePhase::Add),
+        &[marker]
+    );
+    assert!(
+        wire.markers(super::super::wire::WirePhase::Static)
+            .is_empty()
+    );
+    assert_eq!(
+        wire.markers(super::super::wire::WirePhase::Refresh),
+        &[marker]
+    );
+}
+
+#[test]
+fn dot_uses_only_its_captured_add_and_refresh_markers() {
+    let wire = super::super::wire::find(202, "Dot").unwrap();
+    let marker = sonettobuf::effect_type_enum::EffectType::Dot as i32;
+
+    assert_eq!(
+        wire.markers(super::super::wire::WirePhase::Add),
+        &[marker]
+    );
+    assert!(
+        wire.markers(super::super::wire::WirePhase::Static)
+            .is_empty()
+    );
+    assert_eq!(
+        wire.markers(super::super::wire::WirePhase::Refresh),
+        &[marker]
+    );
+}
+
+#[test]
+fn add_to_attacker_marks_only_the_runtime_trigger() {
+    let definition = find(305, "AddToAttacker").unwrap();
+    let wire = super::super::wire::find(305, "AddToAttacker").unwrap();
+    let marker = sonettobuf::effect_type_enum::EffectType::Addtoattacker as i32;
+
+    assert_eq!(definition.kind, BuffActKind::AddToAttacker);
+    assert_eq!(
+        runtime_event(305, "AddToAttacker", 2091),
+        Some(EventKind::BeAttacked)
+    );
+    assert!(wire.markers(super::super::wire::WirePhase::Add).is_empty());
+    assert_eq!(
+        wire.markers(super::super::wire::WirePhase::Static),
+        &[marker]
+    );
+    assert!(
+        wire.markers(super::super::wire::WirePhase::Refresh)
+            .is_empty()
+    );
+}
+
+#[test]
 fn lucy_static_combat_rules_keep_distinct_add_markers() {
     for (act_id, act_type, kind, effect_type) in [
         (
@@ -411,6 +496,24 @@ fn passive_state_consumers_reject_unsupported_argument_shapes() {
         assert!(has_destination(id, kind, &valid), "{id} {kind}");
         assert!(!has_destination(id, kind, &invalid), "{id} {kind}");
     }
+}
+
+#[test]
+fn buff_type_duration_extension_is_an_exact_state_consumer() {
+    let definition = find(608, "BuffRoundAddByBuffTypeId").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::BuffRoundAddByBuffTypeId);
+    assert_eq!(
+        destination(608, "BuffRoundAddByBuffTypeId", &[6003, 1]),
+        Some(BuffActDestination::StateConsumer)
+    );
+    assert!(!has_destination(608, "BuffRoundAddByBuffTypeId", &[]));
+    assert!(!has_destination(
+        608,
+        "BuffRoundAddByBuffTypeId",
+        &[6003, 0]
+    ));
+    assert!(find(608, "BuffRoundAdd").is_none());
 }
 
 #[test]
@@ -525,17 +628,47 @@ fn runtime_capability_lives_on_the_exact_registry_entry() {
 }
 
 #[test]
-fn reflect_frame_is_owned_by_holder_and_marks_attacker() {
-    let definition = find(303, "Rebound").unwrap();
+fn reflect_frames_are_owned_by_holder_and_mark_attacker() {
+    for definition in [
+        find(303, "Rebound").unwrap(),
+        find(743, "ReboundBasedOnDamage").unwrap(),
+    ] {
+        assert_eq!(definition.runtime.frame_source, RuntimeFrameSource::Owner);
+        let marker = definition.runtime.marker.unwrap();
+        assert_eq!(marker.position, RuntimeMarkerPosition::BeforeChanges);
+        assert_eq!(marker.target, RuntimeMarkerTarget::EventSource);
+    }
 
-    assert_eq!(definition.runtime.frame_source, RuntimeFrameSource::Owner);
     assert_eq!(
-        definition.runtime.marker,
-        Some(RuntimeMarker {
-            position: RuntimeMarkerPosition::BeforeChanges,
-            target: RuntimeMarkerTarget::EventSource,
-        })
+        find(303, "Rebound")
+            .unwrap()
+            .runtime
+            .marker
+            .unwrap()
+            .effect_type,
+        None
     );
+
+    let damage_based = find(743, "ReboundBasedOnDamage").unwrap();
+    assert_eq!(damage_based.kind, BuffActKind::ReboundBasedOnDamage);
+    assert!(damage_based.supports.unwrap()(&[300, 0, 0]));
+    assert!(!damage_based.supports.unwrap()(&[300, 101, 2_000]));
+    assert!(!damage_based.supports.unwrap()(&[150, 102, 1_000]));
+    let wire = damage_based.wire.unwrap();
+    assert!(!wire.has_output());
+    assert_eq!(
+        damage_based.runtime.marker.unwrap().effect_type,
+        Some(sonettobuf::effect_type_enum::EffectType::Rebound as i32)
+    );
+    assert!(
+        wire.markers(super::super::wire::WirePhase::Static)
+            .is_empty()
+    );
+    assert!(
+        wire.markers(super::super::wire::WirePhase::Refresh)
+            .is_empty()
+    );
+    assert!(find(743, "Rebound").is_none());
 }
 
 #[test]
@@ -627,6 +760,23 @@ fn holder_scaled_dot_keeps_its_exact_round_end_route() {
 }
 
 #[test]
+fn layered_holder_dot_keeps_its_exact_round_start_route() {
+    assert_eq!(runtime_event(213, "Dot", 101), Some(EventKind::RoundStart));
+    assert!(has_destination(213, "Dot", &[1, 100, 30]));
+
+    let wire = super::super::wire::find(213, "Dot").unwrap();
+    assert!(wire.markers(super::super::wire::WirePhase::Add).is_empty());
+    assert_eq!(
+        wire.markers(super::super::wire::WirePhase::Static),
+        &[sonettobuf::effect_type_enum::EffectType::Dot as i32]
+    );
+    assert!(
+        wire.markers(super::super::wire::WirePhase::Refresh)
+            .is_empty()
+    );
+}
+
+#[test]
 fn moxie_loss_keeps_its_exact_round_end_route() {
     assert_eq!(
         runtime_event(605, "ExPointDel", 302),
@@ -648,6 +798,82 @@ fn targeted_support_dispel_keeps_its_exact_skill_cast_route() {
     );
     assert!(has_destination(804, "DisperseByTag", &[1, 4, 5, 6, 9]));
     assert!(!has_destination(804, "DisperseByTag", &[0, 4, 5, 6, 9]));
+}
+
+#[test]
+fn skill_target_count_attributes_keep_separate_exact_identities() {
+    let single = find(106, "AttrSkillSingle").unwrap();
+    let multiple = find(107, "AttrSkillMultiple").unwrap();
+
+    assert_eq!(single.kind, BuffActKind::AttrSkillSingle);
+    assert_eq!(multiple.kind, BuffActKind::AttrSkillMultiple);
+    assert!(single.state.consumer);
+    assert!(multiple.state.consumer);
+    assert!(has_destination(106, "AttrSkillSingle", &[205, -300]));
+    assert!(has_destination(107, "AttrSkillMultiple", &[205, -300]));
+    assert!(!has_destination(106, "AttrSkillSingle", &[205]));
+    assert!(!has_destination(107, "AttrSkillMultiple", &[205, 0]));
+    assert!(!has_destination(106, "AttrSkillSingle", &[205, 300]));
+    assert!(!has_destination(107, "AttrSkillMultiple", &[205, -200]));
+    assert!(find(106, "AttrSkillMultiple").is_none());
+    assert!(find(107, "AttrSkillSingle").is_none());
+}
+
+#[test]
+fn damage_type_be_attacked_attribute_keeps_its_exact_identity() {
+    assert!(has_destination(
+        112,
+        "AttrOnlyCalDamageBeAttacked",
+        &[206, 250, 1]
+    ));
+    assert!(!has_destination(
+        112,
+        "AttrOnlyCalDamageBeAttacked",
+        &[205, 250, 1]
+    ));
+    assert!(!has_destination(
+        112,
+        "AttrOnlyCalDamageBeAttacked",
+        &[206, 250, 2]
+    ));
+    assert!(!has_destination(
+        112,
+        "AttrOnlyCalDamageBeAttacked",
+        &[206, 250, 1, 1]
+    ));
+    let definition = find(114, "AttrOnlyCalDamageBeAttackedType").unwrap();
+
+    assert_eq!(
+        definition.kind,
+        BuffActKind::AttrOnlyCalDamageBeAttackedType
+    );
+    assert!(definition.state.consumer);
+    assert!(has_destination(
+        114,
+        "AttrOnlyCalDamageBeAttackedType",
+        &[1, 206, 300, 1]
+    ));
+    assert!(has_destination(
+        114,
+        "AttrOnlyCalDamageBeAttackedType",
+        &[2, 206, -250, 1]
+    ));
+    assert!(!has_destination(
+        114,
+        "AttrOnlyCalDamageBeAttackedType",
+        &[0, 206, -250, 1]
+    ));
+    assert!(!has_destination(
+        114,
+        "AttrOnlyCalDamageBeAttackedType",
+        &[2, 205, -250, 1]
+    ));
+    assert!(!has_destination(
+        114,
+        "AttrOnlyCalDamageBeAttackedType",
+        &[2, 206, -250, 0]
+    ));
+    assert!(find(114, "AttrOnlyCalDamageBeAttacked").is_none());
 }
 
 #[test]
@@ -676,6 +902,113 @@ fn moxie_reduction_immunity_keeps_its_exact_static_identity() {
 }
 
 #[test]
+fn special_moxie_cap_keeps_its_exact_transaction_identity() {
+    let definition = find(832, "SpExPointMaxAdd").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::SpExPointMaxAdd);
+    assert_eq!(
+        definition.transaction.events,
+        &[
+            EventKind::BuffAdded,
+            EventKind::BuffChanged,
+            EventKind::BuffRemoved,
+        ]
+    );
+    assert!(has_destination(832, "SpExPointMaxAdd", &[7]));
+    assert!(has_destination(832, "SpExPointMaxAdd", &[7, 3]));
+    assert!(!has_destination(832, "SpExPointMaxAdd", &[0, 3]));
+    assert!(!has_destination(832, "SpExPointMaxAdd", &[-7]));
+    assert!(!has_destination(832, "SpExPointMaxAdd", &[7, -3]));
+    assert!(find(832, "ExPointMaxAdd").is_none());
+}
+
+#[test]
+fn transferred_moxie_keeps_its_exact_state_route() {
+    let definition = find(833, "TransferAddExPoint").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::TransferAddExPoint);
+    assert_eq!(
+        destination(833, "TransferAddExPoint", &[]),
+        Some(BuffActDestination::StateConsumer)
+    );
+    assert!(!has_destination(833, "TransferAddExPoint", &[1]));
+    assert!(find(833, "ExPointCantAdd").is_none());
+}
+
+#[test]
+fn counted_channel_keeps_its_exact_state_event_route() {
+    let definition = find(838, "CountContinueChannel").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::CountContinueChannel);
+    assert_eq!(
+        runtime_event(838, "CountContinueChannel", 1041),
+        Some(EventKind::BuffStateChanged)
+    );
+    assert!(has_destination(
+        838,
+        "CountContinueChannel",
+        &[31000505, 1, 210, 7]
+    ));
+    assert!(!has_destination(
+        838,
+        "CountContinueChannel",
+        &[31000505, 0, 210, 7]
+    ));
+    let wire = super::super::wire::find(838, "CountContinueChannel").unwrap();
+    assert_eq!(
+        wire.initial_private_state(&[838, 31000505, 1, 210, 7]),
+        Some(7)
+    );
+    assert_eq!(wire.initial_private_state(&[838, 31000505, 1, 210]), None);
+    assert!(find(838, "CastChannel").is_none());
+}
+
+#[test]
+fn contract_channel_keeps_its_exact_grant_and_round_start_routes() {
+    let definition = find(836, "ContractCastChannel").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::ContractCastChannel);
+    assert_eq!(definition.transaction.events, &[EventKind::BuffAdded]);
+    assert_eq!(
+        runtime_publication(836, "ContractCastChannel", EventKind::BuffAdded),
+        PublicationPhase::BeforePublish
+    );
+    assert_eq!(
+        runtime_event(836, "ContractCastChannel", 104),
+        Some(EventKind::RoundStart)
+    );
+    assert!(has_destination(
+        836,
+        "ContractCastChannel",
+        &[1, 150, 31_000_151, 31_000_441]
+    ));
+    assert!(!has_destination(
+        836,
+        "ContractCastChannel",
+        &[0, 150, 31_000_151, 31_000_441]
+    ));
+    assert!(!has_destination(
+        836,
+        "ContractCastChannel",
+        &[1, -150, 31_000_151, 31_000_441]
+    ));
+    assert!(find(836, "CastChannel").is_none());
+}
+
+#[test]
+fn bound_channel_lock_keeps_its_exact_state_route() {
+    let definition = find(837, "NoneCastChannel").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::NoneCastChannel);
+    assert_eq!(
+        destination(837, "NoneCastChannel", &[]),
+        Some(BuffActDestination::StateConsumer)
+    );
+    assert!(!has_destination(837, "NoneCastChannel", &[1]));
+    assert!(find(837, "ContractCastChannel").is_none());
+}
+
+#[test]
 fn absolute_missing_hp_attributes_keep_their_exact_static_routes() {
     assert_eq!(
         destination(853, "AttrByLostHp", &[10_000_000, 215, 100, 1, 1, 0]),
@@ -685,6 +1018,27 @@ fn absolute_missing_hp_attributes_keep_their_exact_static_routes() {
         destination(1056, "AttrByLostHp", &[10_000_000, 216, 150, 1, 1, 1]),
         Some(BuffActDestination::StateConsumer)
     );
+    for act_id in [853, 1056] {
+        let wire = super::super::wire::find(act_id, "AttrByLostHp").unwrap();
+        assert_eq!(
+            wire.markers(super::super::wire::WirePhase::Add),
+            &[sonettobuf::effect_type_enum::EffectType::None as i32]
+        );
+        assert!(
+            wire.markers(super::super::wire::WirePhase::Static)
+                .is_empty()
+        );
+        assert!(
+            wire.markers(super::super::wire::WirePhase::Refresh)
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn advanced_cure_owns_its_exact_hit_duration_advance() {
+    assert!(owns_duration(849, "AdvancedCure"));
+    assert!(!owns_duration(201, "Cure"));
 }
 
 #[test]
@@ -708,4 +1062,44 @@ fn incapacitating_control_buffs_keep_distinct_exact_routes() {
             .has_output()
     );
     assert!(find(402, "Dizzy").is_none());
+}
+
+#[test]
+fn shock_wave_channel_keeps_its_exact_round_end_rule() {
+    let definition = find(1031, "ConsumeBuffAddBuffContinueChannel").unwrap();
+
+    assert_eq!(
+        definition.kind,
+        BuffActKind::ConsumeBuffAddBuffContinueChannel
+    );
+    assert_eq!(
+        runtime_event(1031, "ConsumeBuffAddBuffContinueChannel", 302),
+        Some(EventKind::RoundEnd)
+    );
+    assert!(has_destination(
+        1031,
+        "ConsumeBuffAddBuffContinueChannel",
+        &[31280151, 31280113, 0, 50]
+    ));
+    assert!(!has_destination(
+        1031,
+        "ConsumeBuffAddBuffContinueChannel",
+        &[31280151, 31280113, 20, 20]
+    ));
+    assert!(find(1031, "ConsumeBuffContinueChannel").is_none());
+}
+
+#[test]
+fn hero_temp_cards_keep_their_exact_round_start_route() {
+    let definition = find(739, "CreateHeroTempCards").unwrap();
+
+    assert_eq!(definition.kind, BuffActKind::CreateHeroTempCards);
+    assert_eq!(
+        runtime_event(739, "CreateHeroTempCards", 105),
+        Some(EventKind::RoundStartCard)
+    );
+    assert!(has_destination(739, "CreateHeroTempCards", &[1, 2, 1]));
+    assert!(!has_destination(739, "CreateHeroTempCards", &[0, 2, 1]));
+    assert!(!has_destination(739, "CreateHeroTempCards", &[1, 2, 2]));
+    assert!(find(739, "AddSpTempCard").is_none());
 }

@@ -148,6 +148,48 @@ struct QueuedOp {
     frame_group: Option<Rc<RefCell<Option<FramePath>>>>,
     independent_parent_group: Option<Rc<RefCell<Option<FramePath>>>>,
     frame_owner: Option<FrameOwner>,
+    subscriber_owner_uid: Option<i64>,
+}
+
+fn queued_defeated_owner_card_cleanup(
+    pool: &TargetPool,
+    managers: &BattleManagers,
+    death: crate::engine::manager::hp::DeathTransition,
+    parent_path: &[usize],
+) -> Option<QueuedOp> {
+    let team_type = pool
+        .team_type(death.target_uid)
+        .or_else(|| managers.buff.team_type(death.target_uid))?;
+    if team_type != 1 {
+        return None;
+    }
+    Some(QueuedOp {
+        op: RuleOp::Command(crate::engine::skill::rule::output::BattleCommand::Card(
+            crate::engine::manager::card::CardCommand::remove_owner(
+                crate::engine::manager::card::CardRemoveOwner {
+                    origin: crate::engine::skill::rule::CommandOrigin {
+                        domain: crate::engine::skill::rule::RuleDomain::Lifecycle,
+                        key: crate::engine::skill::rule::DefinitionKey::new(0, "EntityCardCleanup"),
+                    },
+                    owner_uid: death.target_uid,
+                    team_type,
+                },
+            ),
+        )),
+        trigger: SkillOpTrigger::Event(BattleEvent::EntityDied(
+            crate::engine::event::payload::EntityDiedEvent {
+                source_uid: death.source_uid,
+                target_uid: death.target_uid,
+            },
+        )),
+        skill_execution: None,
+        frame_path: None,
+        parent_path: Some(parent_path.to_vec()),
+        frame_group: None,
+        independent_parent_group: None,
+        frame_owner: Some(FrameOwner::EventRule),
+        subscriber_owner_uid: None,
+    })
 }
 
 pub(super) fn attack_has_no_target(
@@ -344,6 +386,7 @@ fn drain_queue_with_deferred(
         frame_group,
         independent_parent_group,
         frame_owner,
+        subscriber_owner_uid,
     }) = queue.pop_front()
     {
         // Root and nested drains share this budget, so reaction cycles fail the
@@ -377,6 +420,22 @@ fn drain_queue_with_deferred(
                 .as_ref()
                 .and_then(|group| group.borrow().clone())
         });
+        let frame_group_started = frame_group
+            .as_ref()
+            .is_some_and(|group| group.borrow().is_some());
+        if matches!(trigger, SkillOpTrigger::Event(_))
+            && !frame_group_started
+            && managers
+                .terminal_outcome()
+                .and_then(|outcome| outcome.winning_team())
+                .is_some_and(|winning_team| {
+                    subscriber_owner_uid
+                        .and_then(|owner_uid| base_pool.team_type(owner_uid))
+                        .is_some_and(|team| team != winning_team)
+                })
+        {
+            continue;
+        }
         let parent_path = if let Some(group) = &independent_parent_group {
             let existing = group.borrow().clone();
             let path = existing.unwrap_or_else(|| {
@@ -458,6 +517,7 @@ fn drain_queue_with_deferred(
                 if !skill_from_buff_act && let Some(group) = &frame_group {
                     *group.borrow_mut() = Some(frame_path.clone());
                 }
+                let mut defeated_owner_card_cleanups = Vec::new();
                 if matches!(trigger, SkillOpTrigger::Active)
                     && invocation.phase
                         == Some(crate::engine::skill::action::SkillPhase::AfterDamage)
@@ -472,6 +532,7 @@ fn drain_queue_with_deferred(
                             &frame_path,
                             crate::engine::runtime::change::BattleChange::Death(death),
                         );
+                        defeated_owner_card_cleanups.push(death);
                     }
                 }
                 let mut execution = skill_execution.unwrap_or_else(|| SkillExecution::new(context));
@@ -512,7 +573,12 @@ fn drain_queue_with_deferred(
                     );
                 }
                 set_skill_target(&mut result.frames, &frame_path, emission.target_uid);
-                let mut outputs = Vec::new();
+                let mut outputs = defeated_owner_card_cleanups
+                    .into_iter()
+                    .filter_map(|death| {
+                        queued_defeated_owner_card_cleanup(pool, managers, death, &frame_path)
+                    })
+                    .collect::<Vec<_>>();
                 for emission in emission.ops {
                     let skill::SkillEmissionOp {
                         op,
@@ -534,6 +600,7 @@ fn drain_queue_with_deferred(
                                 frame_group: None,
                                 independent_parent_group: None,
                                 frame_owner: None,
+                                subscriber_owner_uid: None,
                             };
                             if after_current_action {
                                 state.push_after_action(frame_path.clone(), queued);
@@ -551,6 +618,7 @@ fn drain_queue_with_deferred(
                                 frame_group: None,
                                 independent_parent_group: None,
                                 frame_owner: Some(frame_owner),
+                                subscriber_owner_uid: None,
                             },
                             None => QueuedOp {
                                 op: command,
@@ -561,6 +629,7 @@ fn drain_queue_with_deferred(
                                 frame_group: None,
                                 independent_parent_group: None,
                                 frame_owner: None,
+                                subscriber_owner_uid: None,
                             },
                         }),
                     }
@@ -575,6 +644,7 @@ fn drain_queue_with_deferred(
                         frame_group: None,
                         independent_parent_group: None,
                         frame_owner: None,
+                        subscriber_owner_uid: None,
                     });
                 }
                 prepend(queue, outputs);
@@ -619,6 +689,7 @@ fn drain_queue_with_deferred(
                         frame_group,
                         independent_parent_group,
                         frame_owner,
+                        subscriber_owner_uid,
                     });
                     prepend(queue, observers);
                     continue;
@@ -786,6 +857,12 @@ fn drain_queue_with_deferred(
                 };
                 let current_skill = match owner_at_path(&result.frames, &frame_path) {
                     FrameOwner::Skill {
+                        source_uid,
+                        skill_id,
+                        target_uid,
+                        ..
+                    }
+                    | FrameOwner::ConduitSkill {
                         source_uid,
                         skill_id,
                         target_uid,
@@ -1006,28 +1083,10 @@ fn drain_queue_with_deferred(
                 let was_hp_batch = matches!(&outcome, RuleOutcome::HpBatch(_));
                 result.outcomes.push(outcome);
 
-                // Battle outcome logic selects the terminal boundary. Its manager
-                // commits that boundary here; later reactions are limited to the winner.
-                if managers.terminal_outcome().is_none()
-                    && context.battle_id > 0
-                    && let Some(outcome) =
-                        crate::engine::round::outcome::terminal_outcome_for_battle_id(
-                            context.battle_id,
-                            pool,
-                            managers,
-                        )
-                    && let Some(winning_team) = outcome.winning_team()
-                    && managers.commit_terminal(outcome)
-                {
-                    result.events.push(BattleEvent::BattleTerminalCommitted {
-                        outcome,
-                        winning_team,
-                    });
-                }
                 let terminal_owner_uids = managers
                     .terminal_outcome()
                     .and_then(|outcome| outcome.winning_team())
-                    .map(|winning_team| pool.team_uids(winning_team));
+                    .map(|winning_team| base_pool.team_uids(winning_team));
 
                 // AfterPublish reactions are partitioned by their declared release
                 // lane; after-hit and after-action work stays action-scoped in state.
@@ -1116,7 +1175,7 @@ fn drain_queue_with_deferred(
                             queued_runtime_settlement_phase(queued)
                                 == crate::engine::skill::buff_act::registry::RuntimeSettlementPhase::After
                         });
-                    drain_nested_queue(
+                    drain_death_settlement_queue(
                         managers,
                         pool,
                         catalog,
@@ -1128,12 +1187,15 @@ fn drain_queue_with_deferred(
                     after_publish = after_settlement;
                 }
 
+                commit_terminal(managers, base_pool, context, state, &mut result.events);
+
                 // A pending death becomes a frame change only if HP is still zero.
                 // Active-action deaths wait for the shared HitPassives release.
                 let settled_deaths = pending_deaths
                     .into_iter()
                     .filter(|death| managers.hp.current(death.target_uid) == 0)
                     .collect::<Vec<_>>();
+                let mut cleanup_deaths = Vec::new();
                 if let Some(action_scope) = action_scope.as_ref() {
                     state.record_deaths(action_scope.clone(), settled_deaths.iter().copied());
                 } else {
@@ -1144,21 +1206,23 @@ fn drain_queue_with_deferred(
                             crate::engine::runtime::change::BattleChange::Death(*death),
                         );
                     }
+                    cleanup_deaths.extend(settled_deaths.iter().copied());
                 }
-                if releases_pending_hits
-                    && let Some(action_scope) = action_scope.as_ref()
-                    && let Some(deaths) = state.take_deaths(action_scope)
-                {
-                    for death in deaths
+                if releases_pending_hits && let Some(action_scope) = action_scope.as_ref() {
+                    let deaths = state
+                        .take_deaths(action_scope)
+                        .unwrap_or_default()
                         .into_iter()
                         .filter(|death| managers.hp.current(death.target_uid) == 0)
-                    {
+                        .collect::<Vec<_>>();
+                    for death in &deaths {
                         push_change(
                             &mut result.frames,
                             action_scope,
-                            crate::engine::runtime::change::BattleChange::Death(death),
+                            crate::engine::runtime::change::BattleChange::Death(*death),
                         );
                     }
+                    cleanup_deaths.extend(deaths);
                 }
                 if !settled_deaths.is_empty()
                     && matches!(trigger, SkillOpTrigger::Active)
@@ -1171,6 +1235,18 @@ fn drain_queue_with_deferred(
                 {
                     execution.record_kills(settled_deaths.len() as i32);
                 }
+                let cleanup_parent_path = action_scope.as_deref().unwrap_or(&frame_path);
+                after_publish.splice(
+                    0..0,
+                    cleanup_deaths.into_iter().filter_map(|death| {
+                        queued_defeated_owner_card_cleanup(
+                            pool,
+                            managers,
+                            death,
+                            cleanup_parent_path,
+                        )
+                    }),
+                );
                 let after_action = if completes_action {
                     state.take_after_action(&frame_path)
                 } else {
@@ -1200,6 +1276,7 @@ fn drain_queue_with_deferred(
                         frame_group: None,
                         independent_parent_group: None,
                         frame_owner: deferred_followup_owner.clone(),
+                        subscriber_owner_uid: None,
                     };
                     if let Some(skill_path) = skill_path {
                         state.push_after_action(skill_path, queued);
@@ -1242,6 +1319,46 @@ fn drain_nested_queue(
     result.events.extend(nested.events);
     result.frames = nested.frames;
     Ok(())
+}
+
+fn drain_death_settlement_queue(
+    managers: &mut BattleManagers,
+    pool: &TargetPool,
+    catalog: &SkillEffectCatalog,
+    determinism: &mut RoundDeterminism,
+    queue: VecDeque<QueuedOp>,
+    result: &mut DrainResult,
+    state: &mut DrainState,
+) -> Result<(), DrainError> {
+    state.enter_death_settlement();
+    let nested = drain_nested_queue(managers, pool, catalog, determinism, queue, result, state);
+    state.leave_death_settlement();
+    nested
+}
+
+fn commit_terminal(
+    managers: &mut BattleManagers,
+    pool: &TargetPool,
+    context: TargetContext,
+    state: &DrainState,
+    events: &mut Vec<BattleEvent>,
+) {
+    if !state.death_settlement_in_progress()
+        && managers.terminal_outcome().is_none()
+        && context.battle_id > 0
+        && let Some(outcome) = crate::engine::round::outcome::terminal_outcome_for_battle_id(
+            context.battle_id,
+            pool,
+            managers,
+        )
+        && let Some(winning_team) = outcome.winning_team()
+        && managers.commit_terminal(outcome)
+    {
+        events.push(BattleEvent::BattleTerminalCommitted {
+            outcome,
+            winning_team,
+        });
+    }
 }
 
 fn invocation_frame_target(

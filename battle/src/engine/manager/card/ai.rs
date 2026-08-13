@@ -14,6 +14,16 @@ pub fn generate_ai_deck<R: Rng + ?Sized>(
     eureka: &EurekaManager,
     rng: &mut R,
 ) -> Vec<CardInfo> {
+    generate_ai_deck_with_extra_actions(fight, ex_point, eureka, 0, rng)
+}
+
+pub fn generate_ai_deck_with_extra_actions<R: Rng + ?Sized>(
+    fight: &Fight,
+    ex_point: &ExPointManager,
+    eureka: &EurekaManager,
+    extra_actions: i32,
+    rng: &mut R,
+) -> Vec<CardInfo> {
     let enemies = active_enemy_entities(fight);
     if enemies.is_empty() {
         return Vec::new();
@@ -23,16 +33,65 @@ pub fn generate_ai_deck<R: Rng + ?Sized>(
     if target_uids.is_empty() {
         return Vec::new();
     }
-    enemies
+    let mut cards = selectable_cards(enemies, ex_point, eureka)
         .into_iter()
-        .filter_map(|entity| {
-            let mut card = card_for(entity, select_skill(entity, ex_point, eureka))?;
+        .map(|mut card| {
             card.target_uid = target_uids
                 .get(rng.random_range(0..target_uids.len()))
                 .copied();
-            Some(card)
+            card
         })
+        .collect::<Vec<_>>();
+    let candidates = cards.clone();
+    let action_count = action_count(cards.len(), extra_actions);
+    cards.truncate(action_count);
+    if candidates.is_empty() {
+        return cards;
+    }
+    while cards.len() < action_count {
+        let mut card = candidates[rng.random_range(0..candidates.len())].clone();
+        card.target_uid = target_uids
+            .get(rng.random_range(0..target_uids.len()))
+            .copied();
+        cards.push(card);
+    }
+    cards
+}
+
+pub(crate) fn generated_ai_action_count(
+    fight: &Fight,
+    ex_point: &ExPointManager,
+    eureka: &EurekaManager,
+    extra_actions: i32,
+) -> usize {
+    if active_player_uids(fight).is_empty() {
+        return 0;
+    }
+    action_count(
+        selectable_cards(active_enemy_entities(fight), ex_point, eureka).len(),
+        extra_actions,
+    )
+}
+
+fn selectable_cards(
+    enemies: Vec<&sonettobuf::FightEntityInfo>,
+    ex_point: &ExPointManager,
+    eureka: &EurekaManager,
+) -> Vec<CardInfo> {
+    enemies
+        .into_iter()
+        .filter_map(|entity| card_for(entity, select_skill(entity, ex_point, eureka)))
         .collect()
+}
+
+fn action_count(candidate_count: usize, extra_actions: i32) -> usize {
+    if candidate_count == 0 {
+        return 0;
+    }
+    i32::try_from(candidate_count)
+        .unwrap_or(i32::MAX)
+        .saturating_add(extra_actions)
+        .max(0) as usize
 }
 
 fn select_skill(

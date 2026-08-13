@@ -8,6 +8,12 @@ pub fn active_use(_: i32, _: &str, args: &[String]) -> Option<ParsedConditionKin
     })
 }
 
+pub fn active_ally_use(_: i32, _: &str, args: &[String]) -> Option<ParsedConditionKind> {
+    Some(ParsedConditionKind::ActiveAllyUseSkill {
+        slot: first_i32(args)?,
+    })
+}
+
 pub fn use_skill(_: i32, _: &str, args: &[String]) -> Option<ParsedConditionKind> {
     Some(ParsedConditionKind::UseSkillRank(parse_i32_list(
         args.first()?,
@@ -41,6 +47,19 @@ pub fn specific_skill(_: i32, _: &str, args: &[String]) -> Option<ParsedConditio
         (0, 2 | 3) | (1, 0 | 2 | 3) | (2, 0 | 2 | 3) | (3, 0 | 1 | 3) | (4, 0..=3) | (5, 0..=3)
     )
     .then_some(ParsedConditionKind::SpecificSkill { group, rank })
+}
+
+pub fn received_specific_skill(
+    opcode: i32,
+    type_name: &str,
+    args: &[String],
+) -> Option<ParsedConditionKind> {
+    let ParsedConditionKind::SpecificSkill { group, rank } =
+        specific_skill(opcode, type_name, args)?
+    else {
+        return None;
+    };
+    Some(ParsedConditionKind::ReceivedSpecificSkill { group, rank })
 }
 
 pub fn skill_type(_: i32, _: &str, args: &[String]) -> Option<ParsedConditionKind> {
@@ -112,8 +131,8 @@ mod tests {
     #[test]
     fn aleph_active_attack_conditions_use_the_ally_action_lane() {
         assert_eq!(
-            active_use(502212, "ActiveUseSkill", &["0".into()]),
-            Some(ParsedConditionKind::ActiveUseSkill { slot: 0 })
+            active_ally_use(502212, "ActiveUseSkill", &["0".into()]),
+            Some(ParsedConditionKind::ActiveAllyUseSkill { slot: 0 })
         );
         assert_eq!(
             hurt_skill(501212, "UseHurtSkill", &[]),

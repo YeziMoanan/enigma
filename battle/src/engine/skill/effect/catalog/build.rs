@@ -65,7 +65,7 @@ impl SkillEffectCatalog {
                     .filter_map(|skill| skill.skill_id),
             );
         }
-        if let Some(battle) = crate::engine::fight::configured_battle(fight) {
+        if let Some(battle) = crate::engine::fight::configured_battle_with_game_data(db, fight) {
             for rule_id in
                 numeric_ids(&battle.addition_rule).chain(numeric_ids(&battle.hidden_rule))
             {
@@ -75,7 +75,10 @@ impl SkillEffectCatalog {
                 }
             }
         }
-        skills.extend(crate::engine::manager::conduit::ConduitManager::seed(fight).skill_ids());
+        skills.extend(
+            crate::engine::manager::conduit::ConduitManager::seed_with_game_data(db, fight)
+                .skill_ids(),
+        );
         let catalog = Self::from_roots(db, skills, buffs);
         catalog.warn_unsupported(db);
         catalog
@@ -200,9 +203,13 @@ impl SkillEffectCatalog {
                                 &values[1..],
                             ),
                         ),
+                        Some(BuffActKind::BuffReplace) => {
+                            buffs.extend(values.get(2).copied().filter(|id| *id > 0))
+                        }
                         Some(BuffActKind::AddPassiveSkills)
                         | Some(BuffActKind::AddSpTempCard)
                         | Some(BuffActKind::CastChannel)
+                        | Some(BuffActKind::CountContinueChannel)
                         | Some(BuffActKind::SpecialCountCastChannel) => {
                             skills.extend(values.get(1).copied())
                         }
@@ -214,6 +221,18 @@ impl SkillEffectCatalog {
                                 &values[1..],
                             ),
                         ),
+                        Some(BuffActKind::ContractCastChannel) => {
+                            buffs.extend(
+                                crate::engine::skill::buff_act::contract_cast_channel::referenced_buff(
+                                    &values[1..],
+                                ),
+                            );
+                            skills.extend(
+                                crate::engine::skill::buff_act::contract_cast_channel::referenced_skill(
+                                    &values[1..],
+                                ),
+                            );
+                        }
                         Some(BuffActKind::BeatBack) => skills.extend(
                             crate::engine::skill::buff_act::riposte::holder_skill(&values[1..]),
                         ),
@@ -269,8 +288,8 @@ impl SkillEffectCatalog {
                             .map(|request| request.skill_id),
                         ),
                         Some(BuffActKind::EmitterTag) => skills.extend(
-                            crate::engine::mechanic::impromptu::ImpromptuDefinition::from_config()
-                                .map(|definition| definition.skill_id()),
+                            crate::catalog::impromptu_definition(db)
+                            .map(|definition| definition.skill_id()),
                         ),
                         Some(BuffActKind::ChangeEmitterSkill) => {
                             skills.extend(values.get(1).copied().filter(|skill_id| *skill_id > 0))
@@ -446,6 +465,31 @@ impl SkillEffectCatalog {
             let Some(buff) = db.skill_buff.get(buff_id) else {
                 continue;
             };
+            let handler_owns_duration = buff.features.split('|').any(|raw| {
+                let Some(act_id) = crate::engine::entity::skill::split_ids(raw)
+                    .first()
+                    .copied()
+                else {
+                    return false;
+                };
+                db.buff_act.get(act_id).is_some_and(|act| {
+                    crate::engine::skill::buff_act::registry::owns_duration(act.id, &act.r#type)
+                })
+            });
+            if let Ok(policy) = crate::engine::manager::buff::BuffPolicy::try_for_buff_id(buff_id)
+                && policy.lifetime.duration > 0
+                && !handler_owns_duration
+                && !crate::engine::skill::buff_act::effect_time::supports_duration_policy(
+                    policy.lifetime.take_stage,
+                )
+            {
+                tracing::warn!(
+                    buff_id,
+                    duration = policy.lifetime.duration,
+                    take_stage = policy.lifetime.take_stage,
+                    "unsupported buff duration stage in current battle"
+                );
+            }
             for raw in buff
                 .features
                 .split('|')

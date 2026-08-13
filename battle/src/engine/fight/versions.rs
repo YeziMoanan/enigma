@@ -1,20 +1,18 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-pub(crate) fn current() -> Result<i32> {
-    config::configs::get()
-        .r#const
-        .get(1707) // ConstEnum.FightVersion in Lua.
-        .context("FightVersion config 1707 is missing")?
-        .value
-        .parse()
-        .context("FightVersion config 1707 is not an integer")
+pub(crate) fn current(catalog: crate::catalog::BattleCatalog) -> Result<i32> {
+    match catalog.fight_version() {
+        crate::catalog::ConfiguredFightVersion::Missing => {
+            Err(anyhow::anyhow!("FightVersion config 1707 is missing"))
+        }
+        crate::catalog::ConfiguredFightVersion::Invalid => Err(anyhow::anyhow!(
+            "FightVersion config 1707 is not an integer"
+        )),
+        crate::catalog::ConfiguredFightVersion::Value(version) => Ok(version),
+    }
 }
 
 pub(crate) fn writes_reduce_hp(version: i32) -> bool {
-    version == 7
-}
-
-pub(crate) fn writes_change_round_number(version: i32) -> bool {
     version == 7
 }
 
@@ -22,6 +20,13 @@ pub(crate) fn writes_change_round_number(version: i32) -> bool {
 pub(crate) enum HurtInfoWireLayout {
     Version6,
     Version7,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AbsorbHurtMapLayout {
+    TwoMaps,
+    #[default]
+    ThreeMaps,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,15 +69,13 @@ pub(crate) const fn redeal_wire_layout(version: i32) -> Option<RedealWireLayout>
 mod tests {
     use super::{
         HurtInfoWireLayout, RedealWireLayout, RoundStartSetupLayout, hurt_info_wire_layout,
-        redeal_wire_layout, round_start_setup_layout, writes_change_round_number, writes_reduce_hp,
+        redeal_wire_layout, round_start_setup_layout, writes_reduce_hp,
     };
 
     #[test]
     fn reduce_hp_wire_field_is_confirmed_only_for_version_seven() {
         assert!(!writes_reduce_hp(6));
         assert!(writes_reduce_hp(7));
-        assert!(!writes_change_round_number(6));
-        assert!(writes_change_round_number(7));
     }
 
     #[test]

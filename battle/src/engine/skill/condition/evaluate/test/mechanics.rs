@@ -32,6 +32,42 @@ fn blood_pool_max_uses_runtime_state() {
 }
 
 #[test]
+fn broken_condition_reads_committed_toughness_state() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                toughness_value: Some(1),
+                toughness_point: Some(1),
+                is_broken: Some(false),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let condition = exact_condition(783101, "IsBroken", &[]);
+    let matches = |managers: &BattleManagers| {
+        conditions_match(
+            std::slice::from_ref(&condition),
+            10,
+            &[10],
+            Some(managers),
+            &pool,
+            TargetContext::default(),
+        )
+    };
+
+    assert!(!matches(&managers));
+    assert!(managers.toughness.reduce(10, 1, true).is_some());
+    assert!(matches(&managers));
+}
+
+#[test]
 fn blood_pool_value_selects_the_configured_shared_gauge() {
     init_config();
     let condition = |config_effect| ParsedCondition {
@@ -77,7 +113,7 @@ fn blood_pool_value_selects_the_configured_shared_gauge() {
 }
 
 #[test]
-fn ally_attacked_is_distinct_from_carrier_attacked() {
+fn ally_attacked_matches_owner_and_teammate_but_not_opponent() {
     init_config();
     let fight = Fight {
         attacker: Some(FightTeam {
@@ -127,8 +163,66 @@ fn ally_attacked_is_distinct_from_carrier_attacked() {
     };
 
     assert!(matches(11));
-    assert!(!matches(10));
+    assert!(matches(10));
     assert!(!matches(-1));
+}
+
+#[test]
+fn afflatus_hit_conditions_match_only_the_attacked_target() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                career: Some(1),
+                current_hp: Some(1),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    uid: Some(-1),
+                    career: Some(1),
+                    current_hp: Some(1),
+                    ..Default::default()
+                },
+                FightEntityInfo {
+                    uid: Some(-2),
+                    career: Some(1),
+                    current_hp: Some(1),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let condition = ParsedCondition {
+        opcode: 47209,
+        type_name: "HurtNotRestraint".into(),
+        kind: ParsedConditionKind::HurtNotRestrained,
+        raw_args: Vec::new(),
+    };
+    let matches = |hit_target_uid| {
+        conditions_match(
+            std::slice::from_ref(&condition),
+            -1,
+            &[-1],
+            None,
+            &pool,
+            TargetContext {
+                hit_source_uid: 10,
+                hit_target_uid,
+                ..Default::default()
+            },
+        )
+    };
+
+    assert!(matches(-1));
+    assert!(!matches(-2));
 }
 
 #[test]
@@ -159,6 +253,51 @@ fn no_action_round_checks_the_owner_card_state() {
             owner_played_card: true,
             ..Default::default()
         },
+    ));
+}
+
+#[test]
+fn full_moxie_uses_each_targets_configured_maximum() {
+    init_config();
+    let fight = Fight {
+        defender: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    uid: Some(-1),
+                    ex_point: Some(2),
+                    ex_point_max: Some(2),
+                    ..Default::default()
+                },
+                FightEntityInfo {
+                    uid: Some(-2),
+                    ex_point: Some(1),
+                    ex_point_max: Some(2),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let managers = BattleManagers::seeded(&fight);
+    let condition = exact_condition(745304, "ExPointMax", &[]);
+
+    assert!(conditions_match(
+        std::slice::from_ref(&condition),
+        -1,
+        &[-1],
+        Some(&managers),
+        &pool,
+        TargetContext::default(),
+    ));
+    assert!(!conditions_match(
+        &[condition],
+        -2,
+        &[-2],
+        Some(&managers),
+        &pool,
+        TargetContext::default(),
     ));
 }
 
@@ -294,6 +433,42 @@ fn hurt_kind_reads_the_attacker_damage_type() {
 }
 
 #[test]
+fn hero_damage_type_reads_the_setup_skill_source() {
+    init_config();
+    let reality = exact_condition(36021, "HeroReal", &[]);
+    let mental = exact_condition(37021, "HeroMagic", &[]);
+    for (damage_type, is_reality) in [
+        (
+            crate::engine::skill::target::EntityDamageType::Reality,
+            true,
+        ),
+        (
+            crate::engine::skill::target::EntityDamageType::Mental,
+            false,
+        ),
+    ] {
+        let mut source = TargetEntity::default();
+        source.uid = 10;
+        source.damage_type = damage_type;
+        let mut pool = TargetPool::default();
+        pool.attacker_main.push(source.clone());
+        pool.attacker_all.push(source);
+        let matches = |condition| {
+            conditions_match(
+                std::slice::from_ref(condition),
+                10,
+                &[10],
+                None,
+                &pool,
+                TargetContext::default(),
+            )
+        };
+        assert_eq!(matches(&reality), is_reality);
+        assert_eq!(matches(&mental), !is_reality);
+    }
+}
+
+#[test]
 fn alive_team_count_reads_manager_hp_not_the_fight_snapshot() {
     init_config();
     let fight = Fight {
@@ -326,6 +501,37 @@ fn alive_team_count_reads_manager_hp_not_the_fight_snapshot() {
 
     assert!(conditions_match(
         &[condition],
+        10,
+        &[10],
+        Some(&managers),
+        &pool,
+        TargetContext::default(),
+    ));
+}
+
+#[test]
+fn other_teammate_count_excludes_the_alive_source() {
+    init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![10, 11]
+                .into_iter()
+                .map(|uid| FightEntityInfo {
+                    uid: Some(uid),
+                    current_hp: Some(100),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    managers.hp.lose(11, 100, -1);
+
+    assert!(conditions_match(
+        &[exact_condition(73301, "TeammateAliveNum", &["0"])],
         10,
         &[10],
         Some(&managers),

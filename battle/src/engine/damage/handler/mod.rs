@@ -1,12 +1,9 @@
 use crate::engine::{
     damage::butterfly_damage,
     entity::attr::AttrId,
-    manager::{
-        buff::BuffManager,
-        hp::{
-            DamageEffectKind, HpCommand, HpDamage, HpHeal, HpHealKind, HpLoss, HurtDamageFromType,
-            HurtInfoData,
-        },
+    manager::hp::{
+        DamageEffectKind, HpCommand, HpDamage, HpHeal, HpHealKind, HpLoss, HurtDamageFromType,
+        HurtInfoData,
     },
     skill::{
         behavior::{BehaviorOpContext, classify::BehaviorKind, registry::BehaviorHandler},
@@ -17,6 +14,9 @@ use crate::engine::{
 };
 use sonettobuf::effect_type_enum::EffectType;
 
+#[cfg(test)]
+use crate::engine::manager::buff::BuffManager;
+
 mod affinity;
 mod critical;
 mod heal;
@@ -24,8 +24,8 @@ mod loss;
 mod origin;
 mod resolve;
 
-use affinity::{critical_technique_bonus, regular_multiplier, strongest_career_multiplier};
-pub(crate) use affinity::{restrains, restrains_target};
+use affinity::{critical_technique_bonus, regular_multiplier};
+pub(crate) use affinity::{restrains_target, restrains_target_either};
 pub(crate) use critical::{
     chance as crit_chance, damage_multiplier as crit_damage_multiplier,
     excess_rate as excess_crit_rate,
@@ -497,7 +497,10 @@ impl BehaviorHandler for Handler {
                 if *replacement_buff_id <= 0 || *count_scope != 3 || *rate_per_character <= 0 {
                     return None;
                 }
-                let mut feature = BuffManager::configured_features(*replacement_buff_id)
+                let mut feature = context
+                    .managers
+                    .buff
+                    .definition_features(*replacement_buff_id)
                     .into_iter()
                     .find(|feature| is_kind(feature, BuffActKind::AttrOnlyCalDamageReplaceAttr))?;
                 feature.owner_uid = source_uid;
@@ -531,6 +534,8 @@ impl BehaviorHandler for Handler {
                         attack_attributes: &context.modifiers.attack_attributes,
                         career_ratio_bonus: context.modifiers.career_ratio_bonus,
                         attack_career: context.modifiers.attack_career,
+                        additional_attack_career: context.modifiers.additional_attack_career,
+                        critical_multiplier_remainder: 0,
                         is_conduit: context
                             .managers
                             .conduit
@@ -545,7 +550,7 @@ impl BehaviorHandler for Handler {
                         buffs: &context.managers.buff,
                         target_buffs: &context.managers.buff,
                         hp: &context.managers.hp,
-                        fields: Some(&context.managers.field),
+                        fields: Some((&context.managers.field, context.managers.catalog())),
                         emitter: None,
                         team_inspiration: 0,
                     },
@@ -577,8 +582,10 @@ impl BehaviorHandler for Handler {
                                 hurt: HurtInfoData {
                                     from_uid: source_uid,
                                     is_crit,
-                                    career_restraint: restrains_target(
+                                    career_restraint: restrains_target_either(
+                                        context.managers.catalog(),
                                         context.modifiers.attack_career.unwrap_or(source.career),
+                                        context.modifiers.additional_attack_career,
                                         target,
                                     ),
                                     reduce_hp: 0,

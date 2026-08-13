@@ -40,13 +40,22 @@ fn halo_fanout_keeps_add_markers_from_non_halo_features() {
 fn initializes_common_params_for_stateful_buff_acts() {
     crate::test_support::init_config();
 
-    assert_eq!(initial_act_common_params("772#1|806#5"), "806#0");
     assert_eq!(
-        initial_act_common_params("1004#205#500#500#228003"),
+        initial_act_common_params(config::get(), "772#1|806#5"),
+        "806#0"
+    );
+    assert_eq!(
+        initial_act_common_params(config::get(), "1004#205#500#500#228003"),
         "1004#0"
     );
-    assert_eq!(initial_act_common_params("1003#1#228004#6"), "1003#0");
-    assert_eq!(initial_act_common_params("10000"), "10000#1,0,0");
+    assert_eq!(
+        initial_act_common_params(config::get(), "1003#1#228004#6"),
+        "1003#0"
+    );
+    assert_eq!(
+        initial_act_common_params(config::get(), "10000"),
+        "10000#1,0,0"
+    );
 }
 
 #[test]
@@ -60,12 +69,31 @@ fn stacked_markers_use_the_layer_child_uid_lane() {
 }
 
 #[test]
-fn visible_layered_attribute_buff_has_no_post_apply_uid_reservation() {
+fn feature_kind_controls_post_apply_uid_reservation() {
     crate::test_support::init_config();
+
+    let carrier = BuffDefinition::get(31430141).unwrap();
+    assert!(carrier.uses_child_uid());
+    assert!(!carrier.reserves_child_after_first_apply());
 
     let higge = BuffDefinition::get(31200142).unwrap();
     assert!(higge.uses_child_uid());
     assert!(!higge.reserves_child_after_first_apply());
+
+    for buff_id in [435011, 435421] {
+        let hidden_attr = BuffDefinition::get(buff_id).unwrap();
+        assert!(
+            hidden_attr
+                .features()
+                .iter()
+                .any(|feature| feature.kind == Some(BuffActKind::Attr))
+        );
+        assert!(!hidden_attr.reserves_child_after_first_apply());
+    }
+
+    let hidden_attr = BuffDefinition::get(435421).unwrap();
+    assert_eq!(hidden_attr.include_entries(), &[(10, 3)]);
+    assert!(hidden_attr.uses_child_uid());
 
     let lucy_upgrade = BuffDefinition::get(30860113).unwrap();
     assert!(lucy_upgrade.uses_child_uid());
@@ -77,7 +105,7 @@ fn maps_real_harm_fix_to_genesis_damage_bonus() {
     crate::test_support::init_config();
 
     assert_eq!(
-        parse_attribute_deltas("522#70"),
+        parse_attribute_deltas(config::get(), "522#70"),
         vec![(AttrId::GenesisDmgBonus, 70)]
     );
 }
@@ -93,11 +121,25 @@ fn initial_wire_state_comes_from_the_resolved_exact_feature() {
     assert_eq!(crystal[0].params, vec![2, 2, 0]);
     assert_eq!(crystal[0].team_type, 1);
 
-    let kill = BuffDefinition::get(31280111)
+    let kill = BuffDefinition::get(31280111).unwrap();
+    for current_hp in [1_015_000, 1_431_503, 8_423_100] {
+        assert!(kill.initial_wire_states(10, 21, 1, current_hp).is_empty());
+        let act_info = kill.initial_planned_act_info(Some(1_892), &[]).unwrap();
+        assert_eq!(act_info[0].act_id, Some(1028));
+        assert_eq!(act_info[0].str_param.as_deref(), Some("75680"));
+    }
+
+    let channel = BuffDefinition::get(31280115)
         .unwrap()
-        .initial_wire_states(10, 21, 1, 1000);
-    assert_eq!(kill[0].act_id, 1028);
-    assert_eq!(kill[0].str_param.as_deref(), Some("200"));
+        .initial_wire_states(10, 22, 1, 1000);
+    assert_eq!(channel[0].act_id, 1031);
+    assert!(channel[0].params.is_empty());
+    assert_eq!(channel[0].str_param.as_deref(), Some("0"));
+    assert!(
+        !BuffDefinition::get(31280115)
+            .unwrap()
+            .projects_initial_wire_state(1031)
+    );
 }
 
 #[test]
@@ -162,8 +204,10 @@ fn stacked_include_value_is_the_layer_cap() {
 
 #[test]
 fn parses_attribute_features_once() {
+    crate::test_support::init_config();
+
     assert_eq!(
-        parse_attribute_deltas("100#102#10|926#1|100#205#15"),
+        parse_attribute_deltas(config::get(), "100#102#10|926#1|100#205#15"),
         vec![(AttrId::Attack, 10), (AttrId::DmgBonus, 15)]
     );
 }

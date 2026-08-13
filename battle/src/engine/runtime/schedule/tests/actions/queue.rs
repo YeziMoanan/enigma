@@ -72,6 +72,89 @@ fn action_queue_commit_records_cards_in_an_independent_buff_act_frame() {
 }
 
 #[test]
+fn action_queue_commit_expires_the_committed_teams_before_ap_buffs() {
+    init_config();
+    let entity = |uid, team_type, buff_uid| FightEntityInfo {
+        uid: Some(uid),
+        team_type: Some(team_type),
+        current_hp: Some(100),
+        buffs: vec![BuffInfo {
+            uid: Some(buff_uid),
+            buff_id: Some(31390190),
+            from_uid: Some(uid),
+            duration: Some(1),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![entity(10, 1, 31), entity(20, 1, 32)],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![entity(-1, 2, 33)],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    managers
+        .execute_card(CardCommand::Setup(CardSetup {
+            hand: vec![CardInfo {
+                uid: Some(10),
+                skill_id: Some(100),
+                ..Default::default()
+            }],
+            draw_pile: Vec::new(),
+            deck_num: 1,
+        }))
+        .unwrap();
+    managers
+        .execute_card(CardCommand::Play(CardPlay {
+            origin: CARD_PLAY_ORIGIN,
+            hand_index: 0,
+            target_uid: None,
+            chosen_skill_id: None,
+            choice: None,
+            recorded_skill: None,
+        }))
+        .unwrap();
+
+    let result = run_action_queue_committed(
+        &mut managers,
+        &pool,
+        &SkillEffectCatalog::default(),
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        1,
+        99_998,
+    )
+    .unwrap();
+
+    assert!(managers.buff.snapshot(10, 31).is_none());
+    assert!(managers.buff.snapshot(20, 32).is_none());
+    assert!(managers.buff.snapshot(-1, 33).is_some());
+    let removed = result
+        .outcomes
+        .iter()
+        .find_map(|outcome| match outcome {
+            RuleOutcome::Buff(changes) if changes.origin.key.opcode == 107 => Some(
+                changes
+                    .change
+                    .removed
+                    .iter()
+                    .map(|removed| (removed.target_uid, removed.buff.uid))
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(removed, vec![(10, Some(31)), (20, Some(32))]);
+}
+
+#[test]
 fn active_precast_card_publishes_moxie_after_its_card_indexed_skill() {
     init_config();
     let fight = Fight {
@@ -324,6 +407,7 @@ fn cards_without_a_living_current_enemy_resolve_support_effects_or_only_grant_mo
                 chosen_skill_id: None,
                 recorded_skill: None,
             }],
+            Vec::new(),
             1,
             0,
         )
@@ -451,6 +535,7 @@ fn terminal_player_action_stops_the_remaining_action_queue() {
                 recorded_skill: None,
             },
         ],
+        Vec::new(),
         1,
         0,
     )
@@ -464,6 +549,105 @@ fn terminal_player_action_stops_the_remaining_action_queue() {
             crate::engine::skill::action::SkillLifecycle::ActionCompleted(action)
         ) if action.skill_id == 200
     )));
+}
+
+#[test]
+fn repeated_play_index_tracks_the_mutating_hand() {
+    init_config();
+    let entity = |uid, skill_id| FightEntityInfo {
+        uid: Some(uid),
+        team_type: Some(1),
+        current_hp: Some(100),
+        skill_group1: vec![skill_id],
+        ..Default::default()
+    };
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![entity(10, 100), entity(20, 200)],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(-1),
+                team_type: Some(2),
+                current_hp: Some(100),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    managers
+        .execute_card(CardCommand::Setup(CardSetup {
+            hand: vec![
+                CardInfo {
+                    uid: Some(10),
+                    skill_id: Some(100),
+                    ..Default::default()
+                },
+                CardInfo {
+                    uid: Some(20),
+                    skill_id: Some(200),
+                    ..Default::default()
+                },
+            ],
+            draw_pile: Vec::new(),
+            deck_num: 2,
+        }))
+        .unwrap();
+    let mut catalog = SkillEffectCatalog::default();
+    for skill_id in [100, 200] {
+        catalog.insert(ParsedSkillEffect {
+            skill_id,
+            slots: Vec::new(),
+        });
+        catalog.insert_logic_target(
+            skill_id,
+            crate::engine::skill::target::request::SOURCE_TARGET_CODE,
+        );
+    }
+
+    let result = run_player_phase(
+        &fight,
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext::default(),
+        [
+            RoundCommand::PlayCard {
+                card_index: 0,
+                target_uid: None,
+                chosen_skill_id: None,
+                recorded_skill: None,
+            },
+            RoundCommand::PlayCard {
+                card_index: 0,
+                target_uid: None,
+                chosen_skill_id: None,
+                recorded_skill: None,
+            },
+        ],
+        Vec::new(),
+        1,
+        0,
+    )
+    .unwrap();
+
+    let completed = result
+        .outcomes
+        .iter()
+        .filter_map(|outcome| match outcome {
+            RuleOutcome::SkillLifecycle(
+                crate::engine::skill::action::SkillLifecycle::ActionCompleted(action),
+            ) => Some(action.skill_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(completed, vec![100, 200]);
+    assert!(managers.card.hand().is_empty());
 }
 
 #[test]

@@ -5,7 +5,6 @@ use sonettobuf::{
 };
 
 use crate::engine::{
-    entity::skill::card_skill_rank,
     manager::{
         BattleManagers,
         card::{
@@ -42,7 +41,8 @@ pub(crate) fn plan(
     determinism: &RoundDeterminism,
     devices_opers: Vec<FightDeviceOper>,
 ) -> AutoRoundReply {
-    let pool = TargetPool::from_fight(fight).runtime_view(managers);
+    let pool =
+        TargetPool::from_fight_with_catalog(managers.catalog(), fight).runtime_view(managers);
     let mut cards = managers.card.clone();
     let mut normal_ap = round_state.act_point.max(0);
     if !apply_prefix(
@@ -242,19 +242,8 @@ fn best_candidate(
                 return None;
             }
             let source = pool.entity(source_uid)?;
-            let ultimate =
-                crate::engine::mechanic::card::CardMechanic.is_ultimate_skill(skill_id, source);
-            let uses_action_point =
-                crate::engine::skill::buff_act::skill_no_use_action_point::skill_uses_action_point(
-                    &managers.buff.active_features(&managers.hp),
-                    source_uid,
-                    ultimate,
-                );
-            let normal_ap_cost =
-                i32::from(!card.temp_card.unwrap_or_default() && uses_action_point);
-            if normal_ap_cost > normal_ap {
-                return None;
-            }
+            let ultimate = crate::engine::mechanic::card::CardMechanic
+                .is_ultimate_skill(managers, skill_id, source);
             if ultimate
                 && !crate::engine::mechanic::card::CardMechanic.ultimate_ready(managers, source)
             {
@@ -277,7 +266,7 @@ fn best_candidate(
                 normal_ap: normal_ap_cost,
                 ultimate,
                 damage_rate: catalog.damage_rate(skill_id),
-                rank: card_skill_rank(card),
+                rank: managers.catalog().card_skill_rank(card),
             })
         })
         .max_by_key(|candidate| {
@@ -394,15 +383,10 @@ fn target_options(
         active_skill_id: skill_id,
         active_skill_source_uid: source_uid,
         active_skill_is_attack: attack,
-        active_skill_rank: config::try_get()
-            .and_then(|db| db.skill.get(skill_id))
-            .map(|skill| skill.skill_rank)
-            .unwrap_or_default(),
+        active_skill_rank: managers.catalog().skill_rank(skill_id),
         active_skill_type: catalog.skill_type(skill_id),
         active_skill_effect_tag: catalog.effect_tag(skill_id),
-        damage_target_count_kind: crate::engine::skill::target::request::damage_target_count_kind(
-            code,
-        ),
+        damage_target_count_kind: managers.catalog().damage_target_count_kind(code),
         ..Default::default()
     };
     TargetResolver::resolve_primary_candidates(

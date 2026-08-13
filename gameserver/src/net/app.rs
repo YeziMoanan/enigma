@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 
 use crate::net::outbound::CommandPacket;
 
@@ -8,16 +8,8 @@ use crate::net::outbound::CommandPacket;
 pub struct AppState {
     pub db: &'static SqlitePool,
     pub tables: &'static config::GameDB,
-    sessions: dashmap::DashMap<i64, Arc<SessionHandle>>,
-}
-
-/// The sender and identity of one TCP connection.
-///
-/// Keeping the handle in the session registry lets disconnect cleanup verify
-/// that it is removing the same connection that was registered, rather than
-/// accidentally removing a newer login for the same player.
-pub struct SessionHandle {
-    pub sender: mpsc::Sender<CommandPacket>,
+    sessions: dashmap::DashMap<i64, mpsc::Sender<CommandPacket>>,
+    session_locks: dashmap::DashMap<i64, Arc<Mutex<()>>>,
 }
 
 #[allow(dead_code)]
@@ -27,6 +19,7 @@ impl AppState {
             db: Box::leak(Box::new(db)),
             tables,
             sessions: dashmap::DashMap::new(),
+            session_locks: dashmap::DashMap::new(),
         }
     }
 
@@ -44,25 +37,43 @@ impl AppState {
         self.sessions.insert(player_id, session);
     }
 
-    pub fn unregister_session(&self, player_id: i64, session: &Arc<SessionHandle>) -> bool {
-        let Some(entry) = self.sessions.get(&player_id) else {
-            return false;
-        };
-        if !Arc::ptr_eq(entry.value(), session) {
-            return false;
-        }
-        drop(entry);
-        self.sessions
-            .remove_if(&player_id, |_, current| Arc::ptr_eq(current, session))
-            .is_some()
+    pub async fn lock_session(&self, player_id: i64) -> tokio::sync::OwnedMutexGuard<()> {
+        self.session_locks
+            .entry(player_id)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+            .lock_owned()
+            .await
     }
 
-    pub async fn disconnect_session(&self, player_id: i64) -> bool {
-        let Some((_, session)) = self.sessions.remove(&player_id) else {
-            return false;
-        };
-        let _ = session.sender.send(CommandPacket::Disconnect).await;
-        true
+    pub fn is_current_session(
+        &self,
+        player_id: i64,
+        outbound: &mpsc::Sender<CommandPacket>,
+    ) -> bool {
+        self.sessions
+            .get(&player_id)
+            .is_some_and(|current| current.same_channel(outbound))
+    }
+
+    pub fn unregister_session(&self, player_id: i64) {
+        self.sessions.remove(&player_id);
+    }
+
+    pub fn unregister_session_if_current(
+        &self,
+        player_id: i64,
+        outbound: &mpsc::Sender<CommandPacket>,
+    ) -> bool {
+        match self.sessions.entry(player_id) {
+            dashmap::mapref::entry::Entry::Occupied(entry)
+                if entry.get().same_channel(outbound) =>
+            {
+                entry.remove();
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn online_player_ids(&self) -> Vec<i64> {
@@ -73,5 +84,50 @@ impl AppState {
             .collect::<Vec<_>>();
         players.sort();
         players
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn stale_session_cannot_unregister_replacement() {
+        let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("data/excel2json");
+        let _ = config::init(data_dir.to_str().unwrap());
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let state = Arc::new(AppState::new(pool, config::configs::get()));
+        let (first, _) = mpsc::channel(1);
+        let (replacement, _) = mpsc::channel(1);
+
+        state.register_session(7, first.clone());
+        let teardown = state.lock_session(7).await;
+        let replacement_state = Arc::clone(&state);
+        let replacement_sender = replacement.clone();
+        let replacement_task = tokio::spawn(async move {
+            let _registration = replacement_state.lock_session(7).await;
+            replacement_state.register_session(7, replacement_sender);
+        });
+
+        tokio::task::yield_now().await;
+        assert!(state.is_current_session(7, &first));
+        assert!(!replacement_task.is_finished());
+        assert!(state.unregister_session_if_current(7, &first));
+        drop(teardown);
+        replacement_task.await.unwrap();
+
+        assert!(!state.unregister_session_if_current(7, &first));
+        assert!(
+            state
+                .get_session_sender(7)
+                .unwrap()
+                .same_channel(&replacement)
+        );
+        assert!(state.unregister_session_if_current(7, &replacement));
+        assert!(state.get_session_sender(7).is_none());
     }
 }

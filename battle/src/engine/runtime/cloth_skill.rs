@@ -1,4 +1,4 @@
-use sonettobuf::{Fight, FightStep, RedealCardInfoPush, UseClothSkillReply, UseClothSkillRequest};
+use sonettobuf::{FightStep, RedealCardInfoPush, UseClothSkillReply, UseClothSkillRequest};
 
 use crate::engine::round::state::next_round_shell;
 
@@ -56,13 +56,17 @@ impl BattleRuntime {
         self.pending_redeal = None;
         let skill_type = ClothSkillType::try_from(request.r#type?).ok()?;
         let fight_version = self.fight.version.unwrap_or_default();
+        let absorb_hurt_map_layout = self.absorb_hurt_map_layout;
         let steps = match skill_type {
             ClothSkillType::ClothSkill => {
                 let source_uid = request.from_id.unwrap_or_default();
                 let skill_id = request.skill_id?;
                 let use_count = self.cloth_skill_uses.get(&skill_id).copied().unwrap_or(0);
-                let (cost, next_cost, cooldown) =
-                    cloth_skill_terms(&self.fight, skill_id, use_count)?;
+                let cloth_id = self.fight.attacker.as_ref()?.cloth_id;
+                let (cost, next_cost, cooldown) = self
+                    .catalog_data
+                    .expect("battle runtime was not constructed with a catalog")
+                    .cloth_skill_terms(cloth_id, skill_id, use_count)?;
                 let skill_info = self
                     .fight
                     .attacker
@@ -73,8 +77,12 @@ impl BattleRuntime {
                 if skill_info.cd.unwrap_or_default() > 0 || self.round_state.power < cost {
                     return None;
                 }
-                let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight)
-                    .runtime_view(&self.managers);
+                let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                    self.catalog_data
+                        .expect("battle runtime was not constructed with a catalog"),
+                    &self.fight,
+                )
+                .runtime_view(&self.managers);
                 let result = drain::run_skill(
                     &mut self.managers,
                     &pool,
@@ -124,7 +132,7 @@ impl BattleRuntime {
                         crate::engine::fight::versions::RedealWireLayout::Version6 => redeal,
                         crate::engine::fight::versions::RedealWireLayout::Version7 => None,
                     };
-                project_result(result, fight_version)
+                project_result(result, fight_version, absorb_hurt_map_layout)
                     .inspect_err(|error| tracing::warn!(%error, "cloth skill projection failed"))
                     .ok()?
             }
@@ -141,8 +149,87 @@ impl BattleRuntime {
                 project_changes(
                     [change::BattleChange::UpgradeApplied(Box::new(applied))],
                     fight_version,
+                    absorb_hurt_map_layout,
                 )
                 .inspect_err(|error| tracing::warn!(%error, "hero upgrade projection failed"))
+                .ok()?
+            }
+            ClothSkillType::Contract => {
+                if request.skill_id.unwrap_or_default() != 0 {
+                    return None;
+                }
+                let owner_uid = request.from_id?;
+                let bound_uid = request.to_id?;
+                let origin = self
+                    .managers
+                    .contract
+                    .selection_origin(owner_uid, bound_uid)?;
+                let owner = self.managers.entity_snapshot(owner_uid)?;
+                let bound = self.managers.entity_snapshot(bound_uid)?;
+                let (owner_buff_id, bound_buff_id) =
+                    self.managers.catalog().contract_binding_buffs(
+                        owner.ex_skill_level.unwrap_or_default(),
+                        bound.career?,
+                    )?;
+                let owner_buff = self
+                    .managers
+                    .execute_buff(crate::engine::manager::buff::BuffCommand::Grant(
+                        crate::engine::manager::buff::BuffGrant {
+                            origin,
+                            source_uid: owner_uid,
+                            target_uid: owner_uid,
+                            buff_id: owner_buff_id,
+                            amount: None,
+                            occurrences: 1,
+                            child_uid_reservations: 0,
+                        },
+                    ))
+                    .ok()?;
+                let owner_selected = self
+                    .managers
+                    .contract
+                    .execute(
+                        crate::engine::manager::contract::ContractCommand::SelectOwner {
+                            owner_uid,
+                            bound_uid,
+                        },
+                    )
+                    .ok()?;
+                let bound_buff = self
+                    .managers
+                    .execute_buff(crate::engine::manager::buff::BuffCommand::Grant(
+                        crate::engine::manager::buff::BuffGrant {
+                            origin,
+                            source_uid: owner_uid,
+                            target_uid: bound_uid,
+                            buff_id: bound_buff_id,
+                            amount: None,
+                            occurrences: 1,
+                            child_uid_reservations: 0,
+                        },
+                    ))
+                    .ok()?;
+                let bound_selected = self
+                    .managers
+                    .contract
+                    .execute(
+                        crate::engine::manager::contract::ContractCommand::SelectBound {
+                            owner_uid,
+                            bound_uid,
+                        },
+                    )
+                    .ok()?;
+                project_changes(
+                    [
+                        change::BattleChange::Buff(Box::new(owner_buff)),
+                        change::BattleChange::Contract(owner_selected),
+                        change::BattleChange::Buff(Box::new(bound_buff)),
+                        change::BattleChange::Contract(bound_selected),
+                    ],
+                    fight_version,
+                    absorb_hurt_map_layout,
+                )
+                .inspect_err(|error| tracing::warn!(%error, "contract selection projection failed"))
                 .ok()?
             }
             ClothSkillType::SelectCrystal => {
@@ -160,6 +247,7 @@ impl BattleRuntime {
                         change::BattleChange::BuffActInfoMarker(selection.marker),
                     ],
                     fight_version,
+                    absorb_hurt_map_layout,
                 )
                 .inspect_err(|error| tracing::warn!(%error, "crystal selection projection failed"))
                 .ok()?
@@ -250,7 +338,7 @@ impl BattleRuntime {
                         team_type: feature.team_type,
                     },
                 ));
-                project_changes(changes, fight_version)
+                project_changes(changes, fight_version, absorb_hurt_map_layout)
                     .inspect_err(
                         |error| tracing::warn!(%error, "conduit selection projection failed"),
                     )
@@ -351,8 +439,12 @@ impl BattleRuntime {
                     2 => definition.skills[1],
                     _ => return None,
                 };
-                let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight)
-                    .runtime_view(&self.managers);
+                let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                    self.catalog_data
+                        .expect("battle runtime was not constructed with a catalog"),
+                    &self.fight,
+                )
+                .runtime_view(&self.managers);
                 if !self.managers.buff.has_buff_act_kind(
                     owner_uid,
                     crate::engine::skill::buff_act::registry::BuffActKind::EzioBigSkill,
@@ -386,7 +478,7 @@ impl BattleRuntime {
                 )
                 .inspect_err(|error| tracing::warn!(?error, "cloth skill execution failed"))
                 .ok()?;
-                project_result(result, fight_version)
+                project_result(result, fight_version, absorb_hurt_map_layout)
                     .inspect_err(|error| tracing::warn!(%error, "cloth skill projection failed"))
                     .ok()?
             }
@@ -411,29 +503,10 @@ impl BattleRuntime {
     }
 }
 
-fn cloth_skill_terms(fight: &Fight, skill_id: i32, use_count: usize) -> Option<(i32, i32, i32)> {
-    let cloth_id = fight.attacker.as_ref()?.cloth_id.unwrap_or(1);
-    let cloth = config::configs::get()
-        .cloth_level
-        .iter()
-        .find(|cloth| cloth.id == cloth_id && cloth.level == 1)?;
-    let (costs, cooldown) = if cloth.skill1 == skill_id {
-        (&cloth.use_power1, cloth.cd1)
-    } else if cloth.skill2 == skill_id {
-        (&cloth.use_power2, cloth.cd2)
-    } else {
-        return None;
-    };
-    let cost = *costs.get(use_count.min(costs.len().checked_sub(1)?))?;
-    let next = *costs
-        .get((use_count + 1).min(costs.len().saturating_sub(1)))
-        .unwrap_or(&cost);
-    Some((cost, next, cooldown))
-}
-
 fn project_changes(
     changes: impl IntoIterator<Item = change::BattleChange>,
     fight_version: i32,
+    absorb_hurt_map_layout: crate::engine::fight::versions::AbsorbHurtMapLayout,
 ) -> Result<Vec<FightStep>, String> {
     let frame = record::SemanticFrame {
         owner: record::FrameOwner::Command,
@@ -443,8 +516,12 @@ fn project_changes(
             .map(|change| record::FrameItem::Change(Box::new(change)))
             .collect(),
     };
-    crate::engine::packet::timeline::project_for_version(&[frame], fight_version)
-        .map_err(|error| format!("{error:?}"))
+    crate::engine::packet::timeline::project_for_version_with_absorb_map_layout(
+        &[frame],
+        fight_version,
+        absorb_hurt_map_layout,
+    )
+    .map_err(|error| format!("{error:?}"))
 }
 
 #[cfg(test)]

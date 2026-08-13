@@ -20,8 +20,11 @@ fn run_start_schedule(
     cards: CardSetup,
     determinism: &mut RoundDeterminism,
     hand_size: usize,
+    absorb_hurt_map_layout: crate::engine::fight::versions::AbsorbHurtMapLayout,
 ) -> Result<(Vec<FightStep>, Vec<CardInfo>), String> {
-    let pool = crate::engine::skill::target::TargetPool::from_fight(fight);
+    let battle_catalog = managers.catalog();
+    let pool =
+        crate::engine::skill::target::TargetPool::from_fight_with_catalog(battle_catalog, fight);
     let context = crate::engine::skill::target::TargetContext {
         battle_id: fight.battle_id.unwrap_or_default(),
         current_round: 1,
@@ -29,6 +32,7 @@ fn run_start_schedule(
     };
     managers.gauge.begin_opening_setup();
     let result = schedule::run_start(
+        battle_catalog,
         managers,
         &pool,
         catalog,
@@ -39,9 +43,10 @@ fn run_start_schedule(
     );
     managers.gauge.finish_opening_setup();
     let (result, visible_cards) = result.map_err(|error| format!("{error:?}"))?;
-    let steps = crate::engine::packet::timeline::project_for_version(
+    let steps = crate::engine::packet::timeline::project_for_version_with_absorb_map_layout(
         &result.frames,
         fight.version.unwrap_or_default(),
+        absorb_hurt_map_layout,
     )
     .map_err(|error| format!("{error:?}"))?;
     Ok((steps, visible_cards))
@@ -85,6 +90,7 @@ impl BattleRuntime {
             cards,
             determinism,
             hand_size,
+            self.absorb_hurt_map_layout,
         )
     }
 
@@ -99,29 +105,70 @@ impl BattleRuntime {
 
     pub(super) fn build_start_round_from_schedule(&mut self) -> Result<FightRound, String> {
         let battle_id = self.fight.battle_id.unwrap_or_default();
-        let (ai_deck, player_deck) = crate::engine::manager::card::start_decks_from_fight(
+        let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
+        let context = crate::engine::skill::target::TargetContext {
+            battle_id,
+            current_round: self.round_state.cur_round,
+            ..Default::default()
+        };
+        let extra_ai_actions = crate::engine::round::modifier::ai_action_bonus(
+            &pool,
+            &self.managers,
+            &self.catalog,
+            &mut self.determinism,
+            context,
+        );
+        let (captured, captured_draws) = self
+            .determinism
+            .take_start_decks()
+            .map(|(ai, player, draws)| {
+                (
+                    Some(
+                        crate::engine::manager::card::start::CapturedDeckSeed::Opening {
+                            ai,
+                            player,
+                        },
+                    ),
+                    draws,
+                )
+            })
+            .unwrap_or_default();
+        let decks = crate::engine::manager::card::start::configured_start_decks(
+            self.managers.catalog(),
             &self.fight,
             &self.managers.ex_point,
             &self.managers.eureka,
+            extra_ai_actions,
             battle_id,
-            self.determinism.take_start_decks(),
+            captured,
         );
-        self.catalog.extend_roots_and_warn(
-            config::configs::get(),
-            ai_deck.iter().filter_map(|card| card.skill_id),
-            std::iter::empty(),
-        );
+        if decks.used_capture {
+            self.determinism.enqueue_card_draws(captured_draws);
+        }
+        let ai_deck = decks.ai;
+        let player_deck = decks.player;
+        self.catalog_data
+            .expect("battle runtime was not constructed with a catalog")
+            .extend_skill_roots(
+                &mut self.catalog,
+                ai_deck.iter().filter_map(|card| card.skill_id),
+                std::iter::empty(),
+            );
         let opening_hand_size = player_deck
             .iter()
             .filter(|card| !card.temp_card.unwrap_or_default())
             .count();
         let (opening_deal, preserve_refill_floor) = if let Some(configured) =
-            crate::engine::manager::card::start::configured_opening_deal(&self.fight)?
+            crate::engine::manager::card::start::opening_deal(self.managers.catalog(), &self.fight)?
         {
             (configured, true)
         } else {
             let drawn = self.determinism.draw_cards(
-                &available_player_cards(&self.fight, &self.managers),
+                &available_player_cards(self.managers.catalog(), &self.fight),
                 opening_hand_size,
             );
             if drawn.len() == opening_hand_size {
@@ -130,16 +177,25 @@ impl BattleRuntime {
                 (player_deck.clone(), false)
             }
         };
-        self.determinism.enqueue_card_draws(
-            crate::engine::manager::card::start::configured_refill_draws(&self.fight)?,
+        self.determinism
+            .enqueue_card_draws(crate::engine::manager::card::start::refill_draws(
+                self.managers.catalog(),
+                &self.fight,
+            )?);
+        let opening_pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
         );
-        let opening_pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
         let opening_team_cards = crate::engine::mechanic::card::CardMechanic.special_team_cards(
             &opening_pool,
             &self.managers,
             &opening_deal,
         );
-        let draw_pile = crate::engine::manager::card::start::draw_bag(&self.fight);
+        let draw_pile = crate::engine::manager::card::start::configured_draw_bag(
+            self.managers.catalog(),
+            &self.fight,
+        );
         let deck_num = crate::engine::manager::card::start::deck_size(&self.fight);
         self.managers
             .execute_card(CardCommand::SetAiQueue(CardSetAiQueue {
@@ -172,19 +228,28 @@ impl BattleRuntime {
                 cards: opening_team_cards.clone(),
             }))
             .map_err(|error| format!("{error:?}"))?;
-        visible_cards.extend(opening_team_cards);
-        let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        if crate::engine::fight::versions::round_start_setup_layout(
+            self.fight.version.unwrap_or_default(),
+        ) == Some(crate::engine::fight::versions::RoundStartSetupLayout::Version7)
+        {
+            visible_cards = self
+                .managers
+                .card
+                .hand()
+                .iter()
+                .chain(self.managers.card.team_cards())
+                .cloned()
+                .collect();
+        } else {
+            visible_cards.extend(opening_team_cards);
+        }
         self.round_state.act_point = crate::engine::round::state::next_action_points(
             &self.fight,
             &pool,
             &self.managers,
             &self.catalog,
             &mut self.determinism,
-            crate::engine::skill::target::TargetContext {
-                battle_id,
-                current_round: self.round_state.cur_round,
-                ..Default::default()
-            },
+            context,
         );
         self.round_state.hero_sp_attributes = self.managers.hero_sp_attributes(&self.fight);
         self.round_state.last_change_hero_uid = self.fight.last_change_hero_uid.or(Some(0));
@@ -246,13 +311,13 @@ impl BattleRuntime {
     }
 }
 
-pub(super) fn available_player_cards(fight: &Fight, managers: &BattleManagers) -> Vec<CardInfo> {
-    crate::engine::manager::card::pool::player_candidate_pool_with(fight, |entity| {
-        let owner_uid = entity.uid.unwrap_or_default();
-        managers.ex_point.is_full(owner_uid)
-            && !managers.buff.has_buff_act_kind(
-                owner_uid,
-                crate::engine::skill::buff_act::registry::BuffActKind::CantGetExskill,
-            )
-    })
+pub(super) fn available_player_cards(
+    catalog: crate::catalog::BattleCatalog,
+    fight: &Fight,
+) -> Vec<CardInfo> {
+    crate::engine::manager::card::pool::player_candidate_pool_from(
+        fight,
+        |_| false,
+        |model_id| catalog.device_card_weights(model_id),
+    )
 }

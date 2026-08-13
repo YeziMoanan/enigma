@@ -277,6 +277,13 @@ impl BuffManager {
         self.plan_duration_advances_matching(take_stage, owner_uids, None)
     }
 
+    pub(crate) fn duration_buff_uids(&self, take_stage: i32, owner_uids: &[i64]) -> Vec<i64> {
+        self.plan_duration_advances(take_stage, owner_uids)
+            .into_iter()
+            .map(|plan| plan.buff_uid)
+            .collect()
+    }
+
     pub(crate) fn plan_duration_advances_for_snapshot(
         &self,
         take_stage: i32,
@@ -376,24 +383,6 @@ impl BuffManager {
         }
     }
 
-    pub(crate) fn plan_round_start_cleanup(&self) -> Vec<BuffLifecyclePlan> {
-        self.buffs
-            .iter()
-            .filter_map(|active| {
-                let should_remove = active.definition.as_ref().is_some_and(|definition| {
-                    definition.cleans_up_at_round_start()
-                        && active.buff.count.unwrap_or_default() == 0
-                        && active.buff.layer.unwrap_or_default() <= 1
-                });
-                let buff_uid = active.buff.uid?;
-                should_remove.then_some(BuffLifecyclePlan {
-                    target_uid: active.owner_uid,
-                    buff_uid,
-                })
-            })
-            .collect()
-    }
-
     fn seed_team(&mut self, team: &FightTeam, fallback_team_type: i32) {
         for entity in &team.entitys {
             self.seed_entity(entity, fallback_team_type, true);
@@ -428,7 +417,10 @@ impl BuffManager {
             if let Some(uid) = buff.uid {
                 self.allocator_for(team_type).observe(uid);
             }
-            let definition = BuffDefinition::get(buff.buff_id.unwrap_or_default());
+            let definition = BuffDefinition::configured(
+                self.catalog().game_data(),
+                buff.buff_id.unwrap_or_default(),
+            );
             let type_id = definition
                 .as_ref()
                 .map(BuffDefinition::effective_type_id)

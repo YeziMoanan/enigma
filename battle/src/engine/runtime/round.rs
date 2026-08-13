@@ -3,7 +3,7 @@ use sonettobuf::{BeginRoundRequest, Fight, FightRound, FightStep};
 use crate::engine::{
     manager::card::CardCommand,
     round::{
-        command::commands_from_opers,
+        command::{RoundCommand, commands_from_opers},
         outcome::{battle_ended, finish_if_battle_ended},
         power::ClothPower,
         state::{RoundState, next_action_points, next_round_shell, round_field_cards},
@@ -25,7 +25,11 @@ impl BattleRuntime {
         team: i32,
         emitter_uid: i64,
     ) -> Result<Vec<FightStep>, String> {
-        let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
         let result = schedule::run_player_action_queue(
             &mut self.managers,
             &pool,
@@ -37,9 +41,10 @@ impl BattleRuntime {
             emitter_uid,
         )
         .map_err(|error| format!("{error:?}"))?;
-        crate::engine::packet::timeline::project_for_version(
+        crate::engine::packet::timeline::project_for_version_with_absorb_map_layout(
             &result.frames,
             self.fight.version.unwrap_or_default(),
+            self.absorb_hurt_map_layout,
         )
         .map_err(|error| format!("{error:?}"))
     }
@@ -48,7 +53,9 @@ impl BattleRuntime {
         &mut self,
         request: &BeginRoundRequest,
     ) -> Result<FightRound, String> {
-        self.pending_wave_push = None;
+        let battle_catalog = self
+            .catalog_data
+            .expect("battle runtime was not constructed with a catalog");
         let active_round = self.round_state.cur_round;
         self.round_state.begin_round();
         self.fight.cur_round = Some(self.round_state.cur_round);
@@ -71,8 +78,8 @@ impl BattleRuntime {
             .filter(|skill_id| *skill_id > 0)
             .chain(self.determinism.card_play_skill_ids())
             .collect::<Vec<_>>();
-        self.catalog.extend_roots_and_warn(
-            config::configs::get(),
+        battle_catalog.extend_skill_roots(
+            &mut self.catalog,
             request
                 .opers
                 .iter()
@@ -83,8 +90,8 @@ impl BattleRuntime {
         );
         let captured_ai_choices = self.determinism.take_ai_skills();
         if let Some(choices) = &captured_ai_choices {
-            self.catalog.extend_roots_and_warn(
-                config::configs::get(),
+            battle_catalog.extend_skill_roots(
+                &mut self.catalog,
                 choices.iter().map(|choice| choice.skill_id),
                 std::iter::empty(),
             );
@@ -92,14 +99,21 @@ impl BattleRuntime {
         let mut ai_envelope = self.managers.card.ai_queue().to_vec();
 
         let catalog = &mut self.catalog;
-        let mut pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+        let mut pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+            self.catalog_data
+                .expect("battle runtime was not constructed with a catalog"),
+            &self.fight,
+        );
         let context = crate::engine::skill::target::TargetContext {
             battle_id: self.fight.battle_id.unwrap_or_default(),
             current_round: self.round_state.cur_round,
             ..Default::default()
         };
+        let defenders_depleted_before_player_actions =
+            crate::engine::round::outcome::defenders_defeated(&pool, &self.managers);
         let commands = commands_from_opers(&request.opers);
         let fight_version = self.fight.version.unwrap_or_default();
+        let absorb_hurt_map_layout = self.absorb_hurt_map_layout;
         let uses_action_phase_power_clear =
             crate::engine::fight::versions::round_start_setup_layout(fight_version)
                 == Some(crate::engine::fight::versions::RoundStartSetupLayout::Version7);
@@ -122,7 +136,6 @@ impl BattleRuntime {
             }),
         )
         .map_err(|error| format!("{error:?}"))?;
-        let mut fight_steps = project_result(conduit_selection, fight_version)?;
         let player = schedule::run_player_phase(
             &self.fight,
             &mut self.managers,
@@ -131,6 +144,7 @@ impl BattleRuntime {
             &mut self.determinism,
             context,
             commands.iter().cloned(),
+            conduit_selection.frames,
             1,
             crate::engine::manager::emitter::UID,
         )
@@ -139,27 +153,53 @@ impl BattleRuntime {
         self.objectives
             .record_player_round(&commands, catalog, &player, ended_by_player);
         apply_cloth_power(&self.fight, &self.managers, &mut self.round_state, &player);
+        let conduit_context = selected_enemy_target(&commands, &pool)
+            .map(
+                |runtime_target_uid| crate::engine::skill::target::TargetContext {
+                    runtime_target_uid,
+                    ..context
+                },
+            )
+            .unwrap_or(context);
         let conduit = if ended_by_player {
             Default::default()
         } else {
             schedule::run_conduit_phase(
+                battle_catalog,
                 &self.fight,
                 &mut self.managers,
                 &pool,
                 catalog,
                 &mut self.determinism,
-                context,
+                conduit_context,
                 &request.devices_opers,
             )
             .map_err(|error| format!("{error:?}"))?
         };
+        let card_energy_clear = schedule::run_card_energy_clear(
+            &mut self.managers,
+            &pool,
+            catalog,
+            &mut self.determinism,
+            context,
+        )
+        .map_err(|error| format!("{error:?}"))?;
         let hand_size = crate::engine::mechanic::card::CardMechanic.normal_hand_limit(
             crate::engine::manager::card::start::hand_size(&self.fight),
             &self.managers,
             &pool,
         );
-        fight_steps.extend(project_result(player, fight_version)?);
-        fight_steps.extend(project_result(conduit, fight_version)?);
+        let mut fight_steps = project_result(player, fight_version, absorb_hurt_map_layout)?;
+        fight_steps.extend(project_result(
+            conduit,
+            fight_version,
+            absorb_hurt_map_layout,
+        )?);
+        fight_steps.extend(project_result(
+            card_energy_clear,
+            fight_version,
+            absorb_hurt_map_layout,
+        )?);
         let ended_during_attacker_actions = battle_ended(&self.fight, &pool, &self.managers);
         let promotions = if ended_during_attacker_actions {
             Vec::new()
@@ -169,7 +209,11 @@ impl BattleRuntime {
         self.objectives.record_promotions(&promotions);
         if !promotions.is_empty() {
             self.managers.sync_roster(&self.fight);
-            pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+            pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                self.catalog_data
+                    .expect("battle runtime was not constructed with a catalog"),
+                &self.fight,
+            );
         }
         if !promotions.is_empty() {
             fight_steps.extend(project_result(
@@ -183,6 +227,7 @@ impl BattleRuntime {
                 )
                 .map_err(|error| format!("{error:?}"))?,
                 fight_version,
+                absorb_hurt_map_layout,
             )?);
             ai_envelope = self.managers.card.ai_queue().to_vec();
         }
@@ -204,17 +249,43 @@ impl BattleRuntime {
             )
         }
         .map_err(|error| format!("{error:?}"))?;
-        fight_steps.extend(project_result(attacker_settlement, fight_version)?);
+        fight_steps.extend(project_result(
+            attacker_settlement,
+            fight_version,
+            absorb_hurt_map_layout,
+        )?);
         let ended_after_attacker_settlement = battle_ended(&self.fight, &pool, &self.managers);
         let current_wave_defeated =
             crate::engine::round::outcome::defenders_defeated(&pool, &self.managers);
-        let runs_enemy_phase = !ended_after_attacker_settlement && !current_wave_defeated;
+        let runs_phase_two = !ended_after_attacker_settlement
+            && (!current_wave_defeated || defenders_depleted_before_player_actions);
         let needs_refill = crate::engine::mechanic::card::CardMechanic
             .refill_hand_len(&self.managers, &pool)
             < hand_size;
-        if needs_refill && runs_enemy_phase {
+        let phase_two_refill_deferred = needs_refill && !runs_phase_two;
+        if needs_refill && runs_phase_two {
             self.round_state.before_cards2 = round_field_cards(self.managers.card.hand());
-            fight_steps.extend(project_result(schedule::run_round_deal(2), fight_version)?);
+        }
+        if runs_phase_two {
+            fight_steps.extend(project_result(
+                schedule::run_post_action_refill_settlement(
+                    &mut self.managers,
+                    &pool,
+                    catalog,
+                    &mut self.determinism,
+                    context,
+                )
+                .map_err(|error| format!("{error:?}"))?,
+                fight_version,
+                absorb_hurt_map_layout,
+            )?);
+        }
+        if needs_refill && runs_phase_two {
+            fight_steps.extend(project_result(
+                schedule::run_round_deal(2),
+                fight_version,
+                absorb_hurt_map_layout,
+            )?);
         }
         if !ended_after_attacker_settlement {
             let defeated_defenders = pool
@@ -234,9 +305,10 @@ impl BattleRuntime {
                 )
                 .map_err(|error| format!("{error:?}"))?,
                 fight_version,
+                absorb_hurt_map_layout,
             )?);
         }
-        if needs_refill && runs_enemy_phase {
+        if needs_refill && runs_phase_two {
             let refill = schedule::run_round_refill(
                 &mut self.managers,
                 &pool,
@@ -248,11 +320,15 @@ impl BattleRuntime {
             )
             .map_err(|error| format!("{error:?}"))?;
             apply_cloth_power(&self.fight, &self.managers, &mut self.round_state, &refill);
-            fight_steps.extend(project_result(refill, fight_version)?);
+            fight_steps.extend(project_result(
+                refill,
+                fight_version,
+                absorb_hurt_map_layout,
+            )?);
             self.round_state.team_a_cards2 = round_field_cards(self.managers.card.refilled());
         }
-        if runs_enemy_phase {
-            if uses_action_phase_power_clear {
+        if runs_phase_two {
+            if uses_action_phase_power_clear && !current_wave_defeated {
                 fight_steps.extend(project_result(
                     schedule::run_action_phase_start(
                         &mut self.managers,
@@ -264,8 +340,10 @@ impl BattleRuntime {
                     )
                     .map_err(|error| format!("{error:?}"))?,
                     fight_version,
+                    absorb_hurt_map_layout,
                 )?);
             }
+            let wave_entry_condition_uids = std::mem::take(&mut self.wave_entry_condition_uids);
             fight_steps.extend(project_result(
                 schedule::run_before_ai_round_start(
                     &mut self.managers,
@@ -274,9 +352,11 @@ impl BattleRuntime {
                     &mut self.determinism,
                     context,
                     1,
+                    &wave_entry_condition_uids,
                 )
                 .map_err(|error| format!("{error:?}"))?,
                 fight_version,
+                absorb_hurt_map_layout,
             )?);
             let choices = captured_ai_choices.unwrap_or_else(|| {
                 ai_envelope
@@ -300,7 +380,7 @@ impl BattleRuntime {
                 choices,
             )
             .map_err(|error| format!("{error:?}"))?;
-            fight_steps.extend(project_result(ai, fight_version)?);
+            fight_steps.extend(project_result(ai, fight_version, absorb_hurt_map_layout)?);
             let after_ai_round_end = schedule::run_after_ai_round_end(
                 &mut self.managers,
                 &pool,
@@ -309,7 +389,11 @@ impl BattleRuntime {
                 context,
             )
             .map_err(|error| format!("{error:?}"))?;
-            fight_steps.extend(project_result(after_ai_round_end, fight_version)?);
+            fight_steps.extend(project_result(
+                after_ai_round_end,
+                fight_version,
+                absorb_hurt_map_layout,
+            )?);
         }
         let mut wave_entering_uids = Vec::new();
         if current_wave_defeated {
@@ -327,11 +411,15 @@ impl BattleRuntime {
         {
             self.pending_wave_push = Some(change.fight.clone());
             wave_entering_uids = change.entering_uids.clone();
-            catalog.extend_entities_and_warn(
-                config::configs::get(),
+            battle_catalog.extend_skill_entities(
+                catalog,
                 crate::engine::manager::wave::entering_entities(&change),
             );
-            pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight);
+            pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                self.catalog_data
+                    .expect("battle runtime was not constructed with a catalog"),
+                &self.fight,
+            );
             fight_steps.extend(project_result(
                 schedule::run_wave_entry(
                     &mut self.managers,
@@ -343,16 +431,26 @@ impl BattleRuntime {
                 )
                 .map_err(|error| format!("{error:?}"))?,
                 fight_version,
+                absorb_hurt_map_layout,
             )?);
-            let (next_ai, _) = crate::engine::manager::card::start_decks_from_fight(
+            let next_ai = crate::engine::manager::card::start::configured_start_decks(
+                self.managers.catalog(),
                 &self.fight,
                 &self.managers.ex_point,
                 &self.managers.eureka,
+                crate::engine::round::modifier::ai_action_bonus(
+                    &pool,
+                    &self.managers,
+                    catalog,
+                    &mut self.determinism,
+                    context,
+                ),
                 self.fight.battle_id.unwrap_or_default(),
                 None,
-            );
-            catalog.extend_roots_and_warn(
-                config::configs::get(),
+            )
+            .ai;
+            battle_catalog.extend_skill_roots(
+                catalog,
                 next_ai.iter().filter_map(|card| card.skill_id),
                 std::iter::empty(),
             );
@@ -404,7 +502,11 @@ impl BattleRuntime {
                 &mut self.determinism,
                 context,
             );
-            if let Some(power) = ClothPower::for_fight(&self.fight) {
+            if let Some(power) = self
+                .catalog_data
+                .expect("battle runtime was not constructed with a catalog")
+                .cloth_power(&self.fight)
+            {
                 self.round_state.power =
                     power.recover_round(self.round_state.power, self.round_state.cur_round);
             }
@@ -419,23 +521,40 @@ impl BattleRuntime {
                     hand_size,
                 )
                 .map_err(|error| format!("{error:?}"))?;
+            if !wave_entering_uids.is_empty() {
+                self.wave_entry_condition_uids = wave_entering_uids;
+            }
             (round_start, next_round, hand_snapshot, dealt_cards, true)
         };
         finish_if_battle_ended(&mut self.round_state, &self.fight, &pool, &self.managers);
-        fight_steps.extend(project_result(round_start, fight_version)?);
+        let terminal_during_next_round_preparation =
+            next_round_prepared && self.round_state.is_finish;
+        fight_steps.extend(project_result(
+            round_start,
+            fight_version,
+            absorb_hurt_map_layout,
+        )?);
         if !self.round_state.is_finish {
-            let cards = crate::engine::manager::card::start_decks_from_fight(
+            let cards = crate::engine::manager::card::start::configured_start_decks(
+                self.managers.catalog(),
                 &self.fight,
                 &self.managers.ex_point,
                 &self.managers.eureka,
+                crate::engine::round::modifier::ai_action_bonus(
+                    &pool,
+                    &self.managers,
+                    catalog,
+                    &mut self.determinism,
+                    context,
+                ),
                 self.round_state.cur_round,
                 self.determinism
                     .take_next_ai_card_snapshot()
-                    .map(|cards| (cards, Vec::new())),
+                    .map(crate::engine::manager::card::start::CapturedDeckSeed::NextAi),
             )
-            .0;
-            catalog.extend_roots_and_warn(
-                config::configs::get(),
+            .ai;
+            battle_catalog.extend_skill_roots(
+                catalog,
                 cards.iter().filter_map(|card| card.skill_id),
                 std::iter::empty(),
             );
@@ -450,18 +569,39 @@ impl BattleRuntime {
                 )
                 .map_err(|error| format!("{error:?}"))?,
                 fight_version,
+                absorb_hurt_map_layout,
             )?);
         }
-        let next_round_begin_step = project_result(next_round, fight_version)?;
+        let next_round_begin_step =
+            project_result(next_round, fight_version, absorb_hurt_map_layout)?;
 
         self.managers.sync_entities(&mut self.fight);
-        if uses_action_phase_power_clear && self.round_state.is_finish {
+        if uses_action_phase_power_clear
+            && self.round_state.is_finish
+            && !terminal_during_next_round_preparation
+        {
             self.round_state.cur_round = active_round;
         }
         self.round_state.hero_sp_attributes = self.managers.hero_sp_attributes(&self.fight);
         self.round_state.last_change_hero_uid = self.fight.last_change_hero_uid;
         self.fight.cur_round = Some(self.round_state.cur_round);
         self.fight.is_finish = Some(self.round_state.is_finish);
+        let (next_round_hand_snapshot, next_round_dealt_cards) =
+            if terminal_during_next_round_preparation {
+                let team_cards = self.managers.card.team_cards().to_vec();
+                if phase_two_refill_deferred {
+                    self.round_state.before_cards2 = next_round_hand_snapshot;
+                    self.round_state.team_a_cards2 = next_round_dealt_cards
+                        .strip_suffix(team_cards.as_slice())
+                        .ok_or_else(|| {
+                            "prepared team cards are not the dealt-card suffix".to_owned()
+                        })?
+                        .to_vec();
+                }
+                (self.managers.card.hand().to_vec(), team_cards)
+            } else {
+                (next_round_hand_snapshot, next_round_dealt_cards)
+            };
         let mut round = next_round_shell(
             &self.fight,
             &self.round_state,
@@ -505,31 +645,43 @@ impl BattleRuntime {
     }
 }
 
+pub(super) fn selected_enemy_target(
+    commands: &[RoundCommand],
+    pool: &crate::engine::skill::target::TargetPool,
+) -> Option<i64> {
+    commands.iter().rev().find_map(|command| match command {
+        RoundCommand::PlayCard {
+            target_uid: Some(target_uid),
+            ..
+        }
+        | RoundCommand::UseAssistBoss {
+            target_uid: Some(target_uid),
+            ..
+        } if pool.team_type(*target_uid) == Some(2) => Some(*target_uid),
+        _ => None,
+    })
+}
+
 fn apply_cloth_power(
     fight: &Fight,
     managers: &crate::engine::manager::BattleManagers,
     state: &mut RoundState,
     result: &drain::DrainResult,
 ) {
-    let Some(power) = ClothPower::for_fight(fight) else {
+    let Some(power) = managers.catalog().cloth_power(fight) else {
         return;
     };
-    let mut moved_card = false;
     for outcome in &result.outcomes {
         let executor::RuleOutcome::Card(changes) = outcome else {
             continue;
         };
-        let composition_from_move =
-            changes.kind == crate::engine::manager::card::CardChangeKind::Composed && moved_card;
         state.power = cloth_power_after_card_change(
             &power,
             state.power,
             changes.kind,
             changes.played.is_some(),
             eligible_composition_count(managers, &changes.composed_owners),
-            composition_from_move,
         );
-        moved_card = changes.kind == crate::engine::manager::card::CardChangeKind::Moved;
     }
 }
 
@@ -549,17 +701,16 @@ pub(super) fn cloth_power_after_card_change(
     kind: crate::engine::manager::card::CardChangeKind,
     has_played: bool,
     composed_count: usize,
-    composition_from_move: bool,
 ) -> i32 {
     match kind {
         crate::engine::manager::card::CardChangeKind::Moved => power.card_moved(current),
         crate::engine::manager::card::CardChangeKind::Played if has_played => {
             power.card_used(current)
         }
-        crate::engine::manager::card::CardChangeKind::Refilled if composed_count > 0 => {
-            power.cards_composed(current, composed_count)
-        }
-        crate::engine::manager::card::CardChangeKind::Composed if composition_from_move => {
+        crate::engine::manager::card::CardChangeKind::Refilled
+        | crate::engine::manager::card::CardChangeKind::Composed
+            if composed_count > 0 =>
+        {
             power.cards_composed(current, composed_count)
         }
         _ => current,

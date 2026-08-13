@@ -2,8 +2,8 @@ use crate::engine::{
     manager::{
         BattleManagers,
         buff::{
-            BuffChanges, BuffCommand, BuffCommandError, BuffGrant, BuffMarkerResult, BuffPlan,
-            BuffSetState,
+            BuffChanges, BuffCommand, BuffCommandError, BuffGrant, BuffManager, BuffMarkerResult,
+            BuffPlan, BuffPolicy, BuffRefreshDuration, BuffSetState,
         },
         hp::{HpChanges, HpCommand, HpCommandError, ShieldGrant, TeamSharedShieldGain},
     },
@@ -91,11 +91,21 @@ fn plan(
     let carrier_uid = managers
         .buff
         .buff_family_carrier_uid(command.target_uid, command.buff_id);
-    let basis = managers.origin_attribute(command.source_uid, command.amount_attr);
+    let (amount_attr, amount_rate) =
+        if carrier_uid.is_none() && command.scope == ShieldScope::Entity {
+            crate::engine::skill::buff_act::shield::cumulative_attr_rate(
+                command.buff_id,
+                &managers.buff,
+            )
+            .unwrap_or((command.amount_attr, command.amount_rate))
+        } else {
+            (command.amount_attr, command.amount_rate)
+        };
+    let basis = managers.origin_attribute(command.source_uid, amount_attr);
     let multiplier_bonus = command
         .multiplier_bonus
         .map(|(attr, rate)| (managers.origin_attribute(command.source_uid, attr), rate));
-    let amount = shield_amount(basis, command.amount_rate, multiplier_bonus);
+    let amount = shield_amount(basis, amount_rate, multiplier_bonus);
     let max = managers
         .origin_attribute(command.source_uid, command.max_attr)
         .saturating_mul(command.max_rate)
@@ -103,10 +113,32 @@ fn plan(
 
     match command.scope {
         ShieldScope::Entity => {
-            let buff = carrier_uid
-                .is_none()
-                .then(|| plan_carrier(managers, command))
-                .transpose()?;
+            let buff = match carrier_uid {
+                Some(buff_uid) => {
+                    let current_duration = managers
+                        .buff
+                        .snapshot(command.target_uid, buff_uid)
+                        .and_then(|buff| buff.duration)
+                        .ok_or(ShieldCommandError::Buff(
+                            BuffCommandError::InvalidDurationChange,
+                        ))?;
+                    let configured_duration = BuffPolicy::try_for_buff_id(command.buff_id)
+                        .map_err(BuffCommandError::InvalidPolicy)?
+                        .lifetime
+                        .duration;
+                    (current_duration > 0 && configured_duration > 0)
+                        .then(|| {
+                            managers.plan_buff(BuffCommand::RefreshDuration(BuffRefreshDuration {
+                                origin: command.origin,
+                                target_uid: command.target_uid,
+                                buff_uid,
+                                minimum_duration: configured_duration,
+                            }))
+                        })
+                        .transpose()?
+                }
+                None => Some(plan_carrier(managers, command)?),
+            };
             let accepted =
                 carrier_uid.is_some() || buff.as_ref().and_then(BuffPlan::added_buff_uid).is_some();
             let hp = accepted.then_some(HpCommand::GrantShield(ShieldGrant {
@@ -127,8 +159,12 @@ fn plan(
             })
         }
         ShieldScope::TeamShared => {
-            let act_id = configured_act_id(command.buff_id, BuffActKind::TeamShareShield)
-                .ok_or(ShieldCommandError::Buff(BuffCommandError::InvalidSetState))?;
+            let act_id = configured_act_id(
+                &managers.buff,
+                command.buff_id,
+                BuffActKind::TeamShareShield,
+            )
+            .ok_or(ShieldCommandError::Buff(BuffCommandError::InvalidSetState))?;
             let max = max.max(0);
             let before = carrier_uid
                 .and_then(|buff_uid| managers.buff.snapshot(command.target_uid, buff_uid))
@@ -147,7 +183,7 @@ fn plan(
                     .snapshot(command.target_uid, buff_uid)
                     .ok_or(ShieldCommandError::Buff(BuffCommandError::InvalidSetState))?;
                 upsert_act_info(&mut snapshot.act_info, act_id, after);
-                sort_act_info(command.buff_id, &mut snapshot.act_info);
+                sort_act_info(&managers.buff, command.buff_id, &mut snapshot.act_info);
                 (
                     Some(PlannedBuff {
                         plan: managers.plan_buff(BuffCommand::SetInternalState(BuffSetState {
@@ -256,8 +292,9 @@ fn commit(managers: &mut BattleManagers, plan: ShieldPlan) -> ShieldChanges {
     }
 }
 
-fn configured_act_id(buff_id: i32, kind: BuffActKind) -> Option<i32> {
-    crate::engine::manager::buff::BuffManager::configured_features(buff_id)
+fn configured_act_id(buffs: &BuffManager, buff_id: i32, kind: BuffActKind) -> Option<i32> {
+    buffs
+        .definition_features(buff_id)
         .into_iter()
         .find_map(|feature| {
             let act_id = feature.act_id()?;
@@ -280,8 +317,9 @@ fn upsert_act_info(act_info: &mut Vec<sonettobuf::BuffActInfo>, act_id: i32, val
     }
 }
 
-fn sort_act_info(buff_id: i32, act_info: &mut [sonettobuf::BuffActInfo]) {
-    let order = crate::engine::manager::buff::BuffManager::configured_features(buff_id)
+fn sort_act_info(buffs: &BuffManager, buff_id: i32, act_info: &mut [sonettobuf::BuffActInfo]) {
+    let order = buffs
+        .definition_features(buff_id)
         .into_iter()
         .filter_map(|feature| feature.act_id())
         .collect::<Vec<_>>();
@@ -408,9 +446,102 @@ mod tests {
         assert_eq!(managers.hp.shield(1), 1_590);
 
         let second = execute(&mut managers, command()).unwrap();
-        assert!(second.buff.is_none());
+        let refreshed = &second.buff.as_ref().unwrap().change.refreshed;
+        assert_eq!(refreshed.len(), 1);
+        assert_eq!(refreshed[0].after.uid, Some(2));
+        assert_eq!(refreshed[0].after.duration, added.buff.duration);
         assert_eq!(second.hp.unwrap().shield_granted.unwrap().added, 1_590);
         assert_eq!(managers.hp.shield(1), 3_180);
+    }
+
+    #[test]
+    fn cumulative_carrier_initializes_from_its_tier_then_refreshes_by_the_increment() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            defender: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(-2),
+                    current_hp: Some(1_000),
+                    attr: Some(HeroAttribute {
+                        hp: Some(1_000),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut managers = BattleManagers::seeded(&fight);
+        let cumulative = ShieldCommand {
+            origin: CommandOrigin {
+                domain: RuleDomain::Behavior,
+                key: DefinitionKey::new(60183, "SupplyShield2"),
+            },
+            source_uid: -2,
+            target_uid: -2,
+            buff_id: 116385674,
+            amount_attr: crate::engine::entity::attr::AttrId::Hp,
+            amount_rate: 200,
+            multiplier_bonus: None,
+            max_attr: crate::engine::entity::attr::AttrId::Hp,
+            max_rate: 1_000,
+            scope: ShieldScope::Entity,
+            carrier_uid: ShieldCarrierUid::Child,
+        };
+
+        let first = execute(&mut managers, cumulative).unwrap();
+        assert_eq!(first.hp.unwrap().shield_granted.unwrap().added, 400);
+        assert_eq!(managers.hp.shield(-2), 400);
+
+        let second = execute(&mut managers, cumulative).unwrap();
+        assert_eq!(second.hp.unwrap().shield_granted.unwrap().added, 200);
+        assert_eq!(managers.hp.shield(-2), 600);
+    }
+
+    #[test]
+    fn fifth_cumulative_carrier_initializes_to_full_max_hp() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            defender: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(-2),
+                    current_hp: Some(191_000),
+                    attr: Some(HeroAttribute {
+                        hp: Some(191_000),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut managers = BattleManagers::seeded(&fight);
+
+        let changes = execute(
+            &mut managers,
+            ShieldCommand {
+                origin: CommandOrigin {
+                    domain: RuleDomain::Behavior,
+                    key: DefinitionKey::new(60183, "SupplyShield2"),
+                },
+                source_uid: -2,
+                target_uid: -2,
+                buff_id: 116385677,
+                amount_attr: crate::engine::entity::attr::AttrId::Hp,
+                amount_rate: 200,
+                multiplier_bonus: None,
+                max_attr: crate::engine::entity::attr::AttrId::Hp,
+                max_rate: 1_000,
+                scope: ShieldScope::Entity,
+                carrier_uid: ShieldCarrierUid::Child,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(changes.hp.unwrap().shield_granted.unwrap().added, 191_000);
+        assert_eq!(managers.hp.shield(-2), 191_000);
     }
 
     #[test]
@@ -510,7 +641,13 @@ mod tests {
         };
         let mut managers = BattleManagers::seeded(&fight);
 
-        execute(&mut managers, command()).unwrap();
+        let first = execute(&mut managers, command()).unwrap();
+        let carrier_uid = first
+            .buff
+            .as_ref()
+            .and_then(|changes| changes.change.added.as_ref())
+            .and_then(|added| added.buff.uid)
+            .unwrap();
 
         let mut stronger = command();
         stronger.buff_id = 31170009;
@@ -518,7 +655,10 @@ mod tests {
         stronger.multiplier_bonus = None;
         let second = execute(&mut managers, stronger).unwrap();
 
-        assert!(second.buff.is_none());
+        let refreshed = &second.buff.as_ref().unwrap().change.refreshed;
+        assert_eq!(refreshed.len(), 1);
+        assert_eq!(refreshed[0].after.uid, Some(carrier_uid));
+        assert_eq!(refreshed[0].after.buff_id, Some(31170002));
         assert_eq!(second.hp.unwrap().shield_granted.unwrap().added, 2_700);
         assert_eq!(managers.hp.shield(1), 4_200);
         assert_eq!(
@@ -529,6 +669,45 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![31170002]
         );
+    }
+
+    #[test]
+    fn timed_shield_does_not_replace_or_expire_a_permanent_carrier() {
+        crate::test_support::init_config();
+        let fight = Fight {
+            attacker: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(1),
+                    current_hp: Some(1_000),
+                    attr: Some(HeroAttribute {
+                        hp: Some(1_000),
+                        attack: Some(1_000),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut managers = BattleManagers::seeded(&fight);
+        let mut permanent = command();
+        permanent.buff_id = 610161;
+
+        let first = execute(&mut managers, permanent).unwrap();
+        let carrier = first
+            .buff
+            .as_ref()
+            .and_then(|changes| changes.change.added.as_ref())
+            .unwrap();
+        assert_eq!(carrier.buff.duration, Some(0));
+
+        let timed = execute(&mut managers, command()).unwrap();
+        assert!(timed.buff.is_none());
+        let active = managers.buff.active_for(1).collect::<Vec<_>>();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].buff_id, Some(610161));
+        assert_eq!(active[0].duration, Some(0));
     }
 
     #[test]

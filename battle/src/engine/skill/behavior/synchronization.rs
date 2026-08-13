@@ -157,6 +157,8 @@ fn damage_rule_ops(
             attack_attributes: context.modifiers.attack_attributes.clone(),
             career_ratio_bonus: context.modifiers.career_ratio_bonus,
             attack_career: context.modifiers.attack_career,
+            additional_attack_career: context.modifiers.additional_attack_career,
+            critical_multiplier_remainder: 0,
             is_conduit: context
                 .managers
                 .conduit
@@ -175,7 +177,7 @@ fn damage_rule_ops(
             buffs: &context.managers.buff,
             target_buffs: &context.managers.buff,
             hp: &context.managers.hp,
-            fields: Some(&context.managers.field),
+            fields: Some((&context.managers.field, context.managers.catalog())),
             emitter: None,
             team_inspiration: 0,
         },

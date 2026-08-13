@@ -1,4 +1,156 @@
 use super::*;
+use crate::engine::runtime::record::SetupSide;
+
+#[test]
+fn ulrich_channel_reacts_before_take_stage_104_expires_from_the_round_snapshot() {
+    init_config();
+    let entity = |uid, team_type, buffs| FightEntityInfo {
+        uid: Some(uid),
+        current_hp: Some(100),
+        team_type: Some(team_type),
+        buffs,
+        ..Default::default()
+    };
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![
+                entity(
+                    10,
+                    1,
+                    vec![BuffInfo {
+                        uid: Some(20),
+                        buff_id: Some(31070121),
+                        from_uid: Some(10),
+                        duration: Some(1),
+                        ..Default::default()
+                    }],
+                ),
+                entity(11, 1, Vec::new()),
+            ],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![entity(-1, 2, Vec::new())],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let catalog = SkillEffectCatalog::from_fight(config::configs::get(), &fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    managers.buff.add_special_count(10, &[31070121], 3);
+
+    let (round, _) = run_round_start_split(
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut RoundDeterminism::default(),
+        TargetContext {
+            current_round: 2,
+            ..Default::default()
+        },
+        1,
+    )
+    .unwrap();
+
+    let channel_reaction = round
+        .outcomes
+        .iter()
+        .position(|outcome| {
+            matches!(
+                outcome,
+                RuleOutcome::BuffFeatureMarker(marker)
+                    if marker.target_uid == 10
+                        && marker.effect_type
+                            == sonettobuf::effect_type_enum::EffectType::Triggeranalysis as i32
+            )
+        })
+        .expect("the channel reacts while its source buff is active");
+    let channel_expiry = round
+        .outcomes
+        .iter()
+        .position(|outcome| {
+            matches!(
+                outcome,
+                RuleOutcome::BuffBatch(changes)
+                    if changes.iter().any(|change| {
+                        change.origin.key.opcode == 104
+                            && change
+                                .change
+                                .removed
+                                .iter()
+                                .any(|removed| removed.buff.uid == Some(20))
+                    })
+            )
+        })
+        .expect("takeStage 104 expires the one-round channel");
+    assert!(channel_reaction < channel_expiry);
+    assert!(!managers.buff.has_buff_id(10, 31070121));
+
+    for owner_uid in [10, 11] {
+        let output = managers
+            .buff
+            .active_for(owner_uid)
+            .find(|buff| buff.buff_id == Some(31070151))
+            .expect("the channel grants its configured ally output");
+        assert_eq!(output.duration, Some(1));
+    }
+}
+
+#[test]
+fn voiceless_switches_afflatus_weakness_after_recovery() {
+    init_config();
+    let catalog = SkillEffectCatalog::from_game_db(config::configs::get());
+
+    for starts_weak in [false, true] {
+        let mut buffs = vec![BuffInfo {
+            uid: Some(1),
+            buff_id: Some(109360006),
+            from_uid: Some(-1),
+            ..Default::default()
+        }];
+        if starts_weak {
+            buffs.push(BuffInfo {
+                uid: Some(2),
+                buff_id: Some(109360007),
+                from_uid: Some(-1),
+                ..Default::default()
+            });
+        }
+        let fight = Fight {
+            defender: Some(FightTeam {
+                entitys: vec![FightEntityInfo {
+                    uid: Some(-1),
+                    current_hp: Some(100),
+                    passive_skill: vec![109360006],
+                    buffs,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pool = TargetPool::from_fight(&fight);
+        let mut managers = BattleManagers::seeded(&fight);
+
+        run_round_start_split(
+            &mut managers,
+            &pool,
+            &catalog,
+            &mut RoundDeterminism::default(),
+            TargetContext {
+                current_round: 2,
+                ..Default::default()
+            },
+            2,
+        )
+        .unwrap();
+
+        assert_eq!(managers.buff.has_buff_id(-1, 109360007), !starts_weak);
+        assert!(!managers.buff.has_buff_id(-1, 109360006));
+        assert!(!managers.buff.has_buff_id(-1, 109360008));
+    }
+}
 
 #[test]
 fn round_start_settles_unlisted_capacity_owner_before_its_after_settlement_act() {
@@ -197,6 +349,7 @@ fn defender_round_start_expires_the_previous_status_before_alternating_setup() {
             ..Default::default()
         },
         2,
+        &[],
     )
     .unwrap();
 
@@ -309,6 +462,91 @@ fn round_start_resolves_field_with_configured_allied_threshold_modifiers() {
     assert_eq!(field.level, 3);
     assert_eq!(field.definition.field_id, 30003);
     assert_eq!(field.next_upgrade_progress, 120);
+}
+
+fn scheduled_round_start(version: i32, model_id: Option<i32>) -> DrainResult {
+    init_config();
+    let fight = Fight {
+        version: Some(version),
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                model_id,
+                team_type: Some(1),
+                current_hp: Some(100),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    run_round_start_after_ai_split(
+        &mut managers,
+        &pool,
+        &SkillEffectCatalog::default(),
+        &mut RoundDeterminism::default(),
+        TargetContext {
+            current_round: 3,
+            ..Default::default()
+        },
+        &[],
+        0,
+    )
+    .unwrap()
+    .0
+}
+
+fn change_round_effect_num(round: &DrainResult) -> i32 {
+    let steps = crate::engine::packet::timeline::project(&round.frames).unwrap();
+    steps
+        .iter()
+        .flat_map(|step| &step.act_effect)
+        .find(|effect| {
+            effect.effect_type == Some(sonettobuf::effect_type_enum::EffectType::Changeround as i32)
+        })
+        .and_then(|effect| effect.effect_num)
+        .expect("round start emits a CHANGE_ROUND marker")
+}
+
+#[test]
+fn change_round_payload_is_zero_without_a_conduit_area() {
+    assert_eq!(change_round_effect_num(&scheduled_round_start(7, None)), 0);
+}
+
+#[test]
+fn change_round_payload_is_zero_when_the_layout_does_not_reset_conduit_power() {
+    let round = scheduled_round_start(6, Some(3149));
+    assert_eq!(change_round_effect_num(&round), 0);
+    assert!(round.outcomes.iter().all(|outcome| !matches!(
+        outcome,
+        RuleOutcome::Conduit(crate::engine::manager::conduit::ConduitChange::PowersReset { .. })
+    )));
+}
+
+#[test]
+fn change_round_payload_follows_the_conduit_action_phase_reset() {
+    let round = scheduled_round_start(7, Some(3149));
+    assert_eq!(change_round_effect_num(&round), 3);
+    let conduit_changes = round
+        .outcomes
+        .iter()
+        .filter_map(|outcome| match outcome {
+            RuleOutcome::Conduit(change) => Some(change),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        conduit_changes.as_slice(),
+        [
+            crate::engine::manager::conduit::ConduitChange::PowersReset { team: 1 },
+            crate::engine::manager::conduit::ConduitChange::DeviceRestarted {
+                source_uid: 10,
+                team: 1,
+            },
+        ]
+    ));
 }
 
 #[test]
@@ -446,9 +684,14 @@ fn round_start_generated_cards_exist_before_card_energy_allocation() {
     let pool = TargetPool::from_fight(&fight);
     let mut managers = BattleManagers::seeded(&fight);
     let features = managers.buff.active_features(&managers.hp);
-    let enable = enable_rule_ops(&managers.gauge, &features, 10)
-        .pop()
-        .unwrap();
+    let enable = enable_rule_ops(
+        crate::catalog::impromptu_definition(crate::test_support::game_data()),
+        &managers.gauge,
+        &features,
+        10,
+    )
+    .pop()
+    .unwrap();
     for op in [enable.team_energy, enable.inspiration] {
         let RuleOp::Command(BattleCommand::Gauge(command)) = op else {
             panic!("impromptu enable emits gauge commands");
@@ -567,6 +810,7 @@ fn round_start_executes_each_team_at_its_own_turn_boundary() {
         &mut determinism,
         TargetContext::default(),
         1,
+        &[],
     )
     .unwrap();
     assert_eq!(managers.ex_point.get(10), 0);
@@ -616,6 +860,100 @@ fn round_start_executes_each_team_at_its_own_turn_boundary() {
                 ..
             })
     ));
+}
+
+#[test]
+fn defender_round_start_late_applies_configured_buffs_before_ai_and_filters_owners() {
+    init_config();
+    let entity = |uid, current_hp| FightEntityInfo {
+        uid: Some(uid),
+        team_type: Some(2),
+        current_hp: Some(current_hp),
+        ex_point: Some(5),
+        passive_skill: vec![1163855066],
+        attr: Some(HeroAttribute {
+            hp: Some(100),
+            attack: Some(1_000),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(10_000),
+                attr: Some(HeroAttribute {
+                    hp: Some(10_000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![
+                FightEntityInfo {
+                    ex_skill: Some(999),
+                    ..entity(-1, 100)
+                },
+                entity(-2, 50),
+                entity(-3, 0),
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut catalog = SkillEffectCatalog::from_fight(config::configs::get(), &fight);
+    catalog.insert(ParsedSkillEffect {
+        skill_id: 999,
+        slots: Vec::new(),
+    });
+    catalog.insert_damage_rate(999, 1_000);
+    let pool = TargetPool::from_fight(&fight);
+    let mut managers = BattleManagers::seeded(&fight);
+    let mut determinism = RoundDeterminism::default();
+
+    run_before_ai_round_start(
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut determinism,
+        TargetContext {
+            current_round: 2,
+            ..Default::default()
+        },
+        1,
+        &[],
+    )
+    .unwrap();
+
+    for buff_id in [5081, 23501] {
+        assert!(managers.buff.has_buff_id(-1, buff_id));
+        assert!(!managers.buff.has_buff_id(-2, buff_id));
+        assert!(!managers.buff.has_buff_id(-3, buff_id));
+    }
+
+    run_ai_actions(
+        &fight,
+        &mut managers,
+        &pool,
+        &catalog,
+        &mut determinism,
+        TargetContext {
+            current_round: 2,
+            ..Default::default()
+        },
+        [AiSkillChoice {
+            source_uid: -1,
+            skill_id: 999,
+            target_uid: 10,
+        }],
+    )
+    .unwrap();
+
+    assert_eq!(managers.ex_point.get(-1), 0);
+    assert_eq!(managers.hp.current(10), 8_800);
 }
 
 #[test]
@@ -757,6 +1095,7 @@ fn defender_round_start_groups_event_subscribers_with_round_start_setup() {
             ..Default::default()
         },
         1,
+        &[],
     )
     .unwrap();
 

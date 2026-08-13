@@ -48,6 +48,7 @@ pub fn run_setup_stage(
         std::iter::empty(),
         |_| Vec::new(),
         None,
+        false,
         SetupFrameContainer::Standalone,
     )
 }
@@ -74,21 +75,21 @@ pub fn run_setup_stage_for_owners(
         std::iter::empty(),
         |_| Vec::new(),
         Some(owner_uids),
+        false,
         SetupFrameContainer::Standalone,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn run_setup_stage_with_prelude(
+pub fn run_opening_setup_stage_for_owners(
     managers: &mut BattleManagers,
-
     pool: &TargetPool,
     catalog: &SkillEffectCatalog,
     determinism: &mut RoundDeterminism,
     context: TargetContext,
     stage: SetupStage,
     priority: i32,
-    prelude: impl IntoIterator<Item = (SetupSide, RuleOp)>,
+    player_owner_uids: &[i64],
 ) -> Result<DrainResult, DrainError> {
     run_setup_stage_filtered(
         managers,
@@ -98,9 +99,10 @@ pub fn run_setup_stage_with_prelude(
         context,
         stage,
         priority,
-        prelude,
+        std::iter::empty(),
         |_| Vec::new(),
-        None,
+        Some(player_owner_uids),
+        true,
         SetupFrameContainer::Standalone,
     )
 }
@@ -117,6 +119,7 @@ pub(super) fn run_setup_stage_filtered(
     prelude: impl IntoIterator<Item = (SetupSide, RuleOp)>,
     postlude: impl FnOnce(&BattleManagers) -> Vec<(SetupSide, RuleOp)>,
     owner_uids: Option<&[i64]>,
+    include_both_sides_opening: bool,
     frame_container: SetupFrameContainer,
 ) -> Result<DrainResult, DrainError> {
     let context = context_for_setup_stage(context, stage);
@@ -142,6 +145,7 @@ pub(super) fn run_setup_stage_filtered(
             frame_group: None,
             independent_parent_group: None,
             frame_owner: None,
+            subscriber_owner_uid: None,
         });
     }
     let mut result = drain_queue_with_frames(
@@ -160,6 +164,15 @@ pub(super) fn run_setup_stage_filtered(
             .into_iter()
             .filter(|(subscriber, _)| {
                 owner_uids.is_none_or(|uids| uids.contains(&subscriber.owner_uid))
+                    || (include_both_sides_opening
+                        && crate::engine::skill::condition::registry::opening_owner_eligibility(
+                            subscriber.key.opcode,
+                            subscriber.key.type_name,
+                        )
+                        .is_some_and(|eligibility| {
+                            eligibility
+                                == crate::engine::skill::condition::registry::OpeningOwnerEligibility::BothSides
+                        }))
             });
     let subscribers = subscribers.collect::<Vec<_>>();
     let mut frames = std::mem::take(&mut result.frames);
@@ -255,6 +268,7 @@ pub(super) fn run_setup_stage_filtered(
                 card_index: 0,
                 target_uid: Some(subscriber.owner_uid),
             }),
+            subscriber_owner_uid: None,
         });
     }
     let stage_result = drain_queue_with_frames(
@@ -378,6 +392,7 @@ pub(super) fn run_setup_stage_filtered(
                 frame_group: None,
                 independent_parent_group: None,
                 frame_owner: None,
+                subscriber_owner_uid: None,
             });
         }
     }
@@ -441,6 +456,7 @@ pub(super) fn run_setup_stage_filtered(
             frame_group: None,
             independent_parent_group: None,
             frame_owner: None,
+            subscriber_owner_uid: None,
         });
     }
     let postlude_result = drain_queue_with_frames(

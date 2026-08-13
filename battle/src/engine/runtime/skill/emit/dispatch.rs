@@ -123,10 +123,9 @@ pub(in crate::engine::runtime) fn emit_ops(
         SkillTarget::LogicRule(code) => code,
         _ => catalog.logic_target(effect_skill_id),
     };
-    execution.context.damage_target_count_kind =
-        crate::engine::skill::target::request::damage_target_count_kind(
-            execution.context.logic_target,
-        );
+    execution.context.damage_target_count_kind = managers
+        .catalog()
+        .damage_target_count_kind(execution.context.logic_target);
     execution.context.extra_skill_kind = invocation
         .extra_skill_kind
         .map(|kind| kind.id())
@@ -135,13 +134,18 @@ pub(in crate::engine::runtime) fn emit_ops(
         invocation.mode,
         crate::engine::skill::action::SkillExecutionMode::Active
             | crate::engine::skill::action::SkillExecutionMode::DirectBig
+            | crate::engine::skill::action::SkillExecutionMode::Device
+            | crate::engine::skill::action::SkillExecutionMode::DeviceCard
     ) {
         execution.context.active_skill_is_attack = catalog.is_attack(effect_skill_id);
         if matches!(trigger, SkillOpTrigger::Active) && invocation.card_index > 0 {
-            execution.context.active_skill_slot =
-                pool.skill_slot(invocation.plan.source_uid, invocation.plan.skill_id);
+            execution.context.active_skill_slot = pool.skill_slot(
+                managers,
+                invocation.plan.source_uid,
+                invocation.plan.skill_id,
+            );
             execution.context.active_skill_rank =
-                crate::engine::entity::skill::skill_rank(invocation.plan.skill_id);
+                managers.catalog().skill_rank(invocation.plan.skill_id);
             execution.context.active_skill_type = catalog.skill_type(effect_skill_id);
             execution.context.active_skill_effect_tag = catalog.effect_tag(effect_skill_id);
         }
@@ -154,7 +158,7 @@ pub(in crate::engine::runtime) fn emit_ops(
         execution.record_targets([uid]);
     }
     if let SkillOpTrigger::Event(event) = trigger {
-        apply_event_context(&mut execution.context, event);
+        apply_event_context(managers.catalog(), &mut execution.context, event);
     }
     let source_team =
         pool.team_type(invocation.plan.source_uid)
@@ -254,7 +258,13 @@ pub(in crate::engine::runtime) fn emit_ops(
         if !effect_started_subscribers.skills.is_empty()
             || !effect_started_subscribers.buff_acts.is_empty()
         {
-            outputs.push(effect_started_op(&invocation, catalog, pool, execution));
+            outputs.push(effect_started_op(
+                &invocation,
+                managers,
+                catalog,
+                pool,
+                execution,
+            ));
         }
     }
     let has_row_damage = catalog.damage_rate(effect_skill_id) > 0
@@ -563,7 +573,8 @@ pub(in crate::engine::runtime) fn emit_ops(
                 behavior::registry::FireCountMode::Transfer => (1, fire_count),
             };
             for _ in 0..emissions {
-                let behavior_ops = (definition.emit_ops)(
+                let behavior_ops = behavior::registry::emit_runtime_ops(
+                    definition,
                     BehaviorOpContext {
                         source_uid: invocation.plan.source_uid,
                         source_team,
@@ -578,6 +589,7 @@ pub(in crate::engine::runtime) fn emit_ops(
                         target: &mut execution.context,
                     },
                     &slot.behavior,
+                    catalog,
                 )
                 .ok_or(SkillOpError::MissingBehaviorOp {
                     skill_id: invocation.plan.skill_id,
@@ -606,8 +618,14 @@ pub(in crate::engine::runtime) fn emit_ops(
         }
     }
     if active_phase == Some(SkillPhase::Immediate) {
-        let mut phase_completed =
-            phase_completed_op(&invocation, catalog, pool, execution, SkillPhase::Immediate);
+        let mut phase_completed = phase_completed_op(
+            &invocation,
+            managers,
+            catalog,
+            pool,
+            execution,
+            SkillPhase::Immediate,
+        );
         if let Some(cost) = execution.take_action_cost() {
             let RuleOp::SkillLifecycle(lifecycle) = phase_completed.op else {
                 unreachable!("a completed phase emits a skill lifecycle")
@@ -734,11 +752,13 @@ pub(in crate::engine::runtime) fn emit_ops(
             });
         }
         for feature in damage.avoided {
-            let ops = crate::engine::skill::buff_act::dodge_spec_skill::trigger_rule_ops(&feature)
-                .ok_or_else(|| SkillOpError::UnregisteredBuffAct {
-                    opcode: feature.act_id().unwrap_or_default(),
-                    type_name: feature.act_type.clone(),
-                })?;
+            let ops = crate::engine::skill::buff_act::dodge_spec_skill::trigger_rule_ops(
+                managers, &feature,
+            )
+            .ok_or_else(|| SkillOpError::UnregisteredBuffAct {
+                opcode: feature.act_id().unwrap_or_default(),
+                type_name: feature.act_type.clone(),
+            })?;
             outputs.extend(ops.into_iter().map(|op| SkillEmissionOp {
                 op,
                 owner: behavior::registry::OutputOwner::Skill,
@@ -773,6 +793,7 @@ pub(in crate::engine::runtime) fn emit_ops(
         }
         for additional in &execution.modifiers.additional_damage {
             let Some((feature, _)) = crate::engine::skill::buff_act::additional_damage::configured(
+                managers.catalog(),
                 additional.buff_id,
                 invocation.plan.source_uid,
                 invocation.plan.source_uid,
@@ -872,6 +893,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     if publishes_lifecycle && active_phase == Some(SkillPhase::HitPassives) {
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -880,6 +902,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     } else if publishes_lifecycle && active_phase == Some(SkillPhase::AfterDamage) {
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -888,6 +911,7 @@ pub(in crate::engine::runtime) fn emit_ops(
         if continuation.is_none() {
             outputs.push(phase_completed_op(
                 &invocation,
+                managers,
                 catalog,
                 pool,
                 execution,
@@ -897,6 +921,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     } else if publishes_lifecycle && active_phase == Some(SkillPhase::AfterHit) {
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -905,6 +930,7 @@ pub(in crate::engine::runtime) fn emit_ops(
     } else if publishes_lifecycle && active_phase.is_some() && continuation.is_none() {
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -912,6 +938,7 @@ pub(in crate::engine::runtime) fn emit_ops(
         ));
         outputs.push(phase_completed_op(
             &invocation,
+            managers,
             catalog,
             pool,
             execution,
@@ -937,6 +964,8 @@ pub(in crate::engine::runtime) fn emit_ops(
             invocation.mode,
             crate::engine::skill::action::SkillExecutionMode::Active
                 | crate::engine::skill::action::SkillExecutionMode::DirectBig
+                | crate::engine::skill::action::SkillExecutionMode::Device
+                | crate::engine::skill::action::SkillExecutionMode::DeviceCard
         )
     {
         outputs.push(SkillEmissionOp {
@@ -947,17 +976,17 @@ pub(in crate::engine::runtime) fn emit_ops(
                         skill_id: invocation.plan.skill_id,
                         target_uid: execution.primary_target_uid.unwrap_or_default(),
                         target_uids: execution.affected_targets.clone(),
-                        skill_slot: pool
-                            .skill_slot(invocation.plan.source_uid, invocation.plan.skill_id),
+                        skill_slot: pool.skill_slot(
+                            managers,
+                            invocation.plan.source_uid,
+                            invocation.plan.skill_id,
+                        ),
                         is_attack: catalog.is_attack(effect_skill_id),
-                        rank: crate::engine::entity::skill::skill_rank(invocation.plan.skill_id),
+                        rank: managers.catalog().skill_rank(invocation.plan.skill_id),
                         skill_type: catalog.skill_type(effect_skill_id),
                         effect_tag: catalog.effect_tag(effect_skill_id),
                         additional_moxie: invocation.additional_moxie,
-                        extra_skill_kind: invocation
-                            .extra_skill_kind
-                            .map(|kind| kind.id())
-                            .unwrap_or_default(),
+                        extra_skill_kind: execution.context.extra_skill_kind,
                         mode: invocation.mode,
                         assassinate: execution.context.active_skill_assassinate,
                         damage_amount: execution.context.action_damage_amount,

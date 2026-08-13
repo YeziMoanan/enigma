@@ -257,6 +257,49 @@ fn random_pool_add_emits_distinct_configured_buff_commands() {
 }
 
 #[test]
+fn random_type_pool_replays_the_captured_configured_choice() {
+    crate::test_support::init_config();
+    let managers = BattleManagers::default();
+    let behavior = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(20022, "AddBuffRanTypeId"),
+        vec![30830151, 1],
+        Vec::new(),
+    );
+    let mut determinism = RoundDeterminism::default();
+    determinism.enqueue_random_buffs([308301512]);
+    let mut modifiers = crate::engine::skill::action::SkillModifiers::default();
+    let mut target = crate::engine::skill::target::TargetContext::default();
+
+    let ops = super::super::super::rule_ops(
+        BehaviorOpContext {
+            source_uid: 10,
+            source_team: 1,
+            target_uid: 10,
+            active_skill_id: 30830161,
+            transfer_count: 1,
+            event: None,
+            managers: &managers,
+            pool: &TargetPool::default(),
+            determinism: &mut determinism,
+            modifiers: &mut modifiers,
+            target: &mut target,
+        },
+        &behavior,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        ops.as_slice(),
+        [RuleOp::Command(BattleCommand::Buff(BuffCommand::Grant(
+            BuffGrant {
+                buff_id: 308301512,
+                ..
+            }
+        )))]
+    ));
+}
+
+#[test]
 fn random_pool_arguments_require_a_configured_distinct_draw() {
     crate::test_support::init_config();
     let behavior = |args| {
@@ -428,7 +471,7 @@ fn add_buff_round_extends_existing_type_family_without_granting_a_new_buff() {
         vec![31080131, 2],
         Vec::new(),
     );
-    let command = change_duration_command(10, &behavior, BuffSelector::IdOrType).unwrap();
+    let command = change_duration_command(10, &behavior).unwrap();
     let BuffCommand::ChangeDuration(change) = &command else {
         panic!("expected one duration change");
     };
@@ -446,7 +489,7 @@ fn add_buff_round_extends_existing_type_family_without_granting_a_new_buff() {
 }
 
 #[test]
-fn add_buff_duration_updates_owned_instances_through_one_manager_command() {
+fn channel_count_reduction_updates_the_matching_buff_types_private_state() {
     crate::test_support::init_config();
     let fight = Fight {
         attacker: Some(FightTeam {
@@ -455,8 +498,9 @@ fn add_buff_duration_updates_owned_instances_through_one_manager_command() {
                 current_hp: Some(100),
                 buffs: vec![BuffInfo {
                     uid: Some(1),
-                    buff_id: Some(31080131),
-                    duration: Some(1),
+                    buff_id: Some(31000441),
+                    duration: Some(0),
+                    ex_info: Some(7),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -467,17 +511,92 @@ fn add_buff_duration_updates_owned_instances_through_one_manager_command() {
     };
     let mut managers = BattleManagers::seeded(&fight);
     let behavior = ParsedBehavior::from_spec(
-        crate::engine::skill::behavior::classify::BehaviorSpec::new(60145, "AddBuffDuration"),
-        vec![31080131, 5],
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(
+            60094,
+            "ReduceCastChannelCount",
+        ),
+        vec![31000131, 2],
         Vec::new(),
     );
-    let command = change_duration_command(10, &behavior, BuffSelector::ExactId).unwrap();
 
+    let command = reduce_channel_count_command(&managers, 10, &behavior).unwrap();
     let changes = managers.execute_buff(command).unwrap();
 
+    assert!(changes.change.added.is_none());
     assert_eq!(changes.change.refreshed.len(), 1);
+    assert_eq!(changes.change.refreshed[0].before.ex_info, Some(7));
+    assert_eq!(changes.change.refreshed[0].after.ex_info, Some(5));
+    assert_eq!(changes.change.refreshed[0].after.duration, Some(0));
+}
+
+#[test]
+fn add_buff_duration_refreshes_matching_buff_types_to_the_configured_duration() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                buffs: vec![
+                    BuffInfo {
+                        uid: Some(1),
+                        buff_id: Some(31270501),
+                        duration: Some(1),
+                        ..Default::default()
+                    },
+                    BuffInfo {
+                        uid: Some(2),
+                        buff_id: Some(31270501),
+                        duration: Some(0),
+                        ..Default::default()
+                    },
+                    BuffInfo {
+                        uid: Some(3),
+                        buff_id: Some(31270501),
+                        duration: Some(5),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut managers = BattleManagers::seeded(&fight);
+    let behavior = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(60145, "AddBuffDuration"),
+        vec![5001, 3],
+        Vec::new(),
+    );
+    let command = refresh_duration_command(10, &behavior).unwrap();
+    let BuffCommand::RefreshDurationBySelector(refresh) = &command else {
+        panic!("expected one duration refresh");
+    };
+
+    assert_eq!(refresh.selector, BuffSelector::IdOrType(5001));
+    assert_eq!(refresh.minimum_duration, 3);
+
+    let changes = managers.execute_buff(command.clone()).unwrap();
+
+    assert_eq!(changes.change.refreshed.len(), 2);
     assert_eq!(changes.change.refreshed[0].before.duration, Some(1));
-    assert_eq!(changes.change.refreshed[0].after.duration, Some(6));
+    assert_eq!(changes.change.refreshed[0].after.duration, Some(3));
+    assert_eq!(changes.change.refreshed[1].before.duration, Some(5));
+    assert_eq!(changes.change.refreshed[1].after.duration, Some(5));
+    assert_eq!(
+        managers
+            .buff
+            .active_for(10)
+            .find(|active| active.uid == Some(2))
+            .and_then(|active| active.duration),
+        Some(0)
+    );
+
+    let changes = managers.execute_buff(command).unwrap();
+    assert_eq!(changes.change.refreshed.len(), 2);
+    assert_eq!(changes.change.refreshed[0].before.duration, Some(3));
+    assert_eq!(changes.change.refreshed[0].after.duration, Some(3));
 }
 
 #[test]
@@ -616,7 +735,7 @@ fn damage_window_removes_each_configured_buff_id_or_type() {
 }
 
 #[test]
-fn consume_card_add_buff_emits_card_consumption_before_the_grant() {
+fn consume_card_add_buff_emits_consumption_before_the_optional_grant() {
     let mut managers = BattleManagers::default();
     managers.card = crate::engine::manager::card::CardManager::new(vec![
         sonettobuf::CardInfo {
@@ -695,4 +814,85 @@ fn consume_card_add_buff_emits_card_consumption_before_the_grant() {
             })))
         ] if indices == &[0, 2]
     ));
+
+    let destroy_only = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(60222, "ConsumeCardAddBuff"),
+        vec![0],
+        vec!["0".into(), "0,0,0".into()],
+    );
+    let destroy_ops = super::super::super::rule_ops(
+        BehaviorOpContext {
+            source_uid: 10,
+            source_team: 1,
+            target_uid: 10,
+            active_skill_id: 31370131,
+            transfer_count: 1,
+            event: None,
+            managers: &managers,
+            pool: &TargetPool::default(),
+            determinism: &mut determinism,
+            modifiers: &mut modifiers,
+            target: &mut target,
+        },
+        &destroy_only,
+    )
+    .unwrap();
+    let [RuleOp::Command(BattleCommand::Card(command))] = destroy_ops.as_slice() else {
+        panic!("destroy-only behavior must emit only card consumption");
+    };
+
+    managers.execute_card(command.clone()).unwrap();
+    assert_eq!(
+        managers
+            .card
+            .hand()
+            .iter()
+            .filter_map(|card| card.skill_id)
+            .collect::<Vec<_>>(),
+        vec![999]
+    );
+}
+
+#[test]
+fn planet_removal_uses_each_configured_buff_family() {
+    let managers = BattleManagers::default();
+    let mut determinism = RoundDeterminism::default();
+    let mut modifiers = crate::engine::skill::action::SkillModifiers::default();
+    let mut target = crate::engine::skill::target::TargetContext::default();
+    let behavior = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(60252, "DisperseForce3"),
+        vec![307002112, 307002212, 307001312],
+        vec!["307002112".into(), "307002212".into(), "307001312".into()],
+    );
+
+    let ops = super::super::super::rule_ops(
+        BehaviorOpContext {
+            source_uid: 10,
+            source_team: 1,
+            target_uid: 10,
+            active_skill_id: 307001333,
+            transfer_count: 1,
+            event: None,
+            managers: &managers,
+            pool: &TargetPool::default(),
+            determinism: &mut determinism,
+            modifiers: &mut modifiers,
+            target: &mut target,
+        },
+        &behavior,
+    )
+    .unwrap();
+
+    let selectors = ops
+        .into_iter()
+        .map(|op| match op {
+            RuleOp::Command(BattleCommand::Buff(BuffCommand::Remove(BuffRemove {
+                target_uid: 10,
+                selector: BuffRemoveSelector::IdOrType(buff_id),
+                ..
+            }))) => buff_id,
+            other => panic!("unexpected op: {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(selectors, vec![307002112, 307002212, 307001312]);
 }
