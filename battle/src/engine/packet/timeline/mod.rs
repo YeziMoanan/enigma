@@ -152,13 +152,13 @@ fn project_frame(
     if effects.is_empty() {
         return Ok(Vec::new());
     }
-    let step = match &frame.owner {
+    match &frame.owner {
         FrameOwner::Skill {
             source_uid,
             skill_id,
             card_index,
             target_uid,
-        } => Some(normalize_framed_step(
+        } => Ok(Some(normalize_framed_step(
             EffectPacket::skill_fight_step_with_card_index(
                 *skill_id,
                 *source_uid,
@@ -186,46 +186,47 @@ fn project_frame(
             group,
             skill_position,
             target_uid,
-        } => Some(normalize_framed_step(EffectPacket::conduit_fight_step(
-            *source_uid,
-            target_uid.unwrap_or_default(),
-            *group,
-            *skill_position,
-            effects,
+        } => Ok(Some(normalize_framed_step(
+            EffectPacket::conduit_fight_step(
+                *source_uid,
+                target_uid.unwrap_or_default(),
+                *group,
+                *skill_position,
+                effects,
+            ),
         ))),
-        FrameOwner::ConduitStopped { source_uid, group } => Some(normalize_framed_step(
+        FrameOwner::ConduitStopped { source_uid, group } => Ok(Some(normalize_framed_step(
             EffectPacket::conduit_fight_step(*source_uid, 0, *group, 1, effects),
-        )),
+        ))),
         FrameOwner::BuffAct {
             owner_uid,
             source_uid,
             buff_id,
             ..
-        } => Some(normalize_framed_step(
+        } => Ok(Some(normalize_framed_step(
             EffectPacket::effect_fight_step_action(*source_uid, *owner_uid, *buff_id, effects),
-        )),
-        FrameOwner::BuffRule { emitter_uid, .. } => Some(normalize_framed_step(
+        ))),
+        FrameOwner::BuffRule { emitter_uid, .. } => Ok(Some(normalize_framed_step(
             EffectPacket::effect_fight_step_action(*emitter_uid, 0, 0, effects),
-        )),
+        ))),
         FrameOwner::EventEffect {
             source_uid,
             target_uid,
-        } => Some(normalize_framed_step(
+        } => Ok(Some(normalize_framed_step(
             EffectPacket::effect_fight_step_action(*source_uid, *target_uid, 0, effects),
-        )),
-        FrameOwner::SetupBuffAct { .. } => StepPacket::effect(effects),
-        FrameOwner::SetupMechanic => StepPacket::effect(effects).map(|mut step| {
+        ))),
+        FrameOwner::SetupBuffAct { .. } => Ok(StepPacket::effect(effects)),
+        FrameOwner::SetupMechanic => Ok(StepPacket::effect(effects).map(|mut step| {
             step.fake_timeline = Some(true);
             step
-        }),
+        })),
         FrameOwner::SetupSide(_)
         | FrameOwner::SetupEntity { .. }
         | FrameOwner::StageWave { .. }
         | FrameOwner::EventRule
         | FrameOwner::RoundPhase(_)
-        | FrameOwner::Command => StepPacket::effect(effects),
-    };
-    Ok(step.into_iter().collect())
+        | FrameOwner::Command => Ok(StepPacket::effect(effects)),
+    }
 }
 
 fn project_frame_items(

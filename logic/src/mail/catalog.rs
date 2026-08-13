@@ -241,14 +241,11 @@ fn localized_name(db: &config::GameDB, raw: &str, material_type: i32, id: i32) -
         "language_10036873" => Some("原始组件"),
         _ => None,
     };
-    known.map(str::to_string).unwrap_or_else(|| {
-        let english = db.language_en.get(raw).unwrap_or("").trim();
-        if english.is_empty() || english == "0" {
-            format!("物品 {material_type}:{id}")
-        } else {
-            format!("{english}（物品 {material_type}:{id}）")
-        }
-    })
+    // The public Chinese admin must not leak the English localization table.
+    // Unknown entries keep their stable protocol identity and use a Chinese
+    // fallback until a reviewed localized mapping is added.
+    let _ = db.language_en.get(raw);
+    format!("物品 {material_type}:{id}")
 }
 
 #[cfg(test)]
@@ -330,8 +327,10 @@ mod tests {
     fn catalog_names_are_chinese_or_explicit_fallbacks() {
         let catalog = build_initial_catalog(config());
         assert!(catalog.iter().any(|entry| entry.name == "微尘"));
-        assert!(catalog
-            .iter()
-            .all(|entry| !entry.name.starts_with("language_")));
+        assert!(
+            catalog
+                .iter()
+                .all(|entry| !entry.name.starts_with("language_"))
+        );
     }
 }

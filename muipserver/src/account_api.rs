@@ -267,21 +267,22 @@ pub(crate) async fn search_accounts(
     let rows = sqlx::query(
         "WITH candidates AS (
             SELECT COALESCE(a.account_key, LOWER(TRIM(u.email))) AS account,
-                   u.id AS user_id, u.username AS role_name
+                   u.id AS user_id, u.username AS role_name,
+                   COALESCE(a.display_account, '') AS display_account
             FROM users u
             LEFT JOIN account_allowlist a ON a.activated_user_id = u.id
             WHERE a.account_key IS NOT NULL OR TRIM(COALESCE(u.email, '')) <> ''
             UNION
-            SELECT a.account_key, u.id, COALESCE(u.username, '')
+            SELECT a.account_key, u.id, COALESCE(u.username, ''), COALESCE(a.display_account, '')
             FROM account_allowlist a
             LEFT JOIN users u ON u.id = a.activated_user_id
                 OR (a.activated_user_id IS NULL AND LOWER(TRIM(u.email)) = a.account_key)
             UNION
-            SELECT b.account_key, u.id, COALESCE(u.username, '')
+            SELECT b.account_key, u.id, COALESCE(u.username, ''), ''
             FROM account_blacklist b
             LEFT JOIN users u ON u.id = b.user_id OR LOWER(TRIM(u.email)) = b.account_key
          )
-         SELECT DISTINCT c.account, c.user_id, c.role_name,
+         SELECT DISTINCT c.account, c.user_id, c.role_name, c.display_account,
             EXISTS(SELECT 1 FROM account_allowlist a
                    WHERE a.account_key = c.account
                       OR (c.user_id IS NOT NULL AND a.activated_user_id = c.user_id)) AS allowlisted,
@@ -291,9 +292,11 @@ pub(crate) async fn search_accounts(
          FROM candidates c
          WHERE LOWER(c.account) LIKE ? ESCAPE '\\'
             OR LOWER(c.role_name) LIKE ? ESCAPE '\\'
+            OR LOWER(c.display_account) LIKE ? ESCAPE '\\'
             OR CAST(c.user_id AS TEXT) = ?
+             OR (c.user_id IS NULL AND LOWER(?) IN ('\u{65e0}\u{89d2}\u{8272}', '\u{672a}\u{5efa}\u{53f7}', 'unregistered'))
          ORDER BY
-            CASE WHEN LOWER(c.account) = ? OR LOWER(c.role_name) = ? OR CAST(c.user_id AS TEXT) = ?
+            CASE WHEN LOWER(c.account) = ? OR LOWER(c.role_name) = ? OR LOWER(c.display_account) = ? OR CAST(c.user_id AS TEXT) = ?
                  THEN 0 ELSE 1 END,
             c.user_id IS NULL,
             c.user_id,
@@ -302,7 +305,10 @@ pub(crate) async fn search_accounts(
     )
     .bind(&pattern)
     .bind(&pattern)
+    .bind(&pattern)
     .bind(query)
+    .bind(&normalized)
+    .bind(&normalized)
     .bind(&normalized)
     .bind(&normalized)
     .bind(query)
@@ -1148,6 +1154,32 @@ mod tests {
         assert_eq!(preview.user_id, None);
         assert_eq!(preview.role_name, "");
         assert!(preview.allowlisted);
+    }
+
+    #[tokio::test]
+    async fn account_search_matches_unregistered_marker() {
+        let state = state().await;
+        sqlx::query(
+            "INSERT INTO account_allowlist
+                (account_key, display_account, batch_id, imported_at, imported_by)
+             VALUES ('unregistered-account', 'unregistered-account', 'test', 1, 'test')",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let Json(results) = search_accounts(
+            State(state),
+            Query(AccountSearchInput {
+                q: "无角色".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].account, "unregistered-account");
+        assert_eq!(results[0].user_id, None);
+        assert_eq!(results[0].role_name, "");
     }
 
     #[tokio::test]
