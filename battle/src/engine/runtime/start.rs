@@ -20,6 +20,7 @@ fn run_start_schedule(
     cards: CardSetup,
     determinism: &mut RoundDeterminism,
     hand_size: usize,
+    absorb_hurt_map_layout: crate::engine::fight::versions::AbsorbHurtMapLayout,
 ) -> Result<(Vec<FightStep>, Vec<CardInfo>), String> {
     let battle_catalog = managers.catalog();
     let pool =
@@ -42,9 +43,10 @@ fn run_start_schedule(
     );
     managers.gauge.finish_opening_setup();
     let (result, visible_cards) = result.map_err(|error| format!("{error:?}"))?;
-    let steps = crate::engine::packet::timeline::project_for_version(
+    let steps = crate::engine::packet::timeline::project_for_version_with_absorb_map_layout(
         &result.frames,
         fight.version.unwrap_or_default(),
+        absorb_hurt_map_layout,
     )
     .map_err(|error| format!("{error:?}"))?;
     Ok((steps, visible_cards))
@@ -88,6 +90,7 @@ impl BattleRuntime {
             cards,
             determinism,
             hand_size,
+            self.absorb_hurt_map_layout,
         )
     }
 
