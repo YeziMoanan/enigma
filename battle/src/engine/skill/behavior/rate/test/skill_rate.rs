@@ -227,7 +227,7 @@ fn heat_scale_rate_uses_the_configured_scale_and_limit() {
 }
 
 #[test]
-fn purple_crystal_resolves_raw_lingering_glow_when_damage_is_planned() {
+fn purple_crystal_resolves_visible_lingering_glow_when_damage_is_planned() {
     use crate::engine::{
         manager::gauge::{GaugeCommand, GaugeManager, GaugeOperation},
         mechanic::lingering_glow,
@@ -250,7 +250,7 @@ fn purple_crystal_resolves_raw_lingering_glow_when_damage_is_planned() {
     let modifier = SkillRateModifier::new(
         0,
         60243,
-        crate::engine::skill::action::SkillRateAmount::gauge_raw(key, 1_000_000, 4, 1, 1000),
+        crate::engine::skill::action::SkillRateAmount::gauge_current(key, 1_000, 4, 1),
         true,
     );
 
@@ -276,6 +276,19 @@ fn purple_crystal_resolves_raw_lingering_glow_when_damage_is_planned() {
             },
         ))
         .unwrap();
+    assert_eq!(modifier.amount.resolve(&gauges), 600);
+
+    gauges
+        .execute_command(GaugeCommand::new(
+            origin,
+            key,
+            GaugeOperation::AccumulateRawValue {
+                amount: 500,
+                stream: 60243,
+            },
+        ))
+        .unwrap();
+    assert_eq!(gauges.raw_value(key), Some(150_500));
     assert_eq!(modifier.amount.resolve(&gauges), 600);
 }
 

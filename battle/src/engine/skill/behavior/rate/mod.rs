@@ -80,12 +80,11 @@ impl BehaviorHandler for Handler {
                 context.modifiers.rates.push(SkillRateModifier::new(
                     0,
                     behavior.spec.key.opcode,
-                    crate::engine::skill::action::SkillRateAmount::gauge_raw(
+                    crate::engine::skill::action::SkillRateAmount::gauge_current(
                         gauge_key,
-                        *raw_limit,
+                        *raw_limit / 1000,
                         *all_rate,
                         crystal_count,
-                        1000,
                     ),
                     crystal_rate_career_scaled(behavior.spec.kind, false),
                 ));
@@ -102,12 +101,11 @@ impl BehaviorHandler for Handler {
                 context.modifiers.rates.push(SkillRateModifier::new(
                     target_uid,
                     behavior.spec.key.opcode,
-                    crate::engine::skill::action::SkillRateAmount::gauge_raw(
+                    crate::engine::skill::action::SkillRateAmount::gauge_current(
                         gauge_key,
-                        *raw_limit,
+                        *raw_limit / 1000,
                         *focus_rate,
                         crystal_count,
-                        1000,
                     ),
                     crystal_rate_career_scaled(behavior.spec.kind, true),
                 ));
