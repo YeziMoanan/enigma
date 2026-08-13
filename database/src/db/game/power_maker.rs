@@ -454,7 +454,7 @@ mod tests {
             USER_ID,
             now,
             super::super::currencies::PowerRecovery {
-                quantity: recover_limit - recover_num,
+                quantity: i64::from(recover_limit - recover_num),
                 last_recover_time: Some(SERVER_DAY_START),
                 limit: recover_limit,
                 interval_seconds: recover_time,

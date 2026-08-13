@@ -7,7 +7,7 @@ pub const POWER_CURRENCY_ID: i32 = 4;
 
 #[derive(Clone, Copy)]
 pub(crate) struct PowerRecovery {
-    pub quantity: i32,
+    pub quantity: i64,
     pub last_recover_time: Option<i64>,
     pub limit: i32,
     pub interval_seconds: i32,
@@ -344,7 +344,7 @@ pub(crate) async fn settle_loaded_power(
     now: i64,
     recovery: PowerRecovery,
 ) -> sqlx::Result<()> {
-    if recovery.quantity >= recovery.limit {
+    if recovery.quantity >= i64::from(recovery.limit) {
         super::power_maker::settle_in_transaction(tx, user_id, now, true, None).await?;
         return Ok(());
     }
@@ -374,9 +374,10 @@ pub(crate) async fn settle_loaded_power(
     }
 
     let recovered = ticks.saturating_mul(i64::from(recovery.amount));
-    let recovered_quantity = i64::from(recovery.quantity)
+    let recovered_quantity = recovery
+        .quantity
         .saturating_add(recovered)
-        .min(i64::from(recovery.limit)) as i32;
+        .min(i64::from(recovery.limit));
     let recovered_at = last_recover_time.saturating_add(ticks.saturating_mul(interval));
     sqlx::query(
         "UPDATE currencies
@@ -389,8 +390,8 @@ pub(crate) async fn settle_loaded_power(
     .bind(POWER_CURRENCY_ID)
     .execute(&mut **tx)
     .await?;
-    let started_at = (recovered_quantity >= recovery.limit).then(|| {
-        let missing = i64::from(recovery.limit - recovery.quantity);
+    let started_at = (recovered_quantity >= i64::from(recovery.limit)).then(|| {
+        let missing = i64::from(recovery.limit) - recovery.quantity;
         let step = i64::from(recovery.amount);
         let needed_ticks = (missing + step - 1) / step;
         last_recover_time.saturating_add(needed_ticks.saturating_mul(interval))
@@ -463,7 +464,7 @@ pub async fn remove_currency(
     if currency_id == POWER_CURRENCY_ID {
         settle_power_recovery_in_transaction(&mut tx, user_id, timestamp).await?;
     }
-    let current: Option<i32> =
+    let current: Option<i64> =
         sqlx::query_scalar("SELECT quantity FROM currencies WHERE user_id = ? AND currency_id = ?")
             .bind(user_id)
             .bind(currency_id)
