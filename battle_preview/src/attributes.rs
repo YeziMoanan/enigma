@@ -55,6 +55,24 @@ pub fn preview_attributes(fight: &Fight, battle_path: &Path) -> anyhow::Result<P
     Ok(attributes)
 }
 
+pub fn hydrate_configured_trial_identity(fight: &mut Fight) {
+    for entity in fight
+        .attacker
+        .iter_mut()
+        .flat_map(|team| team.entitys.iter_mut().chain(team.sub_entitys.iter_mut()))
+    {
+        let Some((configured, _)) = configured_trial(entity) else {
+            continue;
+        };
+        if entity.skill_group1.is_empty() {
+            entity.skill_group1 = configured.skill_group1;
+        }
+        if entity.skill_group2.is_empty() {
+            entity.skill_group2 = configured.skill_group2;
+        }
+    }
+}
+
 #[cfg(test)]
 fn hydrate_preview_attributes(
     fight: &Fight,
@@ -207,6 +225,13 @@ fn captured_battle_balance(
 fn configured_trial_attributes(
     entity: &FightEntityInfo,
 ) -> Option<(HeroExAttribute, HeroSpAttribute)> {
+    let (_, stats) = configured_trial(entity)?;
+    Some((stats.ex(), stats.sp()))
+}
+
+fn configured_trial(
+    entity: &FightEntityInfo,
+) -> Option<(FightEntityInfo, battle::engine::entity::stats::Stats)> {
     let trial_id = entity.trial_id.filter(|trial_id| *trial_id > 0)?;
     let uid = entity.uid?;
     let (trial, stats) = battle::engine::entity::builder::EntityBuilder::trial(
@@ -216,7 +241,7 @@ fn configured_trial_attributes(
         entity.team_type.unwrap_or_default(),
     )
     .ok()?;
-    (trial.model_id == entity.model_id).then(|| (stats.ex(), stats.sp()))
+    (trial.model_id == entity.model_id).then_some((trial, stats))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1101,6 +1126,49 @@ mod tests {
             )
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn configured_trial_identity_hydrates_only_missing_skill_groups() {
+        crate::init_test_config();
+        let uid = 42;
+        let trial_id = 116385001;
+        let mut captured_fight = fight(uid);
+        let entity = &mut captured_fight.attacker.as_mut().unwrap().entitys[0];
+        entity.trial_id = Some(trial_id);
+        entity.skill_group1 = vec![999];
+        let (configured, _) =
+            battle::engine::entity::builder::EntityBuilder::trial(trial_id, uid, 0, 0).unwrap();
+
+        hydrate_configured_trial_identity(&mut captured_fight);
+
+        let entity = &captured_fight.attacker.as_ref().unwrap().entitys[0];
+        assert_eq!(entity.skill_group1, vec![999]);
+        assert_eq!(entity.skill_group2, configured.skill_group2);
+
+        let mut missing_both = fight(uid);
+        missing_both.attacker.as_mut().unwrap().entitys[0].trial_id = Some(trial_id);
+        hydrate_configured_trial_identity(&mut missing_both);
+        let entity = &missing_both.attacker.as_ref().unwrap().entitys[0];
+        assert_eq!(entity.skill_group1, configured.skill_group1);
+        assert_eq!(entity.skill_group2, configured.skill_group2);
+    }
+
+    #[test]
+    fn configured_trial_identity_does_not_invent_groups_without_matching_identity() {
+        crate::init_test_config();
+        for (trial_id, model_id) in [(None, 3149), (Some(0), 3149), (Some(116385001), 999)] {
+            let mut fight = fight(42);
+            let entity = &mut fight.attacker.as_mut().unwrap().entitys[0];
+            entity.trial_id = trial_id;
+            entity.model_id = Some(model_id);
+
+            hydrate_configured_trial_identity(&mut fight);
+
+            let entity = &fight.attacker.as_ref().unwrap().entitys[0];
+            assert!(entity.skill_group1.is_empty());
+            assert!(entity.skill_group2.is_empty());
+        }
     }
 
     #[test]

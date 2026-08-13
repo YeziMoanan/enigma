@@ -7,8 +7,9 @@ use std::{
 use battle::engine::{runtime::BattleRuntime, skill::effect::catalog};
 use battle_preview::{
     begin_round_inputs, canonical_comparison, captured_opening_determinism,
-    expand_compressed_fight_steps, first_diff_path, normalize_live_json, preview_attributes,
-    preview_output_text, render_json_with_capture_conventions, tower_plan_id,
+    expand_compressed_fight_steps, first_diff_path, hydrate_configured_trial_identity,
+    normalize_live_json, preview_attributes, preview_output_text,
+    render_json_with_capture_conventions, tower_plan_id,
 };
 use sonettobuf::{BeginRoundReply, BeginRoundRequest, Fight, FightRound, FightStep};
 
@@ -126,7 +127,8 @@ fn replay_to_round(db: &'static config::GameDB, path: &Path) -> anyhow::Result<F
             format!("{} has no captured start fight", path.display()),
         )
     })?;
-    let fight: Fight = serde_json::from_value(fight)?;
+    let mut fight: Fight = serde_json::from_value(fight)?;
+    hydrate_configured_trial_identity(&mut fight);
     let captured_start_round: FightRound = serde_json::from_value(
         value
             .get("round")
