@@ -505,6 +505,78 @@ fn excess_crit_conversion_keeps_the_fractional_remainder() {
 }
 
 #[test]
+fn row_damage_preserves_fractional_excess_crit_conversion() {
+    crate::test_support::init_config();
+    let fight = Fight {
+        attacker: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(10),
+                current_hp: Some(100),
+                attr: Some(HeroAttribute {
+                    attack: Some(20_000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        defender: Some(FightTeam {
+            entitys: vec![FightEntityInfo {
+                uid: Some(-1),
+                current_hp: Some(100_000),
+                attr: Some(HeroAttribute {
+                    hp: Some(100_000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut managers = BattleManagers::seeded(&fight);
+    managers.attribute.override_ex(
+        10,
+        &HeroExAttribute {
+            cri: Some(1_066),
+            cri_dmg: Some(1_000),
+            ..Default::default()
+        },
+    );
+    let pool = TargetPool::from_fight(&fight);
+    let mut catalog = SkillEffectCatalog::default();
+    catalog.insert_damage_rate(100, 1_000);
+    let mut invocation: SkillInvocation = SkillRequest {
+        source_uid: 10,
+        skill_id: 100,
+    }
+    .into();
+    invocation.target = SkillTarget::Explicit(-1);
+    let mut determinism = RoundDeterminism::default();
+    determinism.enqueue_hidden_crits(100, 10, [true]);
+    let mut execution = SkillExecution::new(TargetContext::default());
+    execution.modifiers.excess_crit_conversion_rate = 750;
+
+    let ops = plan::damage_ops(
+        &invocation,
+        &managers,
+        &pool,
+        &catalog,
+        100,
+        &mut determinism,
+        &mut execution,
+    );
+
+    assert!(matches!(
+        ops.damage.as_slice(),
+        [HpCommand::Damage(crate::engine::manager::hp::HpDamage {
+            amount: 20_990,
+            ..
+        })]
+    ));
+}
+
+#[test]
 fn row_damage_consumes_captured_crit_choices_in_target_order() {
     crate::test_support::init_config();
     let fight = Fight {
