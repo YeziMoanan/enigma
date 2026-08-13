@@ -561,6 +561,7 @@ fn run_player_card_ops(
             let grants_ex_point = managers.entity.team_type(played.caster_uid) == Some(team)
                 && managers.ex_point.kind(played.caster_uid) == 0
                 && catalog.grants_resource_on_card_play(played.skill_id)
+                && played.card.card_type != Some(sonettobuf::card_info::CardType::Skill3 as i32)
                 && !crate::engine::manager::card::deck::has_enchant_type(
                     &played.card,
                     crate::engine::manager::card::EnchantedType::Lorenz,
