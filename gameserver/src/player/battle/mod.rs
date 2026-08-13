@@ -108,21 +108,30 @@ impl BattleState {
             .unwrap_or_default()
     }
 
-    pub fn use_cloth_skill(
+    pub async fn use_cloth_skill(
         &mut self,
+        pool: &SqlitePool,
+        player_id: i64,
         request: UseClothSkillRequest,
     ) -> Result<(UseClothSkillReply, Option<RedealCardInfoPush>), AppError> {
-        self.active
-            .as_mut()
-            .ok_or(AppError::InvalidRequest)?
-            .use_cloth_skill(request)
+        let mut active = self.active.clone().ok_or(AppError::InvalidRequest)?;
+        let reply = active.use_cloth_skill(request)?;
+        active.persist_checkpoint(pool, player_id).await?;
+        self.active = Some(active);
+        Ok(reply)
     }
 
-    pub fn begin_round(&mut self, request: BeginRoundRequest) -> Result<BeginRoundReply, AppError> {
-        self.active
-            .as_mut()
-            .ok_or(AppError::InvalidRequest)?
-            .begin_round(request)
+    pub async fn begin_round(
+        &mut self,
+        pool: &SqlitePool,
+        player_id: i64,
+        request: BeginRoundRequest,
+    ) -> Result<BeginRoundReply, AppError> {
+        let mut active = self.active.clone().ok_or(AppError::InvalidRequest)?;
+        let reply = active.begin_round(request)?;
+        active.persist_checkpoint(pool, player_id).await?;
+        self.active = Some(active);
+        Ok(reply)
     }
 
     pub fn plan_auto_round(&self, request: &AutoRoundRequest) -> Result<AutoRoundReply, AppError> {
@@ -162,6 +171,10 @@ struct BattleCheckpoint {
     seed: u64,
     tower_context: Option<crate::logic::battle_setup::tower::BattleContext>,
     act229_context: Option<Act229BattleContext>,
+    #[serde(default)]
+    rounds: Vec<CommittedRound>,
+    #[serde(default)]
+    pending_cloth_skill_opers: Vec<UseClothSkillOperRecord>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -515,6 +528,15 @@ impl ActiveBattle {
             checkpoint.seed,
         )?;
         active.fight_id = Some(record.id);
+        for round in checkpoint.rounds {
+            for operation in round.cloth_skill_opers {
+                active.use_cloth_skill(cloth_skill_request(operation))?;
+            }
+            active.begin_round(round.request)?;
+        }
+        for operation in checkpoint.pending_cloth_skill_opers {
+            active.use_cloth_skill(cloth_skill_request(operation))?;
+        }
         Ok(active)
     }
 
@@ -525,7 +547,18 @@ impl ActiveBattle {
             seed: self.seed,
             tower_context: self.tower_context,
             act229_context: self.act229_context,
+            rounds: self.rounds.clone(),
+            pending_cloth_skill_opers: self.pending_cloth_skill_opers.clone(),
         })?)
+    }
+
+    async fn persist_checkpoint(&self, pool: &SqlitePool, player_id: i64) -> Result<(), AppError> {
+        let Some(fight_id) = self.fight_id else {
+            return Ok(());
+        };
+        let checkpoint = self.checkpoint_json()?;
+        battle::update_fight_checkpoint(pool, player_id, fight_id, &checkpoint).await?;
+        Ok(())
     }
 
     pub fn reconnect_reply(&self) -> ReconnectFightReply {
@@ -616,6 +649,15 @@ impl ActiveBattle {
             request,
             cloth_skill_opers: std::mem::take(&mut self.pending_cloth_skill_opers),
         });
+    }
+}
+
+fn cloth_skill_request(operation: UseClothSkillOperRecord) -> UseClothSkillRequest {
+    UseClothSkillRequest {
+        skill_id: operation.skill_id,
+        from_id: operation.from_id,
+        to_id: operation.to_id,
+        r#type: operation.r#type,
     }
 }
 

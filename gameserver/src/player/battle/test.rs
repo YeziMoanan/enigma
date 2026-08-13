@@ -113,7 +113,7 @@ fn begin_round_steps_use_the_clients_compressed_framing() {
 }
 
 #[test]
-fn active_fight_reconnects_from_its_fresh_start_checkpoint() {
+fn active_fight_reconnects_from_its_latest_committed_round() {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
@@ -122,8 +122,10 @@ fn active_fight_reconnects_from_its_fresh_start_checkpoint() {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
-                    let _ = config::init(&data_dir);
+                    let data_dir = std::env::var("ENIGMA_BATTLE_DATA_DIR").unwrap_or_else(|_| {
+                        format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"))
+                    });
+                    config::init(&data_dir).unwrap();
                     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
                     database::run_migrations(&pool).await.unwrap();
                     sqlx::query(
@@ -156,10 +158,11 @@ fn active_fight_reconnects_from_its_fresh_start_checkpoint() {
                         .activate(&pool, 9, &RewardSet::default())
                         .await
                         .unwrap();
+                    active.begin_round(BeginRoundRequest::default()).unwrap();
+                    active.persist_checkpoint(&pool, 9).await.unwrap();
                     let expected = active.reconnect_reply();
                     let expected_start = active.start_reply();
                     let expected_cards = active.card_info_push();
-                    active.begin_round(BeginRoundRequest::default()).unwrap();
                     let fight_id = active.fight_id.unwrap();
                     assert!(matches!(
                         BattleState::default().ensure_can_start(&pool, 9).await,
@@ -188,7 +191,7 @@ fn active_fight_reconnects_from_its_fresh_start_checkpoint() {
                     assert_eq!(restored.reconnect_reply(), expected);
                     assert_eq!(restored.start_reply(), expected_start);
                     assert_eq!(restored.card_info_push(), expected_cards);
-                    assert!(restored.oper_records().is_empty());
+                    assert_eq!(restored.oper_records(), active.oper_records());
                     battle::finish_fight_instance(&pool, 9, fight_id)
                         .await
                         .unwrap();

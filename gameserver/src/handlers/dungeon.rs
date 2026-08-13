@@ -212,7 +212,13 @@ pub async fn on_use_cloth_skill(
     req: ClientPacket,
 ) -> Result<(), AppError> {
     let request = UseClothSkillRequest::decode(&req.data[..])?;
-    let (reply, redeal) = ctx.player_mut()?.battle.use_cloth_skill(request)?;
+    let player_id = ctx.player()?.id;
+    let db = ctx.state.db;
+    let (reply, redeal) = ctx
+        .player_mut()?
+        .battle
+        .use_cloth_skill(db, player_id, request)
+        .await?;
     if let Some(redeal) = redeal {
         ctx.notify(CmdId::RedealCardInfoPushCmd, redeal).await?;
     }
@@ -477,7 +483,13 @@ pub async fn on_begin_round(
     req: ClientPacket,
 ) -> Result<(), AppError> {
     let request = BeginRoundRequest::decode(&req.data[..])?;
-    let reply = ctx.player_mut()?.battle.begin_round(request)?;
+    let player_id = ctx.player()?.id;
+    let db = ctx.state.db;
+    let reply = ctx
+        .player_mut()?
+        .battle
+        .begin_round(db, player_id, request)
+        .await?;
 
     ctx.send_reply(CmdId::BeginRoundCmd, reply, 0, req.up_tag)
         .await
