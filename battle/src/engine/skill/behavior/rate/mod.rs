@@ -272,6 +272,8 @@ fn conduit_power_up_ops(
     behavior: &ParsedBehavior,
 ) -> Option<Vec<RuleOp>> {
     let args = conduit_power_up_args(behavior)?;
+    context.modifiers.attack_career = Some(args.power_ids[0]);
+    context.modifiers.additional_attack_career = Some(args.power_ids[1]);
     let spent = args
         .power_ids
         .iter()
@@ -362,7 +364,7 @@ fn conduit_power_up_args(behavior: &ParsedBehavior) -> Option<ConduitPowerUpArgs
         penetration: (AttrId::from_raw(behavior.arg(10)?)?, behavior.arg(11)?),
         excess_crit_conversion: behavior.arg(12)?,
     };
-    (args.power_ids.iter().all(|id| *id > 0)
+    (args.power_ids.iter().all(|id| (1..=8).contains(id))
         && args.rate_per_power >= 0
         && args.thresholds.iter().all(|threshold| *threshold > 0)
         && args.thresholds.windows(2).all(|pair| pair[0] < pair[1])
