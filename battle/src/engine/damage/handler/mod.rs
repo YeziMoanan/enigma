@@ -119,12 +119,13 @@ impl BehaviorHandler for Handler {
         };
         match (behavior.spec.key.opcode, behavior.spec.kind) {
             (20001 | 90001, BehaviorKind::Heal) => {
-                let is_crit = context.determinism.roll_hidden_crit(
-                    context.active_skill_id,
-                    source_uid,
-                    target_uid,
-                    crit_chance(source_uid, target_uid, context.pool, context.managers),
-                );
+                let is_crit = !heal::is_full_restore(behavior)
+                    && context.determinism.roll_hidden_crit(
+                        context.active_skill_id,
+                        source_uid,
+                        target_uid,
+                        crit_chance(source_uid, target_uid, context.pool, context.managers),
+                    );
                 return heal::amount(source_uid, target_uid, context.managers, is_crit, behavior)
                     .map(|amount| {
                         heal(
