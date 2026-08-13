@@ -91,6 +91,7 @@ pub struct AccountLoginMailReq {
 pub struct AccountBindListReq {
     pub device_info: DeviceInfo,
     pub app_package_info: AppPackageInfo,
+    #[serde(default)]
     pub reactivate: bool,
     pub token: String,
     pub user_id: u64,
@@ -102,6 +103,7 @@ pub struct AccountBindListReq {
 pub struct AccountAutoLoginReq {
     pub device_info: DeviceInfo,
     pub app_package_info: AppPackageInfo,
+    #[serde(default)]
     pub reactivate: bool,
     pub token: String,
     pub user_id: u64,
