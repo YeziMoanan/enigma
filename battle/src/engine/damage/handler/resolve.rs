@@ -3,7 +3,6 @@ use sonettobuf::effect_type_enum::EffectType;
 use crate::engine::{
     damage::{
         AttackPlan, DamageFormula, DamageFormulaInput as DamageInputs, DamageKind, DamageRateTerm,
-        calculate_with_trace_for_version as calculate_damage_with_trace,
     },
     entity::attr::AttrId,
     manager::{
@@ -34,6 +33,8 @@ pub struct DamageRequest<'a> {
     pub attack_attributes: &'a [(AttrId, i32)],
     pub career_ratio_bonus: i32,
     pub attack_career: Option<i32>,
+    /// Thousandths of one critical-damage permille point.
+    pub critical_multiplier_remainder: i32,
     pub is_conduit: bool,
     pub is_crit: bool,
     pub extra_skill_kind: i32,
@@ -67,6 +68,7 @@ pub fn resolve_attack_command(
             attack_attributes: &plan.attack_attributes,
             career_ratio_bonus: plan.career_ratio_bonus,
             attack_career: plan.attack_career,
+            critical_multiplier_remainder: plan.critical_multiplier_remainder,
             is_conduit: plan.is_conduit,
             is_crit: plan.is_crit,
             extra_skill_kind: plan.extra_skill_kind,
@@ -444,6 +446,7 @@ pub(super) fn direct_damage(
         rate_terms,
         attack_attributes,
         career_ratio_bonus,
+        critical_multiplier_remainder,
         is_conduit,
         is_crit,
         extra_skill_kind,
@@ -832,7 +835,13 @@ pub(super) fn direct_damage(
     } else {
         0
     };
-    let crit_multiplier = (source_crit + technique_crit + buff_crit - target_crit).max(0);
+    let crit_multiplier = source_crit + technique_crit + buff_crit - target_crit;
+    let critical_multiplier_remainder = if crit_multiplier >= 0 {
+        critical_multiplier_remainder
+    } else {
+        0
+    };
+    let crit_multiplier = crit_multiplier.max(0);
     let inputs = DamageInputs {
         kind: if source.damage_type == crate::engine::skill::target::EntityDamageType::Mental {
             DamageKind::Mental
@@ -864,7 +873,12 @@ pub(super) fn direct_damage(
             "damage rate terms skill={skill_id} terms={rate_terms:?} attack_attributes={attack_attributes:?}"
         );
     }
-    let damage_trace = calculate_damage_with_trace(inputs, runtime.fight_version);
+    let damage_trace =
+        crate::engine::damage::pipeline::calculate_with_trace_for_version_and_remainder(
+            inputs,
+            runtime.fight_version,
+            critical_multiplier_remainder,
+        );
     let amount = damage_trace.amount;
     if crate::engine::damage::trace::enabled() {
         let local_damage_bonus = source_active_features

@@ -497,6 +497,14 @@ fn row_damage_applies_configured_excess_crit_conversion() {
 }
 
 #[test]
+fn excess_crit_conversion_keeps_the_fractional_remainder() {
+    assert_eq!(
+        super::super::plan::split_excess_crit_conversion(66, 750),
+        (49, 500)
+    );
+}
+
+#[test]
 fn row_damage_consumes_captured_crit_choices_in_target_order() {
     crate::test_support::init_config();
     let fight = Fight {

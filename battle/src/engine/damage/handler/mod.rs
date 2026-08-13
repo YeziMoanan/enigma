@@ -534,6 +534,7 @@ impl BehaviorHandler for Handler {
                         attack_attributes: &context.modifiers.attack_attributes,
                         career_ratio_bonus: context.modifiers.career_ratio_bonus,
                         attack_career: context.modifiers.attack_career,
+                        critical_multiplier_remainder: 0,
                         is_conduit: context
                             .managers
                             .conduit
