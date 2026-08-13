@@ -712,6 +712,59 @@ fn normalizes_device_card_weights() {
 }
 
 #[test]
+fn trial_skill_groups_require_exact_positive_identity() {
+    crate::test_support::init_config();
+    let catalog = BattleCatalog::new(crate::test_support::game_data());
+    let (configured, _) =
+        crate::engine::entity::builder::EntityBuilder::trial(116_385_001, 42, 0, 1).unwrap();
+
+    assert_eq!(
+        catalog.trial_skill_groups(116_385_001, 3_149),
+        Some(ConfiguredSkillGroups {
+            group1: configured.skill_group1,
+            group2: configured.skill_group2,
+        })
+    );
+    assert_eq!(catalog.trial_skill_groups(0, 3_149), None);
+    assert_eq!(catalog.trial_skill_groups(116_385_001, 999), None);
+}
+
+#[test]
+fn fight_skill_catalog_includes_missing_exact_trial_groups() {
+    crate::test_support::init_config();
+    let catalog = BattleCatalog::new(crate::test_support::game_data());
+    let configured = catalog.trial_skill_groups(116_385_001, 3_149).unwrap();
+    let fight = sonettobuf::Fight {
+        attacker: Some(sonettobuf::FightTeam {
+            entitys: vec![sonettobuf::FightEntityInfo {
+                uid: Some(-1),
+                model_id: Some(3_149),
+                trial_id: Some(116_385_001),
+                current_hp: Some(1),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let effects = catalog.skill_effects_for_fight(&fight);
+
+    assert!(
+        configured
+            .group1
+            .iter()
+            .all(|skill_id| effects.get(*skill_id).is_some())
+    );
+    assert!(
+        configured
+            .group2
+            .iter()
+            .all(|skill_id| effects.get(*skill_id).is_some())
+    );
+}
+
+#[test]
 fn rejects_unsupported_lingering_glow_attribute_buff() {
     crate::test_support::init_config();
     let game_data = crate::test_support::game_data();

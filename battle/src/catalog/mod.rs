@@ -38,6 +38,12 @@ pub(crate) struct ConfiguredTeachingCards {
     pub refill_cards: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfiguredSkillGroups {
+    pub group1: Vec<i32>,
+    pub group2: Vec<i32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EntityExAttributes {
     pub crit_rate: i32,
@@ -592,11 +598,54 @@ impl BattleCatalog {
         configured_device_card_weights(self.game_data, model_id)
     }
 
+    pub(crate) fn trial_skill_groups(
+        self,
+        trial_id: i32,
+        model_id: i32,
+    ) -> Option<ConfiguredSkillGroups> {
+        let trial_id = (trial_id > 0).then_some(trial_id)?;
+        let trial = self.game_data.hero_trial.get(trial_id)?;
+        if model_id <= 0 || trial.hero_id != model_id {
+            return None;
+        }
+        let (group1, group2, _) = crate::engine::entity::skill::Skill::active_skills(
+            self.game_data,
+            model_id,
+            trial.ex_skill_lv,
+        );
+        Some(ConfiguredSkillGroups { group1, group2 })
+    }
+
     pub(crate) fn skill_effects_for_fight(
         self,
         fight: &sonettobuf::Fight,
     ) -> crate::engine::skill::effect::SkillEffectCatalog {
-        crate::engine::skill::effect::SkillEffectCatalog::from_fight(self.game_data, fight)
+        let mut catalog =
+            crate::engine::skill::effect::SkillEffectCatalog::from_fight(self.game_data, fight);
+        let configured_trial_roots = crate::engine::manager::entities(fight)
+            .filter_map(|entity| {
+                self.trial_skill_groups(
+                    entity.trial_id.unwrap_or_default(),
+                    entity.model_id.unwrap_or_default(),
+                )
+                .map(|configured| (entity, configured))
+            })
+            .flat_map(|(entity, configured)| {
+                let group1 = if entity.skill_group1.is_empty() {
+                    configured.group1
+                } else {
+                    Vec::new()
+                };
+                let group2 = if entity.skill_group2.is_empty() {
+                    configured.group2
+                } else {
+                    Vec::new()
+                };
+                group1.into_iter().chain(group2)
+            })
+            .collect::<Vec<_>>();
+        catalog.extend_roots_and_warn(self.game_data, configured_trial_roots, []);
+        catalog
     }
 
     pub(crate) fn extend_skill_roots(
