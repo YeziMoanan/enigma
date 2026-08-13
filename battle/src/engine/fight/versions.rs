@@ -22,6 +22,13 @@ pub(crate) enum HurtInfoWireLayout {
     Version7,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AbsorbHurtMapLayout {
+    TwoMaps,
+    #[default]
+    ThreeMaps,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RoundStartSetupLayout {
     Version6,

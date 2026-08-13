@@ -144,6 +144,9 @@ fn replay_to_round(db: &'static config::GameDB, path: &Path) -> anyhow::Result<F
         ex_attributes,
         sp_attributes,
     );
+    runtime
+        .inherit_absorb_hurt_map_layout(&captured_start_round)
+        .map_err(anyhow::Error::msg)?;
     runtime.extend_battle_rule_skills(tower_rule_skills);
     let mut round_reply = runtime
         .start_round_with_determinism(opening_determinism)
