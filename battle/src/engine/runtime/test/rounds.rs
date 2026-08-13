@@ -255,6 +255,17 @@ fn client_conduit_selection_projects_two_top_level_confirmations_before_actions(
     assert_eq!(effect.effect_num, Some(1));
     assert_eq!(effect.team_type, Some(1));
     assert_eq!(effect.config_effect, Some(0));
+    let use_cards = &round.fight_step[0].act_effect[0].card_info_list;
+    assert_eq!(use_cards.len(), 2);
+    assert_eq!(use_cards[0].uid, Some(10));
+    assert_eq!(use_cards[0].skill_id, Some(31446011));
+    assert_eq!(use_cards[1].uid, Some(0));
+    assert_eq!(use_cards[1].skill_id, Some(0));
+    assert_eq!(use_cards[1].hero_id, Some(0));
+    assert_eq!(
+        use_cards[1].card_type,
+        Some(sonettobuf::card_info::CardType::Device as i32)
+    );
     assert_eq!(
         round.fight_step[0]
             .act_effect
