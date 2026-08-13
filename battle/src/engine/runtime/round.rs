@@ -265,6 +265,22 @@ impl BattleRuntime {
         let phase_two_refill_deferred = needs_refill && !runs_phase_two;
         if needs_refill && runs_phase_two {
             self.round_state.before_cards2 = round_field_cards(self.managers.card.hand());
+        }
+        if runs_phase_two {
+            fight_steps.extend(project_result(
+                schedule::run_post_action_refill_settlement(
+                    &mut self.managers,
+                    &pool,
+                    catalog,
+                    &mut self.determinism,
+                    context,
+                )
+                .map_err(|error| format!("{error:?}"))?,
+                fight_version,
+                absorb_hurt_map_layout,
+            )?);
+        }
+        if needs_refill && runs_phase_two {
             fight_steps.extend(project_result(
                 schedule::run_round_deal(2),
                 fight_version,
