@@ -29,7 +29,13 @@ pub fn build_initial_catalog(db: &config::GameDB) -> Vec<CatalogEntry> {
 
     for row in db.currency.all() {
         if row.id > 0 && !row.name.trim().is_empty() && !row.icon.trim().is_empty() {
-            entries.push(entry(2, row.id, &row.name, MailCategory::Currency, 9_999));
+            entries.push(entry(
+                2,
+                row.id,
+                localized_name(db, &row.name, 2, row.id),
+                MailCategory::Currency,
+                9_999,
+            ));
         }
     }
     for row in db.item.all() {
@@ -43,7 +49,7 @@ pub fn build_initial_catalog(db: &config::GameDB) -> Vec<CatalogEntry> {
             entries.push(entry(
                 1,
                 row.id,
-                &row.name,
+                localized_name(db, &row.name, 1, row.id),
                 if row.is_stackable == 1 {
                     MailCategory::Material
                 } else {
@@ -55,37 +61,79 @@ pub fn build_initial_catalog(db: &config::GameDB) -> Vec<CatalogEntry> {
     }
     for row in db.power_item.all() {
         if row.id > 0 && !row.name.trim().is_empty() && !row.icon.trim().is_empty() {
-            entries.push(entry(10, row.id, &row.name, MailCategory::Consumable, 1));
+            entries.push(entry(
+                10,
+                row.id,
+                localized_name(db, &row.name, 10, row.id),
+                MailCategory::Consumable,
+                1,
+            ));
         }
     }
     for row in db.insight_item.all() {
         if row.id > 0 && !row.name.trim().is_empty() && !row.icon.trim().is_empty() {
-            entries.push(entry(24, row.id, &row.name, MailCategory::Material, 1));
+            entries.push(entry(
+                24,
+                row.id,
+                localized_name(db, &row.name, 24, row.id),
+                MailCategory::Material,
+                1,
+            ));
         }
     }
     for row in db.equip.all() {
         if row.id > 0 && !row.name.trim().is_empty() && !row.icon.trim().is_empty() {
-            entries.push(entry(9, row.id, &row.name, MailCategory::Psychube, 1));
+            entries.push(entry(
+                9,
+                row.id,
+                localized_name(db, &row.name, 9, row.id),
+                MailCategory::Psychube,
+                1,
+            ));
         }
     }
     for row in db.skin.all() {
         if row.id > 0 && row.character_id > 0 && !row.name.trim().is_empty() {
-            entries.push(entry(5, row.id, &row.name, MailCategory::Skin, 1));
+            entries.push(entry(
+                5,
+                row.id,
+                localized_name(db, &row.name, 5, row.id),
+                MailCategory::Skin,
+                1,
+            ));
         }
     }
     for row in db.room_building.all() {
         if row.id > 0 && !row.name.trim().is_empty() {
-            entries.push(entry(11, row.id, &row.name, MailCategory::Wilderness, 1));
+            entries.push(entry(
+                11,
+                row.id,
+                localized_name(db, &row.name, 11, row.id),
+                MailCategory::Wilderness,
+                1,
+            ));
         }
     }
     for row in db.block_package.all() {
         if row.id > 0 && !row.show_only && !row.name.trim().is_empty() {
-            entries.push(entry(13, row.id, &row.name, MailCategory::Wilderness, 1));
+            entries.push(entry(
+                13,
+                row.id,
+                localized_name(db, &row.name, 13, row.id),
+                MailCategory::Wilderness,
+                1,
+            ));
         }
     }
     for row in db.antique.all() {
         if row.id > 0 && !row.name.trim().is_empty() && !row.icon.trim().is_empty() {
-            entries.push(entry(18, row.id, &row.name, MailCategory::Antique, 1));
+            entries.push(entry(
+                18,
+                row.id,
+                localized_name(db, &row.name, 18, row.id),
+                MailCategory::Antique,
+                1,
+            ));
         }
     }
     let cloth_ids = db
@@ -115,7 +163,13 @@ pub fn build_initial_catalog(db: &config::GameDB) -> Vec<CatalogEntry> {
         ));
     }
     if let Some(row) = db.character.get(3143) {
-        entries.push(entry(4, row.id, &row.name, MailCategory::Character, 1));
+        entries.push(entry(
+            4,
+            row.id,
+            localized_name(db, &row.name, 4, row.id),
+            MailCategory::Character,
+            1,
+        ));
     }
 
     entries.sort_by_key(|entry| (entry.category, entry.material_type, entry.id));
@@ -126,17 +180,75 @@ pub fn build_initial_catalog(db: &config::GameDB) -> Vec<CatalogEntry> {
 fn entry(
     material_type: i32,
     id: i32,
-    name: &str,
+    name: impl Into<String>,
     category: MailCategory,
     quantity: i32,
 ) -> CatalogEntry {
     CatalogEntry {
         material_type,
         id,
-        name: name.trim().to_string(),
+        name: name.into().trim().to_string(),
         category,
         quantity,
     }
+}
+
+/// The international data tables store display names as language keys. The
+/// public Chinese admin must never expose those implementation keys to users.
+/// Keep the protocol/data IDs unchanged and translate only the presentation
+/// name; unknown keys receive a stable Chinese fallback instead of leaking the
+/// raw `language_xxx` token.
+fn localized_name(db: &config::GameDB, raw: &str, material_type: i32, id: i32) -> String {
+    if !raw.starts_with("language_") {
+        return raw.trim().to_string();
+    }
+    let known = match raw {
+        "language_10003211" => Some("纯雨滴"),
+        "language_10003214" => Some("澄澈雨滴"),
+        "language_10003217" => Some("利齿子儿"),
+        "language_10003220" => Some("细胞活性"),
+        "language_10003223" => Some("微尘"),
+        "language_10003226" => Some("迷途之齿"),
+        "language_10003229" => Some("迷途之齿唱片"),
+        "language_10003233" => Some("思绪点"),
+        "language_10003236" => Some("全知之书"),
+        "language_10003239" => Some("梦境流体"),
+        "language_10003242" => Some("荒原贝壳"),
+        "language_10003245" => Some("阅读概率"),
+        "language_10003248" => Some("UTTU代币"),
+        "language_10003251" => Some("小狗硬币"),
+        "language_10003254" => Some("尖叫罐头"),
+        "language_10003257" => Some("干木材"),
+        "language_10003261" => Some("永恒星锑"),
+        "language_10003264" => Some("闪耀之物"),
+        "language_10003268" => Some("旧日的金匣"),
+        "language_10003271" => Some("归途券"),
+        "language_10003274" => Some("尤里卡"),
+        "language_10003278" => Some("苹果币"),
+        "language_10003281" => Some("尘封文件"),
+        "language_10003284" => Some("火花印章"),
+        "language_10003287" => Some("远古火种"),
+        "language_10003290" => Some("桉树果"),
+        "language_10003295" => Some("纸马"),
+        "language_10003298" => Some("光明的馈赠"),
+        "language_10003305" => Some("幸运币"),
+        "language_10033894" => Some("UTTU积分"),
+        "language_10033889" => Some("交响"),
+        "language_10036862" => Some("修复零件"),
+        "language_10036864" => Some("修复材料"),
+        "language_10036866" => Some("基石"),
+        "language_10036870" => Some("黑钻石"),
+        "language_10036873" => Some("原始组件"),
+        _ => None,
+    };
+    known.map(str::to_string).unwrap_or_else(|| {
+        let english = db.language_en.get(raw).unwrap_or("").trim();
+        if english.is_empty() || english == "0" {
+            format!("物品 {material_type}:{id}")
+        } else {
+            format!("{english}（物品 {material_type}:{id}）")
+        }
+    })
 }
 
 #[cfg(test)]
@@ -212,5 +324,14 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn catalog_names_are_chinese_or_explicit_fallbacks() {
+        let catalog = build_initial_catalog(config());
+        assert!(catalog.iter().any(|entry| entry.name == "微尘"));
+        assert!(catalog
+            .iter()
+            .all(|entry| !entry.name.starts_with("language_")));
     }
 }

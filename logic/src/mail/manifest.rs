@@ -2,7 +2,7 @@ use super::catalog::{CatalogEntry, MailCategory, build_initial_catalog};
 use serde::{Deserialize, Serialize};
 
 pub const INITIAL_MAIL_BODY: &str =
-    "该游戏服务器纯公益无收费，如果收费携带邮件举报卖家\n群号：1084799028";
+    "该游戏服务器纯公益无收费，如果收费携带邮件举报卖家\n群号：609290224";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct InitialMailManifest {
@@ -123,6 +123,7 @@ mod tests {
         let first = build_manifest_from_entries(entries(), "sha", "initial-full-v1");
         let second = build_manifest_from_entries(entries(), "sha", "initial-full-v1");
         assert_eq!(first, second);
+        assert_eq!(INITIAL_MAIL_BODY, "该游戏服务器纯公益无收费，如果收费携带邮件举报卖家\n群号：609290224");
         assert!(first.mails.iter().all(|mail| {
             (1..=5).contains(&mail.entries.len())
                 && mail.entries.len() == mail.attachment.split('|').count()
