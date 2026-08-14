@@ -79,9 +79,13 @@ pub async fn on_read_mail(ctx: &mut ConnectionContext, req: ClientPacket) -> Res
     let incr_id = msg.incr_id.ok_or(AppError::InvalidRequest)? as i64;
     let (reply, outcome) = ctx.player()?.mail.claim_one(ctx.state.db, incr_id).await?;
 
-    send_claim_pushes(ctx, player_id, outcome).await?;
+    // Complete the request callback before pushing the authoritative currency snapshots.
+    // The client may rebuild its mail view when it receives the reply; sending the push
+    // afterwards prevents that refresh from restoring the pre-claim raindrop balances.
     ctx.send_reply(CmdId::ReadMailCmd, reply, 0, req.up_tag)
-        .await
+        .await?;
+    send_claim_pushes(ctx, player_id, outcome).await?;
+    Ok(())
 }
 
 pub async fn on_read_mail_batch(
@@ -92,9 +96,10 @@ pub async fn on_read_mail_batch(
     ReadMailBatchRequest::decode(&req.data[..])?;
     let (reply, outcome) = ctx.player()?.mail.claim_batch(ctx.state.db).await?;
 
-    send_claim_pushes(ctx, player_id, outcome).await?;
     ctx.send_reply(CmdId::ReadMailBatchCmd, reply, 0, req.up_tag)
-        .await
+        .await?;
+    send_claim_pushes(ctx, player_id, outcome).await?;
+    Ok(())
 }
 
 async fn send_claim_pushes(
@@ -117,3 +122,6 @@ async fn send_claim_pushes(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod test;
