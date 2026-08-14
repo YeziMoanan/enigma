@@ -2,7 +2,10 @@ use super::{
     GachaRules, SummonManager,
     commands::{is_newbie_pool, is_newbie_six_star, select_summon_cost, validate_summon_count},
 };
-use crate::reward::{self, RewardSet};
+use crate::{
+    inventory::InventoryManager,
+    reward::{self, RewardSet},
+};
 use database::{
     db::game::{guides, summon},
     models::game::{heros::UserHeroModel, items::UserItemModel},
@@ -124,7 +127,7 @@ async fn ordinary_summon_still_uses_the_pool_without_advancing_a_guide() {
 }
 
 #[tokio::test]
-async fn ten_pull_uses_one_regular_ticket_when_no_special_ticket_exists() {
+async fn ten_pull_fills_missing_regular_tickets_from_pure_raindrops() {
     let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
     let _ = config::init(&data_dir);
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -136,23 +139,123 @@ async fn ten_pull_uses_one_regular_ticket_when_no_special_ticket_exists() {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO items (user_id, item_id, quantity) VALUES (28, 140001, 4)")
+    sqlx::query("INSERT INTO items (user_id, item_id, quantity) VALUES (28, 140001, 2)")
         .execute(&pool)
         .await
         .unwrap();
     sqlx::query(
         "INSERT INTO currencies (user_id, currency_id, quantity)
-         VALUES (28, 2, 1080)",
+         VALUES (28, 1, 1440), (28, 2, 0)",
     )
     .execute(&pool)
     .await
     .unwrap();
 
-    let selected = select_summon_cost(&pool, 28, "1#140002#1|1#140001#10".into(), true)
+    InventoryManager::new(28)
+        .exchange_diamond(&pool, 1440, 1)
         .await
         .unwrap();
-    assert_eq!(selected.items, [(140001, 1)]);
-    assert!(selected.currencies.is_empty());
+    let selected = select_summon_cost(&pool, 28, "1#140002#1|1#140001#10".into())
+        .await
+        .unwrap();
+    assert_eq!(selected.items, [(140001, 2)]);
+    assert_eq!(selected.currencies, [(2, 1440)]);
+
+    let completion = SummonManager::new(28)
+        .summon(&pool, 2, None, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(completion.reply.summon_result.len(), 10);
+    let item_quantity: i32 =
+        sqlx::query_scalar("SELECT quantity FROM items WHERE user_id = 28 AND item_id = 140001")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let currencies: Vec<(i32, i32)> = sqlx::query_as(
+        "SELECT currency_id, quantity FROM currencies WHERE user_id = 28 ORDER BY currency_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let summon_count: i32 = sqlx::query_scalar(
+        "SELECT summon_count FROM user_summon_pools WHERE user_id = 28 AND pool_id = 2",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let history_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_summon_history WHERE user_id = 28")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let history_item_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_summon_history_items
+         WHERE history_id IN (SELECT id FROM user_summon_history WHERE user_id = 28)",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(item_quantity, 0);
+    assert_eq!(currencies, vec![(1, 0), (2, 0)]);
+    assert_eq!(summon_count, 10);
+    assert_eq!(history_count, 1);
+    assert_eq!(history_item_count, 10);
+}
+
+#[tokio::test]
+async fn ten_pull_cost_selection_rejects_insufficient_raindrops_without_mutation() {
+    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+    let _ = config::init(&data_dir);
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at)
+         VALUES (30, 'summon-insufficient', 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO items (user_id, item_id, quantity) VALUES (30, 140001, 2)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO currencies (user_id, currency_id, quantity)
+         VALUES (30, 1, 1439), (30, 2, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    InventoryManager::new(30)
+        .exchange_diamond(&pool, 1439, 1)
+        .await
+        .unwrap();
+    assert!(matches!(
+        SummonManager::new(30)
+            .summon(&pool, 2, None, None, 10)
+            .await,
+        Err(crate::error::AppError::InsufficientCurrency)
+    ));
+    let item_quantity: i32 =
+        sqlx::query_scalar("SELECT quantity FROM items WHERE user_id = 30 AND item_id = 140001")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let currencies: Vec<(i32, i32)> = sqlx::query_as(
+        "SELECT currency_id, quantity FROM currencies WHERE user_id = 30 ORDER BY currency_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let history_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_summon_history WHERE user_id = 30")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(item_quantity, 2);
+    assert_eq!(currencies, vec![(1, 0), (2, 1439)]);
+    assert_eq!(history_count, 0);
 }
 
 #[tokio::test]

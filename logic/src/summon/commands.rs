@@ -186,7 +186,7 @@ pub(super) async fn summon(
     } else {
         pool_cfg.cost1.clone()
     };
-    let cost = select_summon_cost(db, player_id, cost, count == 10).await?;
+    let cost = select_summon_cost(db, player_id, cost).await?;
 
     let sp_pool = summon::get_sp_pool_info(db, player_id, pool_id).await?;
     let expected_gacha = summon::get_gacha_state(db, player_id, pool_id).await?;
@@ -378,22 +378,8 @@ pub(super) async fn select_summon_cost(
     db: &SqlitePool,
     player_id: i64,
     cost: String,
-    is_ten_pull: bool,
 ) -> Result<reward::RewardSet, AppError> {
-    let cost_options = cost
-        .split('|')
-        .map(reward::parse)
-        .map(|mut option| {
-            if is_ten_pull {
-                for (_, amount) in &mut option.items {
-                    if *amount == 10 {
-                        *amount = 1;
-                    }
-                }
-            }
-            option
-        })
-        .collect::<Vec<_>>();
+    let cost_options = cost.split('|').map(reward::parse).collect::<Vec<_>>();
     for option in &cost_options {
         if can_pay(db, player_id, option).await? {
             return Ok(option.clone());
