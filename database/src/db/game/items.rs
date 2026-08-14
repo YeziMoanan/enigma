@@ -358,17 +358,31 @@ pub async fn add_power_items(
         } else {
             0
         };
-        for _ in 0..*quantity {
+        if expire_time == 0 {
             sqlx::query(
                 "INSERT INTO power_items (user_id, item_id, quantity, expire_time, created_at)
-                 VALUES (?, ?, 1, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?)",
             )
             .bind(user_id)
             .bind(item_id)
+            .bind(*quantity)
             .bind(expire_time)
             .bind(now)
             .execute(pool)
             .await?;
+        } else {
+            for _ in 0..*quantity {
+                sqlx::query(
+                    "INSERT INTO power_items (user_id, item_id, quantity, expire_time, created_at)
+                     VALUES (?, ?, 1, ?, ?)",
+                )
+                .bind(user_id)
+                .bind(item_id)
+                .bind(expire_time)
+                .bind(now)
+                .execute(pool)
+                .await?;
+            }
         }
         changed_item_ids.push(*item_id);
         tracing::info!(
@@ -486,17 +500,31 @@ pub async fn add_power_items_in_transaction(
                 1..=3 => (now / 1000) + 10 * 24 * 60 * 60,
                 _ => 0,
             });
-        for _ in 0..*amount {
+        if expire_time == 0 {
             sqlx::query(
                 "INSERT INTO power_items (user_id, item_id, quantity, expire_time, created_at)
-                 VALUES (?, ?, 1, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?)",
             )
             .bind(user_id)
             .bind(item_id)
+            .bind(*amount)
             .bind(expire_time)
             .bind(now)
             .execute(&mut **tx)
             .await?;
+        } else {
+            for _ in 0..*amount {
+                sqlx::query(
+                    "INSERT INTO power_items (user_id, item_id, quantity, expire_time, created_at)
+                     VALUES (?, ?, 1, ?, ?)",
+                )
+                .bind(user_id)
+                .bind(item_id)
+                .bind(expire_time)
+                .bind(now)
+                .execute(&mut **tx)
+                .await?;
+            }
         }
         if *amount > 0 {
             changed.push(*item_id);

@@ -2,7 +2,7 @@ use super::catalog::{CatalogEntry, MailCategory, build_initial_catalog};
 use serde::{Deserialize, Serialize};
 
 pub const INITIAL_MAIL_BODY: &str =
-    "该游戏服务器纯公益无收费，如果收费携带邮件举报卖家\n群号：609290224";
+    "该游戏服务器纯公益无收费，如果收费携带邮件举报卖家\n群号：1104082465";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct InitialMailManifest {
@@ -38,8 +38,6 @@ pub fn build_manifest_from_entries(
     let mut mails = Vec::new();
     for category in [
         MailCategory::Currency,
-        MailCategory::Material,
-        MailCategory::Consumable,
         MailCategory::Equipment,
         MailCategory::Psychube,
         MailCategory::Skin,
@@ -71,6 +69,23 @@ pub fn build_manifest_from_entries(
             });
         }
     }
+
+    let stamina_entry = CatalogEntry {
+        material_type: 10,
+        id: 21,
+        name: "大罐体力糖".to_string(),
+        category: MailCategory::Consumable,
+        quantity: 9_999,
+    };
+    let sequence = mails.len() as i32 + 1;
+    mails.push(ManifestMail {
+        sequence,
+        category: MailCategory::Consumable,
+        title: "体力-1".to_string(),
+        body: INITIAL_MAIL_BODY.to_string(),
+        attachment: "10#21#9999".to_string(),
+        entries: vec![stamina_entry],
+    });
     InitialMailManifest {
         campaign_id: campaign_id.into(),
         source_data_sha: source_data_sha.into(),
@@ -109,6 +124,13 @@ mod tests {
                 quantity: 9_999,
             })
             .chain(std::iter::once(CatalogEntry {
+                material_type: 10,
+                id: 20,
+                name: "expiring-consumable".to_string(),
+                category: MailCategory::Consumable,
+                quantity: 9_999,
+            }))
+            .chain(std::iter::once(CatalogEntry {
                 material_type: 4,
                 id: 3143,
                 name: "character".to_string(),
@@ -123,22 +145,37 @@ mod tests {
         let first = build_manifest_from_entries(entries(), "sha", "initial-full-v1");
         let second = build_manifest_from_entries(entries(), "sha", "initial-full-v1");
         assert_eq!(first, second);
-        assert_eq!(INITIAL_MAIL_BODY, "该游戏服务器纯公益无收费，如果收费携带邮件举报卖家\n群号：609290224");
+        assert_eq!(
+            INITIAL_MAIL_BODY,
+            "该游戏服务器纯公益无收费，如果收费携带邮件举报卖家\n群号：1104082465"
+        );
         assert!(first.mails.iter().all(|mail| {
             (1..=5).contains(&mail.entries.len())
                 && mail.entries.len() == mail.attachment.split('|').count()
                 && mail.title.contains('-')
                 && mail.body == INITIAL_MAIL_BODY
         }));
-        assert_eq!(
+        assert!(
             first
                 .mails
                 .iter()
-                .filter(|mail| mail.category == MailCategory::Material)
-                .map(|mail| mail.sequence)
-                .collect::<Vec<_>>(),
-            vec![1, 2, 3]
+                .all(|mail| mail.category != MailCategory::Material)
         );
+        assert_eq!(first.mails.len(), 2);
+        assert!(
+            first
+                .mails
+                .iter()
+                .any(|mail| mail.category == MailCategory::Character)
+        );
+        let stamina_mail = first
+            .mails
+            .iter()
+            .find(|mail| mail.category == MailCategory::Consumable)
+            .expect("permanent stamina mail");
+        assert_eq!(stamina_mail.title, "体力-1");
+        assert_eq!(stamina_mail.attachment, "10#21#9999");
+        assert_eq!(stamina_mail.entries[0].quantity, 9_999);
         assert_eq!(
             first
                 .mails

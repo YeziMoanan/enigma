@@ -227,17 +227,31 @@ impl ItemModel<PowerItem> for UserItemModel {
             0
         };
 
-        for _ in 0..amount {
+        if expire_time == 0 {
             sqlx::query(
                 "INSERT INTO power_items (user_id, item_id, quantity, expire_time, created_at)
-                     VALUES (?, ?, 1, ?, ?)",
+                     VALUES (?, ?, ?, ?, ?)",
             )
             .bind(self.user_id)
             .bind(item_id)
+            .bind(amount)
             .bind(expire_time)
             .bind(now)
             .execute(&self.pool)
             .await?;
+        } else {
+            for _ in 0..amount {
+                sqlx::query(
+                    "INSERT INTO power_items (user_id, item_id, quantity, expire_time, created_at)
+                         VALUES (?, ?, 1, ?, ?)",
+                )
+                .bind(self.user_id)
+                .bind(item_id)
+                .bind(expire_time)
+                .bind(now)
+                .execute(&self.pool)
+                .await?;
+            }
         }
 
         changed_item_ids.push(item_id);
