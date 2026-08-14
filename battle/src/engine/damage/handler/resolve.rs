@@ -248,12 +248,17 @@ fn resolve_row_damage_result(
             attack_replacement,
         },
     );
-    let career_restraint = restrains_target_either(
-        runtime.pool.catalog(),
-        request.attack_career.unwrap_or(source.career),
-        request.additional_attack_career,
-        target,
-    );
+    let career_restraint = buffs
+        .active_features(hp)
+        .iter()
+        .filter(|feature| feature.owner_uid == source_uid)
+        .any(crate::engine::skill::buff_act::forces_career_restraint)
+        || restrains_target_either(
+            runtime.pool.catalog(),
+            request.attack_career.unwrap_or(source.career),
+            request.additional_attack_career,
+            target,
+        );
     (amount > 0).then_some(ResolvedRowDamage {
         source_uid,
         target_uid,
