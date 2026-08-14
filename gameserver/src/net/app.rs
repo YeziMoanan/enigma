@@ -1,5 +1,5 @@
 use sqlx::SqlitePool;
-use std::sync::Arc;
+use std::{sync::Arc, time::{Duration, Instant}};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::net::outbound::CommandPacket;
@@ -10,6 +10,19 @@ pub struct AppState {
     pub tables: &'static config::GameDB,
     sessions: dashmap::DashMap<i64, Arc<SessionHandle>>,
     session_locks: dashmap::DashMap<i64, Arc<Mutex<()>>>,
+    rate_limits: dashmap::DashMap<i64, Arc<Mutex<RateLimitState>>>,
+}
+
+#[derive(Default)]
+struct RateLimitState {
+    last_purchase: Option<Instant>,
+    last_summon: Option<Instant>,
+}
+
+#[derive(Clone, Copy)]
+enum RateLimitKind {
+    Purchase,
+    Summon,
 }
 
 /// The sender and identity of one TCP connection.
@@ -25,6 +38,7 @@ impl AppState {
             tables,
             sessions: dashmap::DashMap::new(),
             session_locks: dashmap::DashMap::new(),
+            rate_limits: dashmap::DashMap::new(),
         }
     }
 
@@ -49,6 +63,31 @@ impl AppState {
             .clone()
             .lock_owned()
             .await
+    }
+
+    pub async fn allow_purchase(&self, player_id: i64) -> bool {
+        self.allow_rate_limited(player_id, Duration::from_secs(2), RateLimitKind::Purchase)
+            .await
+    }
+
+    pub async fn allow_summon(&self, player_id: i64) -> bool {
+        self.allow_rate_limited(player_id, Duration::from_secs(5), RateLimitKind::Summon)
+            .await
+    }
+
+    async fn allow_rate_limited(
+        &self,
+        player_id: i64,
+        interval: Duration,
+        kind: RateLimitKind,
+    ) -> bool {
+        let lock = self
+            .rate_limits
+            .entry(player_id)
+            .or_insert_with(|| Arc::new(Mutex::new(RateLimitState::default())))
+            .clone();
+        let mut state = lock.lock().await;
+        allow_slot(&mut state, Instant::now(), interval, kind)
     }
 
     pub fn is_current_session(
@@ -99,6 +138,67 @@ impl AppState {
             .collect::<Vec<_>>();
         players.sort();
         players
+    }
+}
+
+fn allow_slot(
+    state: &mut RateLimitState,
+    now: Instant,
+    interval: Duration,
+    kind: RateLimitKind,
+) -> bool {
+    let slot = match kind {
+        RateLimitKind::Purchase => &mut state.last_purchase,
+        RateLimitKind::Summon => &mut state.last_summon,
+    };
+    if slot
+        .as_ref()
+        .is_some_and(|last| now.duration_since(*last) < interval)
+    {
+        return false;
+    }
+    *slot = Some(now);
+    true
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::*;
+
+    #[test]
+    fn purchase_and_summon_limits_are_independent() {
+        let mut state = RateLimitState::default();
+        let now = Instant::now();
+        assert!(allow_slot(
+            &mut state,
+            now,
+            Duration::from_secs(2),
+            RateLimitKind::Purchase
+        ));
+        assert!(!allow_slot(
+            &mut state,
+            now + Duration::from_millis(1999),
+            Duration::from_secs(2),
+            RateLimitKind::Purchase
+        ));
+        assert!(allow_slot(
+            &mut state,
+            now + Duration::from_secs(2),
+            Duration::from_secs(2),
+            RateLimitKind::Purchase
+        ));
+        assert!(allow_slot(
+            &mut state,
+            now,
+            Duration::from_secs(5),
+            RateLimitKind::Summon
+        ));
+        assert!(!allow_slot(
+            &mut state,
+            now + Duration::from_millis(4999),
+            Duration::from_secs(5),
+            RateLimitKind::Summon
+        ));
     }
 }
 

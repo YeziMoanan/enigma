@@ -38,6 +38,9 @@ pub enum AppError {
     #[error("Invalid request")]
     InvalidRequest,
 
+    #[error("Request rate limited")]
+    RateLimited,
+
     #[error("Invalid battle checkpoint: {0}")]
     InvalidBattleCheckpoint(String),
 
@@ -110,6 +113,7 @@ impl AppError {
             ) => Reply(InvalidOperation),
             Self::Logic(logic::LogicError::InsufficientItems) => Reply(InsufficientItems),
             Self::Logic(logic::LogicError::InsufficientCurrency) => Reply(InsufficientResources),
+            Self::RateLimited => Reply(ServiceUnavailable),
             Self::Cmd(_) | Self::NotLoggedIn | Self::MissingPlayerId => {
                 Reconnect(ServiceUnavailable)
             }

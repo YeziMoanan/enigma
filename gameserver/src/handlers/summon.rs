@@ -70,6 +70,9 @@ pub async fn on_summon_query_token(
 
 pub async fn on_summon(ctx: &mut ConnectionContext, req: ClientPacket) -> Result<(), AppError> {
     let player_id = ctx.player()?.id;
+    if !ctx.state.allow_summon(player_id).await {
+        return Err(AppError::RateLimited);
+    }
     let msg = SummonRequest::decode(&req.data[..])?;
     let pool_id = msg.pool_id.ok_or(AppError::InvalidRequest)?;
     let count = msg.count.unwrap_or(1);

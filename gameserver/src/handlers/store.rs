@@ -28,6 +28,9 @@ pub async fn on_get_store_infos(
 
 pub async fn on_buy_goods(ctx: &mut ConnectionContext, req: ClientPacket) -> Result<(), AppError> {
     let player_id = ctx.player()?.id;
+    if !ctx.state.allow_purchase(player_id).await {
+        return Err(AppError::RateLimited);
+    }
     let msg = BuyGoodsRequest::decode(&req.data[..])?;
     let result = ctx
         .player()?
@@ -78,6 +81,9 @@ pub async fn on_buy_goods(ctx: &mut ConnectionContext, req: ClientPacket) -> Res
 
 pub async fn on_new_order(ctx: &mut ConnectionContext, req: ClientPacket) -> Result<(), AppError> {
     let player_id = ctx.player()?.id;
+    if !ctx.state.allow_purchase(player_id).await {
+        return Err(AppError::RateLimited);
+    }
     let msg = NewOrderRequest::decode(&req.data[..])?;
     let result = ctx
         .player()?
