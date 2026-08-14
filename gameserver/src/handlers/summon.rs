@@ -26,13 +26,13 @@ pub async fn on_get_summon_progress_rewards(
 ) -> Result<(), AppError> {
     let player_id = ctx.player()?.id;
     let msg = GetSummonProgressRewardsRequest::decode(&req.data[..])?;
-    let (reply, changed_items) = ctx
+    let (reply, changed, material_changes) = ctx
         .player()?
         .summon
         .progress_rewards(ctx.state.db, msg.pool_id.ok_or(AppError::InvalidRequest)?)
         .await?;
 
-    push::send_item_change_push(ctx, player_id, changed_items, Vec::new(), Vec::new()).await?;
+    push::send_applied_reward_pushes(ctx, player_id, changed, material_changes, None).await?;
     ctx.send_reply(CmdId::GetSummonProgressRewardsCmd, reply, 0, req.up_tag)
         .await
 }

@@ -838,3 +838,48 @@ pub async fn claim_progress_rewards(
 
     Ok((claimed, changed_items))
 }
+
+pub async fn summon_count_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
+    user_id: i64,
+    pool_id: i32,
+) -> Result<i32> {
+    Ok(sqlx::query_scalar(
+        "SELECT summon_count FROM user_summon_pools WHERE user_id = ? AND pool_id = ?",
+    )
+    .bind(user_id)
+    .bind(pool_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .unwrap_or_default())
+}
+
+pub async fn claim_progress_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
+    user_id: i64,
+    pool_id: i32,
+    progress: i32,
+) -> Result<bool> {
+    Ok(sqlx::query(
+        "INSERT OR IGNORE INTO user_sp_pool_reward_progress (user_id, pool_id, progress_id)
+         VALUES (?, ?, ?)",
+    )
+    .bind(user_id)
+    .bind(pool_id)
+    .bind(progress)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected()
+        > 0)
+}
+
+pub async fn claimed_progresses(pool: &SqlitePool, user_id: i64, pool_id: i32) -> Result<Vec<i32>> {
+    Ok(sqlx::query_scalar(
+        "SELECT progress_id FROM user_sp_pool_reward_progress
+         WHERE user_id = ? AND pool_id = ? ORDER BY progress_id",
+    )
+    .bind(user_id)
+    .bind(pool_id)
+    .fetch_all(pool)
+    .await?)
+}

@@ -48,38 +48,79 @@ pub(super) async fn progress_rewards(
     db: &SqlitePool,
     player_id: i64,
     pool_id: i32,
-) -> Result<(GetSummonProgressRewardsReply, Vec<u32>), AppError> {
+) -> Result<
+    (
+        GetSummonProgressRewardsReply,
+        reward::AppliedRewards,
+        Vec<(u32, u32, i32)>,
+    ),
+    AppError,
+> {
     let tables = config::configs::get();
     let pool = tables
         .summon_pool
         .iter()
-        .find(|pool| pool.id == pool_id && !pool.progress_rewards.is_empty())
+        .find(|pool| pool.id == pool_id)
         .ok_or(AppError::InvalidRequest)?;
-    let rewards = pool
-        .progress_rewards
-        .split('|')
-        .map(|entry| {
-            let (progress, hero_id) = entry.split_once('#').ok_or(AppError::InvalidRequest)?;
-            let progress = progress.parse().map_err(|_| AppError::InvalidRequest)?;
-            let hero_id = hero_id.parse().map_err(|_| AppError::InvalidRequest)?;
-            let item = tables
-                .character
-                .get(hero_id)
-                .map(|hero| reward::parse(&hero.duplicate_item))
-                .and_then(|reward| reward.items.into_iter().next())
-                .ok_or(AppError::InvalidRequest)?;
-            Ok((progress, item.0 as i32, item.1))
-        })
-        .collect::<Result<Vec<_>, AppError>>()?;
-    let (has_get_reward_progresses, changed_items) =
-        summon::claim_progress_rewards(db, player_id, pool_id, &rewards).await?;
+    let rewards = if !pool.progress_rewards.is_empty() {
+        pool.progress_rewards
+            .split('|')
+            .map(|entry| {
+                let (progress, hero_id) = entry.split_once('#').ok_or(AppError::InvalidRequest)?;
+                let progress = progress.parse().map_err(|_| AppError::InvalidRequest)?;
+                let hero_id = hero_id.parse().map_err(|_| AppError::InvalidRequest)?;
+                let rewards = tables
+                    .character
+                    .get(hero_id)
+                    .map(|hero| reward::parse(&hero.duplicate_item))
+                    .filter(|rewards| !rewards.is_empty())
+                    .ok_or(AppError::InvalidRequest)?;
+                Ok((progress, rewards))
+            })
+            .collect::<Result<Vec<_>, AppError>>()?
+    } else {
+        let group_id = pool
+            .progress_choose_group_id
+            .parse::<i32>()
+            .map_err(|_| AppError::InvalidRequest)?;
+        tables
+            .summon_progress_choose
+            .by_group(group_id)
+            .map(|row| {
+                let rewards = reward::parse(&row.choose_rewards);
+                (!rewards.is_empty())
+                    .then_some((row.progress, rewards))
+                    .ok_or(AppError::InvalidRequest)
+            })
+            .collect::<Result<Vec<_>, AppError>>()?
+    };
+    if rewards.is_empty() {
+        return Err(AppError::InvalidRequest);
+    }
+
+    let mut tx = db.begin().await?;
+    let summon_count = summon::summon_count_in_transaction(&mut tx, player_id, pool_id).await?;
+    let mut changed = reward::AppliedRewards::default();
+    let mut material_changes = Vec::new();
+    for (progress, rewards) in rewards {
+        if progress > summon_count
+            || !summon::claim_progress_in_transaction(&mut tx, player_id, pool_id, progress).await?
+        {
+            continue;
+        }
+        material_changes.extend(rewards.material_changes());
+        changed.extend(reward::apply_in_transaction(&mut tx, db, player_id, rewards).await?);
+    }
+    tx.commit().await?;
+    let has_get_reward_progresses = summon::claimed_progresses(db, player_id, pool_id).await?;
 
     Ok((
         GetSummonProgressRewardsReply {
             pool_id: Some(pool_id),
             has_get_reward_progresses,
         },
-        changed_items.into_iter().map(|id| id as u32).collect(),
+        changed,
+        material_changes,
     ))
 }
 

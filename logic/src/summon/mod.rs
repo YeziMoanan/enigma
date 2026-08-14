@@ -42,7 +42,14 @@ impl SummonManager {
         &self,
         db: &SqlitePool,
         pool_id: i32,
-    ) -> Result<(GetSummonProgressRewardsReply, Vec<u32>), AppError> {
+    ) -> Result<
+        (
+            GetSummonProgressRewardsReply,
+            reward::AppliedRewards,
+            Vec<(u32, u32, i32)>,
+        ),
+        AppError,
+    > {
         commands::progress_rewards(db, self.player_id, pool_id).await
     }
 

@@ -373,7 +373,8 @@ async fn recommend_popup_count_is_persisted_per_pool_order() {
 
 #[tokio::test]
 async fn summon_progress_claims_each_configured_portrayal_once() {
-    let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
+    let data_dir = std::env::var("ENIGMA_BATTLE_DATA_DIR")
+        .unwrap_or_else(|_| format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR")));
     let _ = config::init(&data_dir);
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
     database::run_migrations(&pool).await.unwrap();
@@ -393,18 +394,69 @@ async fn summon_progress_claims_each_configured_portrayal_once() {
     .unwrap();
 
     let manager = SummonManager::new(23);
-    let (first, changed) = manager.progress_rewards(&pool, 305111).await.unwrap();
-    let (_, repeated) = manager.progress_rewards(&pool, 305111).await.unwrap();
+    let (first, changed, _) = manager.progress_rewards(&pool, 305111).await.unwrap();
+    let (_, repeated, _) = manager.progress_rewards(&pool, 305111).await.unwrap();
 
     assert_eq!(first.has_get_reward_progresses, vec![100, 160]);
-    assert_eq!(changed, vec![133123, 133123]);
-    assert!(repeated.is_empty());
+    assert_eq!(changed.item_ids, vec![133123, 133123]);
+    assert!(repeated.item_ids.is_empty());
     let quantity: i32 =
         sqlx::query_scalar("SELECT quantity FROM items WHERE user_id = 23 AND item_id = 133123")
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(quantity, 2);
+}
+
+#[tokio::test]
+async fn summon_choose_progress_grants_the_configured_character_and_box_once() {
+    let data_dir = std::env::var("ENIGMA_BATTLE_DATA_DIR")
+        .unwrap_or_else(|_| format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR")));
+    let _ = config::init(&data_dir);
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    database::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, username, created_at, updated_at)
+         VALUES (25, 'choose-progress', 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO user_summon_pools
+             (user_id, pool_id, summon_count, created_at, updated_at)
+         VALUES (25, 385111, 100, 0, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let manager = SummonManager::new(25);
+    let (first, changed, material_changes) = manager.progress_rewards(&pool, 385111).await.unwrap();
+    let (_, repeated, _) = manager.progress_rewards(&pool, 385111).await.unwrap();
+
+    assert_eq!(first.has_get_reward_progresses, vec![100]);
+    assert_eq!(changed.hero_ids, vec![3149]);
+    assert_eq!(changed.item_ids, vec![823852]);
+    assert!(
+        material_changes
+            .iter()
+            .any(|(_, material_id, quantity)| *material_id == 823852 && *quantity == 1)
+    );
+    assert!(repeated.hero_ids.is_empty());
+    assert!(repeated.item_ids.is_empty());
+    let hero_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM heroes WHERE user_id = 25 AND hero_id = 3149")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let box_quantity: i32 =
+        sqlx::query_scalar("SELECT quantity FROM items WHERE user_id = 25 AND item_id = 823852")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(hero_count, 1);
+    assert_eq!(box_quantity, 1);
 }
 
 #[tokio::test]

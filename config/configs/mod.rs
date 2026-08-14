@@ -333,6 +333,7 @@ pub mod store_recommend;
 pub mod summon;
 pub mod summon_pool;
 pub mod summon_pool_package;
+pub mod summon_progress_choose;
 pub mod summoned;
 pub mod survival_hardness_mod;
 pub mod survival_reward_shop;
@@ -732,6 +733,7 @@ pub struct GameDB {
     pub summon: summon::SummonTable,
     pub summon_pool: summon_pool::SummonPoolTable,
     pub summon_pool_package: summon_pool_package::SummonPoolPackageTable,
+    pub summon_progress_choose: summon_progress_choose::SummonProgressChooseTable,
     pub summoned: summoned::SummonedTable,
     pub survival_hardness_mod: survival_hardness_mod::SurvivalHardnessModTable,
     pub survival_reward_shop: survival_reward_shop::SurvivalRewardShopTable,
@@ -1797,6 +1799,9 @@ impl GameDB {
         let summon_pool_package = summon_pool_package::SummonPoolPackageTable::load(
             &format!("{}/summon_pool_package.json", data_dir)
         ).map_err(|e| anyhow::anyhow!("Failed to load summon_pool_package.json: {}", e))?;
+        let summon_progress_choose = summon_progress_choose::SummonProgressChooseTable::load(
+            &format!("{}/summon_progress_choose.json", data_dir)
+        ).map_err(|e| anyhow::anyhow!("Failed to load summon_progress_choose.json: {}", e))?;
         let summoned = summoned::SummonedTable::load(
             &format!("{}/summoned.json", data_dir)
         ).map_err(|e| anyhow::anyhow!("Failed to load summoned.json: {}", e))?;
@@ -2318,6 +2323,7 @@ impl GameDB {
             summon,
             summon_pool,
             summon_pool_package,
+            summon_progress_choose,
             summoned,
             survival_hardness_mod,
             survival_reward_shop,

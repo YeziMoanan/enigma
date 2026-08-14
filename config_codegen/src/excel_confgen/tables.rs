@@ -43,6 +43,7 @@ pub const FILTER_TABLES: &[&str] = &[
     "summoned",
     "summon_pool",
     "summon_pool_package",
+    "summon_progress_choose",
     "survival_hardness_mod",
     "survival_reward_shop",
     "survival_role",
