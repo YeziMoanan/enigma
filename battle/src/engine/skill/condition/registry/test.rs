@@ -916,6 +916,31 @@ fn magic_circle_round_start_key_keeps_its_setup_lane() {
 }
 
 #[test]
+fn magic_circle_after_hit_aliases_keep_their_exact_routes() {
+    for (opcode, type_name, expected) in [
+        (
+            542402,
+            "InMagicCircleId",
+            ParsedConditionKind::InMagicCircleId(vec![30001]),
+        ),
+        (
+            544402,
+            "NotInMagicCircleId",
+            ParsedConditionKind::NotInMagicCircleId(vec![30001]),
+        ),
+    ] {
+        assert_eq!(parse(opcode, type_name, &["30001".into()]), Some(expected));
+        assert_eq!(
+            find_key(opcode, type_name).map(|definition| definition.role),
+            Some(ConditionRole::Trigger {
+                event: EventKind::SkillAction,
+                phase: Some(SkillPhase::AfterHit),
+            })
+        );
+    }
+}
+
+#[test]
 fn exact_dead_alias_subscribes_to_entity_death() {
     assert_eq!(
         parse(812, "Dead", &[]),

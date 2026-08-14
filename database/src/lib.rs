@@ -1,5 +1,5 @@
 use sqlx::{
-    Connection, Row, SqliteConnection, migrate,
+    Acquire, Row, SqliteConnection, migrate,
     migrate::MigrateError,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
@@ -14,6 +14,32 @@ pub mod models;
 
 pub use config::DatabaseSettings;
 pub use sqlx::{Error, SqlitePool, query, query_as};
+
+/// Starts a write transaction with a bounded retry for SQLite's transient BUSY state.
+/// The closure/body is still executed exactly once, after the transaction is acquired.
+pub async fn begin_immediate_with_retry(
+    pool: &SqlitePool,
+) -> sqlx::Result<sqlx::Transaction<'_, sqlx::Sqlite>> {
+    const MAX_RETRIES: usize = 5;
+    for attempt in 0..=MAX_RETRIES {
+        match pool.begin_with("BEGIN IMMEDIATE").await {
+            Ok(transaction) => return Ok(transaction),
+            Err(error) if attempt < MAX_RETRIES && is_sqlite_busy(&error) => {
+                tokio::time::sleep(Duration::from_millis(25 << attempt)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("retry loop returns on success or final error")
+}
+
+fn is_sqlite_busy(error: &sqlx::Error) -> bool {
+    let sqlx::Error::Database(database_error) = error else {
+        return false;
+    };
+    database_error.code().is_some_and(|code| code == "5")
+        || database_error.message().contains("database is locked")
+}
 
 pub async fn connect_to(settings: &DatabaseSettings) -> sqlx::Result<SqlitePool> {
     ensure_database_exists(&settings.db_name)?;
@@ -455,6 +481,39 @@ mod tests {
         pool.close().await;
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn begin_immediate_with_retry_starts_a_single_write_transaction() {
+        let name = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("enigma-db-begin-retry-{name}"));
+        let pool = connect_to(&DatabaseSettings {
+            db_name: dir.join("sonetto.db").to_string_lossy().to_string(),
+        })
+        .await
+        .unwrap();
+        sqlx::query("CREATE TABLE retry_test (id INTEGER PRIMARY KEY)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut transaction = begin_immediate_with_retry(&pool).await.unwrap();
+        sqlx::query("INSERT INTO retry_test (id) VALUES (1)")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM retry_test")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

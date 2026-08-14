@@ -52,7 +52,7 @@ pub async fn settle_active(
     record: &DungeonRecordStatus,
 ) -> Result<DungeonSettlement, AppError> {
     let fight_id = active.fight_id.ok_or(AppError::InvalidRequest)?;
-    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = database::begin_immediate_with_retry(db).await?;
     let mut settlement = settle_completion_in_transaction(
         &mut tx,
         player_id,

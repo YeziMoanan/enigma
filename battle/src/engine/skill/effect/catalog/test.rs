@@ -172,6 +172,25 @@ fn anjo_negative_status_rate_condition_compiles_as_an_active_modifier() {
 }
 
 #[test]
+fn anjo_bound_star_ally_follow_up_keeps_two_per_round_limit() {
+    init_config();
+    let catalog = SkillEffectCatalog::from_game_db(config::configs::get());
+    let effect = catalog.get(31000161).unwrap();
+
+    let follow_up = effect
+        .slots
+        .iter()
+        .find(|slot| {
+            slot.behavior.spec.key.opcode == 50008
+                && slot.behavior.args == vec![31000171]
+        })
+        .unwrap();
+    assert_eq!(follow_up.round_limit, 2);
+    assert_eq!(follow_up.conditions[0].opcode, 656212);
+    assert_eq!(follow_up.conditions[1].opcode, 502212);
+}
+
+#[test]
 fn kaalaa_baunaa_planet_removal_compiles_through_its_exact_behavior() {
     init_config();
     let catalog = SkillEffectCatalog::from_roots(config::configs::get(), [307001333], []);
