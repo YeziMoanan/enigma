@@ -267,7 +267,29 @@ pub struct CallbackQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccountLoginMailReq, AccountTokenRefreshReq};
+    use super::{
+        AccountAutoLoginReq, AccountBindListReq, AccountLoginMailReq, AccountTokenRefreshReq,
+    };
+
+    fn android_request_base() -> serde_json::Value {
+        serde_json::json!({
+            "deviceInfo": {
+                "networkName": "wifi", "deviceId": "android-device", "cnadid": "",
+                "oaId": "", "androidId": "android-id", "imsi": "", "imei": "",
+                "uuid": "android-uuid", "deviceName": "MuMu", "deviceManufacturer": "MuMu",
+                "osType": 0, "osVersion": "12", "apiLevel": "32", "language": "zh-CN",
+                "displayWidth": "1600", "displayHeight": "900", "hardware": "x86_64",
+                "buildName": "android", "distinctId": "", "anonymousId": ""
+            },
+            "appPackageInfo": {
+                "appPackageName": "com.bluepoch.m.en.reverse1999", "appVersion": 69,
+                "appVersionName": "3.6.5", "gameId": 60001, "gameCode": "reverse1999",
+                "gameName": "Reverse: 1999", "channelId": "200", "subChannelId": "200",
+                "appInstallTime": "0", "appUpdateTime": "0", "appSignature": "",
+                "sdkVersion": "", "channelVersion": "", "dataAppId": ""
+            }
+        })
+    }
 
     #[test]
     fn token_refresh_accepts_numeric_or_string_user_id() {
@@ -302,29 +324,36 @@ mod tests {
 
     #[test]
     fn login_mail_defaults_optional_android_package_fields() {
-        let request: AccountLoginMailReq = serde_json::from_value(serde_json::json!({
-            "deviceInfo": {
-                "networkName": "wifi", "deviceId": "android-device", "cnadid": "",
-                "oaId": "", "androidId": "android-id", "imsi": "", "imei": "",
-                "uuid": "android-uuid", "deviceName": "MuMu", "deviceManufacturer": "MuMu",
-                "osType": 0, "osVersion": "12", "apiLevel": "32", "language": "zh-CN",
-                "displayWidth": "1600", "displayHeight": "900", "hardware": "x86_64",
-                "buildName": "android", "distinctId": "", "anonymousId": ""
-            },
-            "appPackageInfo": {
-                "appPackageName": "com.bluepoch.m.en.reverse1999", "appVersion": 69,
-                "appVersionName": "3.6.5", "gameId": 60001, "gameCode": "reverse1999",
-                "gameName": "Reverse: 1999", "channelId": "200", "subChannelId": "200",
-                "appInstallTime": "0", "appUpdateTime": "0", "appSignature": "",
-                "sdkVersion": "", "channelVersion": "", "dataAppId": ""
-            },
-            "reactivate": false,
-            "account": "2513675036",
-            "pwd": "password-hash"
-        }))
-        .unwrap();
+        let mut value = android_request_base();
+        value["reactivate"] = serde_json::json!(false);
+        value["account"] = serde_json::json!("2513675036");
+        value["pwd"] = serde_json::json!("password-hash");
+        let request: AccountLoginMailReq = serde_json::from_value(value).unwrap();
 
         assert_eq!(request.app_package_info.ad_fid, "");
         assert_eq!(request.app_package_info.gclid, "");
+    }
+
+    #[test]
+    fn android_bind_list_defaults_missing_reactivate_to_false() {
+        let mut value = android_request_base();
+        value["token"] = serde_json::json!("access-token");
+        value["userId"] = serde_json::json!(42);
+
+        let request: AccountBindListReq = serde_json::from_value(value).unwrap();
+
+        assert!(!request.reactivate);
+    }
+
+    #[test]
+    fn android_auto_login_defaults_missing_reactivate_to_false() {
+        let mut value = android_request_base();
+        value["token"] = serde_json::json!("access-token");
+        value["userId"] = serde_json::json!(42);
+        value["accountType"] = serde_json::json!(10);
+
+        let request: AccountAutoLoginReq = serde_json::from_value(value).unwrap();
+
+        assert!(!request.reactivate);
     }
 }

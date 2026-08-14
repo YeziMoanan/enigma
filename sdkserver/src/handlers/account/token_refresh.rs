@@ -1,6 +1,6 @@
 use super::helpers::get_user_by_id;
 use crate::AppState;
-use crate::access_control::{authorize, normalize_qq, trusted_client_ip};
+use crate::access_control::{authorize, qq_identity_from_stored_account, trusted_client_ip};
 use crate::models::request::AccountTokenRefreshReq;
 use crate::models::response::{AccountTokenRefreshRsp, AccountTokenRefreshRspData};
 use axum::{
@@ -24,7 +24,7 @@ pub async fn post(
         Ok(user) if user.refresh_token == req.refresh_token => user,
         Ok(_) | Err(_) => return Json(error_response()),
     };
-    let qq = match normalize_qq(&user.email) {
+    let qq = match qq_identity_from_stored_account(&user.email) {
         Ok(qq) => qq,
         Err(error) => {
             tracing::warn!(user_id = req.user_id, %error, "Token refresh rejected for non-QQ account");

@@ -55,6 +55,17 @@ pub fn normalize_qq(value: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
+pub fn qq_identity_from_stored_account(value: &str) -> Result<String> {
+    if let Ok(qq) = normalize_qq(value) {
+        return Ok(qq);
+    }
+    let value = value.trim().to_ascii_lowercase();
+    let Some(qq) = value.strip_suffix("@qq.com") else {
+        bail!("stored account has no QQ identity");
+    };
+    normalize_qq(qq)
+}
+
 pub fn trusted_client_ip(headers: &HeaderMap, peer: SocketAddr) -> Result<IpAddr> {
     if peer.ip().is_loopback() {
         if let Some(value) = headers.get("x-real-ip") {
@@ -147,7 +158,7 @@ fn request_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_qq, trusted_client_ip};
+    use super::{normalize_qq, qq_identity_from_stored_account, trusted_client_ip};
     use axum::http::{HeaderMap, HeaderValue};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -163,6 +174,15 @@ mod tests {
         ] {
             assert!(normalize_qq(invalid).is_err(), "accepted {invalid}");
         }
+    }
+
+    #[test]
+    fn derives_qq_only_from_legacy_stored_qq_email() {
+        assert_eq!(
+            qq_identity_from_stored_account(" 12345678@QQ.COM ").unwrap(),
+            "12345678"
+        );
+        assert!(qq_identity_from_stored_account("player@example.com").is_err());
     }
 
     #[test]

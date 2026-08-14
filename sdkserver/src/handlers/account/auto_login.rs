@@ -1,6 +1,6 @@
 use super::helpers::*;
 use crate::AppState;
-use crate::access_control::{authorize, normalize_qq, trusted_client_ip};
+use crate::access_control::{authorize, qq_identity_from_stored_account, trusted_client_ip};
 use crate::models::request::AccountAutoLoginReq;
 use crate::models::response::AccountLoginRsp;
 use axum::{
@@ -28,7 +28,7 @@ pub async fn post(
         }
     };
 
-    let qq = match normalize_qq(&user.email) {
+    let qq = match qq_identity_from_stored_account(&user.email) {
         Ok(qq) => qq,
         Err(error) => {
             tracing::warn!("Auto-login rejected for non-QQ account: {error}");

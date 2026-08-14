@@ -76,6 +76,23 @@ pub async fn get_user_by_email(pool: &SqlitePool, email: &str) -> Result<Option<
     }
 }
 
+pub async fn get_user_by_login_account(
+    pool: &SqlitePool,
+    account: &str,
+) -> Result<Option<UserAccount>> {
+    let account = normalize_email(account);
+    if let Some(user) = get_user_by_email(pool, &account).await? {
+        return Ok(Some(user));
+    }
+    if !(5..=12).contains(&account.len())
+        || account.starts_with('0')
+        || !account.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Ok(None);
+    }
+    get_user_by_email(pool, &format!("{account}@qq.com")).await
+}
+
 /// Get user account by ID
 pub async fn get_user_by_id(pool: &SqlitePool, user_id: i64) -> Result<Option<UserAccount>> {
     let row = sqlx::query(
@@ -116,6 +133,25 @@ pub async fn verify_user_password(pool: &SqlitePool, email: &str, password: &str
     let email = normalize_email(email);
     let row = sqlx::query("SELECT password_hash FROM users WHERE LOWER(TRIM(email)) = ?1")
         .bind(&email)
+        .fetch_optional(pool)
+        .await?;
+
+    match row {
+        Some(r) => {
+            let password_hash: String = r.try_get("password_hash")?;
+            Ok(verify_password(password, &password_hash)?)
+        }
+        None => Ok(false),
+    }
+}
+
+pub async fn verify_user_password_by_id(
+    pool: &SqlitePool,
+    user_id: i64,
+    password: &str,
+) -> Result<bool> {
+    let row = sqlx::query("SELECT password_hash FROM users WHERE id = ?1")
+        .bind(user_id)
         .fetch_optional(pool)
         .await?;
 
@@ -416,13 +452,13 @@ pub async fn handle_user_login(
     now: i64,
 ) -> Result<UserAccount> {
     let email = access::normalize_account(email).map_err(anyhow::Error::new)?;
-    match get_user_by_email(pool, &email).await? {
+    match get_user_by_login_account(pool, &email).await? {
         Some(user) => {
             access::require_login_access(pool, user.id, &email)
                 .await
                 .map_err(anyhow::Error::new)?;
             validate_password(password).map_err(anyhow::Error::new)?;
-            if !verify_user_password(pool, &email, password).await? {
+            if !verify_user_password_by_id(pool, user.id, password).await? {
                 return Err(anyhow::Error::new(
                     access::AccountAccessError::InvalidPassword,
                 ));
@@ -435,14 +471,14 @@ pub async fn handle_user_login(
         None => match create_user(pool, &email, password, &token_info, now).await {
             Ok(user) => Ok(user),
             Err(create_error) => {
-                let Some(user) = get_user_by_email(pool, &email).await? else {
+                let Some(user) = get_user_by_login_account(pool, &email).await? else {
                     return Err(create_error);
                 };
                 access::require_login_access(pool, user.id, &email)
                     .await
                     .map_err(anyhow::Error::new)?;
                 validate_password(password).map_err(anyhow::Error::new)?;
-                if !verify_user_password(pool, &email, password).await? {
+                if !verify_user_password_by_id(pool, user.id, password).await? {
                     return Err(anyhow::Error::new(
                         access::AccountAccessError::InvalidPassword,
                     ));
@@ -547,7 +583,10 @@ pub async fn update_user_level(pool: &SqlitePool, user_id: i64, level: i32) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{TokenInfo, handle_user_login, normalize_email, refresh_user_login_token};
+    use super::{
+        TokenInfo, get_user_by_login_account, handle_user_login, normalize_email,
+        refresh_user_login_token,
+    };
     use crate::db::game::mail_campaign;
     use crate::db::user::access::AccountAccessError;
     use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
@@ -669,6 +708,62 @@ mod tests {
             normalize_email("  Player@Example.COM "),
             "player@example.com"
         );
+    }
+
+    #[tokio::test]
+    async fn numeric_qq_login_reuses_the_legacy_qq_email_user() {
+        let (pool, database_path) = account_test_pool("legacy-qq-email").await;
+        let legacy = handle_user_login(&pool, "12345678@qq.com", "password", token(), 10)
+            .await
+            .unwrap();
+        let current = handle_user_login(
+            &pool,
+            "12345678",
+            "password",
+            TokenInfo {
+                token: "rotated".to_string(),
+                refresh_token: "rotated-refresh".to_string(),
+                expires_at: 200,
+            },
+            20,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(current.id, legacy.id);
+        assert_eq!(current.email, "12345678@qq.com");
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(user_count, 1);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[tokio::test]
+    async fn exact_numeric_qq_takes_precedence_over_a_legacy_email_collision() {
+        let (pool, database_path) = account_test_pool("qq-alias-collision").await;
+        sqlx::query(
+            "INSERT INTO users (id, username, email, created_at, updated_at)
+             VALUES
+                (7, 'legacy', '12345679@qq.com', 1, 1),
+                (8, 'numeric', '12345679', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let user = get_user_by_login_account(&pool, "12345679")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(user.id, 8);
+        assert_eq!(user.email, "12345679");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
     }
 
     #[tokio::test]

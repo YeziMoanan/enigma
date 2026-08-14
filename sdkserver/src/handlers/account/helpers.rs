@@ -188,6 +188,8 @@ pub fn build_login_response(
     new_refresh_token: String,
 ) -> AccountLoginRsp {
     let expires_in = calculate_expires_in(user.token_expires_at);
+    let account = crate::access_control::qq_identity_from_stored_account(&user.email)
+        .unwrap_or_else(|_| mask_email(&user.email));
 
     AccountLoginRsp {
         code: 200,
@@ -199,7 +201,7 @@ pub fn build_login_response(
             user_id: user.user_id as u64,
             account_type: AccountType::Email,
             registration_account_type: 1,
-            account: mask_email(&user.email),
+            account,
             real_name_info: RealNameInfo {
                 need_real_name: !user.real_name_status,
                 real_name_status: user.real_name_status,

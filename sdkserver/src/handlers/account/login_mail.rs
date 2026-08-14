@@ -10,7 +10,9 @@ use axum::{
 use common::time::ServerTime;
 use database::db::user::{
     access,
-    account::{TokenInfo, get_user_by_email, handle_user_login, verify_user_password},
+    account::{
+        TokenInfo, get_user_by_login_account, handle_user_login, verify_user_password_by_id,
+    },
 };
 use std::net::SocketAddr;
 
@@ -55,7 +57,7 @@ pub async fn post(
         expires_at: token_expires_at,
     };
 
-    let existing = match get_user_by_email(&state.db, &qq).await {
+    let existing = match get_user_by_login_account(&state.db, &qq).await {
         Ok(user) => user,
         Err(error) => {
             tracing::error!("Failed to read QQ account before login: {error}");
@@ -67,7 +69,7 @@ pub async fn post(
             .await
             .is_err()
             || !matches!(
-                verify_user_password(&state.db, &qq, &req.pwd).await,
+                verify_user_password_by_id(&state.db, user.id, &req.pwd).await,
                 Ok(true)
             )
         {
@@ -107,7 +109,7 @@ pub async fn post(
             user_id: user.id as u64, // Use actual user ID from database
             account_type: AccountType::Email,
             registration_account_type: 1,
-            account: user.email.clone(),
+            account: qq,
             real_name_info: RealNameInfo {
                 need_real_name: user.need_real_name,
                 real_name_status: user.real_name_status,
