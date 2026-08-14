@@ -1,8 +1,9 @@
 use crate::AppState;
 use crate::models::request::PaymentListReq;
-use crate::models::response::{PaymentListRsp, PaymentListRspData};
+use crate::models::response::{PaymentListRsp, PaymentListRspData, PaymentMethod};
 use axum::extract::State;
 use axum::response::Json;
+use common::{dns, http_port};
 
 pub async fn post(
     State(_): State<AppState>,
@@ -14,12 +15,26 @@ pub async fn post(
         code: 200,
         msg: "success".to_string(),
         data: PaymentListRspData {
-            payments: Vec::new(),
-            web_pre_pay_url: String::new(),
+            payments: vec![PaymentMethod {
+                payment_method_type: "ALL".to_string(),
+                payment_method: "1012".to_string(),
+                payment_method_name: "Sonetto-Rs".to_string(),
+                icon_url: "https://gamecms-res-hw.sl916.com/payment-method/worldpay.png"
+                    .to_string(),
+                pay_channel_id: 9,
+                other_payment_methods: None,
+                ext_payment_method_params: None,
+            }],
+            web_pre_pay_url: format!(
+                "http://{}:{}/sdk-pc-pay/pcpay.html?timestamp={}",
+                dns(),
+                http_port(),
+                chrono::Utc::now().timestamp_millis()
+            ),
         },
     };
 
-    tracing::info!("Payments are disabled");
+    tracing::info!("Returning {} payment methods", response.data.payments.len());
 
     Json(response)
 }
@@ -61,7 +76,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn payment_list_disables_all_payment_methods_and_pages() {
+    async fn payment_list_returns_local_payment_method_and_public_page() {
         init_test_config();
         let request = serde_json::from_value(serde_json::json!({
             "deviceInfo": {
@@ -99,7 +114,17 @@ mod tests {
         .await
         .0;
 
-        assert!(response.data.payments.is_empty());
-        assert!(response.data.web_pre_pay_url.is_empty());
+        assert_eq!(response.code, 200);
+        assert_eq!(response.msg, "success");
+        assert_eq!(response.data.payments.len(), 1);
+        assert_eq!(response.data.payments[0].payment_method, "1012");
+        assert_eq!(response.data.payments[0].payment_method_name, "Sonetto-Rs");
+        assert!(
+            response
+                .data
+                .web_pre_pay_url
+                .starts_with("http://reverse1999.yezimoan.xyz:32019/sdk-pc-pay/pcpay.html?")
+        );
+        assert!(!response.data.web_pre_pay_url.contains("0.0.0.0"));
     }
 }

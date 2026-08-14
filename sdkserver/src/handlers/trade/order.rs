@@ -14,17 +14,30 @@ pub async fn post(
         req.game_order_id
     );
 
+    let order_id = format!(
+        "{}{}",
+        chrono::Utc::now().timestamp(),
+        rand::random::<u32>() % 1000
+    );
+
     let response = OrderRsp {
-        code: 403,
-        msg: "payments disabled".to_string(),
+        code: 200,
+        msg: "success".to_string(),
         data: OrderRspData {
-            order_id: String::new(),
+            order_id,
             pay_notify_url: String::new(),
-            ext_params: String::new(),
+            ext_params: format!(
+                r#"{{"sign":"{}","timestamp":"{}"}}"#,
+                "54ba11fed654b46039956329afc44391",
+                chrono::Utc::now().timestamp_millis()
+            ),
         },
     };
 
-    tracing::info!("Rejecting order because payments are disabled");
+    tracing::info!(
+        "Returning order response: order_id={}",
+        response.data.order_id
+    );
 
     Json(response)
 }
@@ -38,7 +51,7 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     #[tokio::test]
-    async fn order_creation_is_rejected_before_the_payment_flow_starts() {
+    async fn order_creation_returns_local_success_contract() {
         let request = serde_json::from_value(serde_json::json!({
             "deviceInfo": {
                 "networkName": "test", "deviceId": "test", "cnadid": "", "oaId": "",
@@ -81,10 +94,19 @@ mod tests {
         .await
         .0;
 
-        assert_eq!(response.code, 403);
-        assert_eq!(response.msg, "payments disabled");
-        assert!(response.data.order_id.is_empty());
+        assert_eq!(response.code, 200);
+        assert_eq!(response.msg, "success");
+        assert!(!response.data.order_id.is_empty());
+        assert!(response.data.order_id.chars().all(|ch| ch.is_ascii_digit()));
         assert!(response.data.pay_notify_url.is_empty());
-        assert!(response.data.ext_params.is_empty());
+        let ext_params: serde_json::Value =
+            serde_json::from_str(&response.data.ext_params).unwrap();
+        assert_eq!(
+            ext_params["sign"],
+            serde_json::json!("54ba11fed654b46039956329afc44391")
+        );
+        assert!(ext_params["timestamp"].as_str().is_some_and(|value| {
+            !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit())
+        }));
     }
 }
