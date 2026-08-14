@@ -198,7 +198,7 @@ fn entry(
 /// Keep the protocol/data IDs unchanged and translate only the presentation
 /// name; unknown keys receive a stable Chinese fallback instead of leaking the
 /// raw `language_xxx` token.
-fn localized_name(db: &config::GameDB, raw: &str, material_type: i32, id: i32) -> String {
+fn localized_name(_db: &config::GameDB, raw: &str, material_type: i32, id: i32) -> String {
     if !raw.starts_with("language_") {
         return raw.trim().to_string();
     }
@@ -244,8 +244,9 @@ fn localized_name(db: &config::GameDB, raw: &str, material_type: i32, id: i32) -
     // The public Chinese admin must not leak the English localization table.
     // Unknown entries keep their stable protocol identity and use a Chinese
     // fallback until a reviewed localized mapping is added.
-    let _ = db.language_en.get(raw);
-    format!("物品 {material_type}:{id}")
+    known
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("物品 {material_type}:{id}"))
 }
 
 #[cfg(test)]
