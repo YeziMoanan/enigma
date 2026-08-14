@@ -39,6 +39,7 @@ router! {
     "/login/mail" post login_mail;
     "/login/verify" post login_verify;
     "/sdk/init" post sdk_init;
+    "/token/refresh" post token_refresh;
 }
 
 router! {

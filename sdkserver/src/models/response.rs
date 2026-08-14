@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 // TODO: replace all code: .. msg: .. with
 // this struct, using serde(flatten)
@@ -10,12 +10,25 @@ use serde::Serialize;
 
 #[allow(dead_code)]
 #[repr(u8)]
-#[derive(Serialize, Default)]
+#[derive(Default)]
 pub enum AccountType {
     #[default]
     Email = 10,
     Bluepoch = 13, // not sure
     Steam = 14,    // Steam = 15,
+}
+
+impl Serialize for AccountType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(match self {
+            Self::Email => 10,
+            Self::Bluepoch => 13,
+            Self::Steam => 14,
+        })
+    }
 }
 
 #[derive(Serialize, Default)]
@@ -257,6 +270,20 @@ pub struct AccountLoginRspData {
 }
 
 #[derive(Serialize, Default)]
+pub struct AccountTokenRefreshRsp {
+    pub code: u16,
+    pub msg: String,
+    pub data: AccountTokenRefreshRspData,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountTokenRefreshRspData {
+    pub token: String,
+    pub expires_in: i64,
+}
+
+#[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RealNameInfo {
     pub need_real_name: bool,
@@ -451,4 +478,21 @@ pub struct PaymentMethod {
     pub pay_channel_id: i32,
     pub other_payment_methods: Option<String>,
     pub ext_payment_method_params: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AccountLoginRspData, AccountType};
+
+    #[test]
+    fn account_type_serializes_as_the_protocol_number() {
+        let data = AccountLoginRspData {
+            account_type: AccountType::Email,
+            ..Default::default()
+        };
+
+        let json = serde_json::to_value(data).unwrap();
+        assert_eq!(json["accountType"], 10);
+        assert!(json["accountType"].is_number());
+    }
 }

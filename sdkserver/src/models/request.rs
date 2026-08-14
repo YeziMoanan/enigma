@@ -1,4 +1,22 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+
+fn deserialize_i64_from_string_or_number<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Number(number) => number
+            .as_i64()
+            .ok_or_else(|| serde::de::Error::custom("userId is outside the i64 range")),
+        serde_json::Value::String(value) => value
+            .parse()
+            .map_err(|_| serde::de::Error::custom("userId must be an integer")),
+        _ => Err(serde::de::Error::custom(
+            "userId must be a string or integer",
+        )),
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Deserialize)]
@@ -69,7 +87,9 @@ pub struct AppPackageInfo {
     pub app_signature: String,
     pub sdk_version: String,
     pub channel_version: String,
+    #[serde(default)]
     pub ad_fid: String,
+    #[serde(default)]
     pub gclid: String,
     pub data_app_id: String,
 }
@@ -120,6 +140,15 @@ pub struct AccountLoginVerifyReq {
     pub token: String,
     #[serde(default)]
     pub ext_args: serde_json::Value,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountTokenRefreshReq {
+    #[serde(deserialize_with = "deserialize_i64_from_string_or_number")]
+    pub user_id: i64,
+    pub refresh_token: String,
 }
 
 #[allow(dead_code)]
@@ -234,4 +263,68 @@ pub struct CallbackQuery {
     pub user_id: Option<String>,
     pub foreign_invoice: Option<String>,
     pub invoice_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AccountLoginMailReq, AccountTokenRefreshReq};
+
+    #[test]
+    fn token_refresh_accepts_numeric_or_string_user_id() {
+        for user_id in [serde_json::json!(42), serde_json::json!("42")] {
+            let request: AccountTokenRefreshReq = serde_json::from_value(serde_json::json!({
+                "userId": user_id,
+                "refreshToken": "refresh-token"
+            }))
+            .unwrap();
+
+            assert_eq!(request.user_id, 42);
+            assert_eq!(request.refresh_token, "refresh-token");
+        }
+    }
+
+    #[test]
+    fn token_refresh_rejects_non_integer_user_id() {
+        for user_id in [
+            serde_json::json!(42.5),
+            serde_json::json!("not-an-integer"),
+            serde_json::json!(true),
+        ] {
+            assert!(
+                serde_json::from_value::<AccountTokenRefreshReq>(serde_json::json!({
+                    "userId": user_id,
+                    "refreshToken": "refresh-token"
+                }))
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn login_mail_defaults_optional_android_package_fields() {
+        let request: AccountLoginMailReq = serde_json::from_value(serde_json::json!({
+            "deviceInfo": {
+                "networkName": "wifi", "deviceId": "android-device", "cnadid": "",
+                "oaId": "", "androidId": "android-id", "imsi": "", "imei": "",
+                "uuid": "android-uuid", "deviceName": "MuMu", "deviceManufacturer": "MuMu",
+                "osType": 0, "osVersion": "12", "apiLevel": "32", "language": "zh-CN",
+                "displayWidth": "1600", "displayHeight": "900", "hardware": "x86_64",
+                "buildName": "android", "distinctId": "", "anonymousId": ""
+            },
+            "appPackageInfo": {
+                "appPackageName": "com.bluepoch.m.en.reverse1999", "appVersion": 69,
+                "appVersionName": "3.6.5", "gameId": 60001, "gameCode": "reverse1999",
+                "gameName": "Reverse: 1999", "channelId": "200", "subChannelId": "200",
+                "appInstallTime": "0", "appUpdateTime": "0", "appSignature": "",
+                "sdkVersion": "", "channelVersion": "", "dataAppId": ""
+            },
+            "reactivate": false,
+            "account": "2513675036",
+            "pwd": "password-hash"
+        }))
+        .unwrap();
+
+        assert_eq!(request.app_package_info.ad_fid, "");
+        assert_eq!(request.app_package_info.gclid, "");
+    }
 }
