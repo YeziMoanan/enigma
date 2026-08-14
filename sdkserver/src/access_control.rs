@@ -1,14 +1,19 @@
 use crate::AppState;
 use anyhow::{Context, Result, bail};
 use axum::http::HeaderMap;
+#[cfg(not(test))]
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 
+#[cfg(not(test))]
 const GAME_ID: &str = "reverse1999";
+#[cfg(not(test))]
 const SERVER_ID: &str = "reverse1999-main";
+#[cfg(not(test))]
 const DEFAULT_API: &str = "http://127.0.0.1:31063/api/v1";
 
+#[cfg(not(test))]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DecisionRequest<'a> {
@@ -20,6 +25,7 @@ struct DecisionRequest<'a> {
     request_id: String,
 }
 
+#[cfg(not(test))]
 #[derive(Debug, Serialize)]
 struct Identity<'a> {
     #[serde(rename = "type")]
@@ -27,6 +33,7 @@ struct Identity<'a> {
     value: &'a str,
 }
 
+#[cfg(not(test))]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Decision {
