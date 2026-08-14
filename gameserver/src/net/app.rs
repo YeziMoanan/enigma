@@ -8,8 +8,13 @@ use crate::net::outbound::CommandPacket;
 pub struct AppState {
     pub db: &'static SqlitePool,
     pub tables: &'static config::GameDB,
-    sessions: dashmap::DashMap<i64, mpsc::Sender<CommandPacket>>,
+    sessions: dashmap::DashMap<i64, Arc<SessionHandle>>,
     session_locks: dashmap::DashMap<i64, Arc<Mutex<()>>>,
+}
+
+/// The sender and identity of one TCP connection.
+pub struct SessionHandle {
+    pub sender: mpsc::Sender<CommandPacket>,
 }
 
 #[allow(dead_code)]
@@ -53,11 +58,21 @@ impl AppState {
     ) -> bool {
         self.sessions
             .get(&player_id)
-            .is_some_and(|current| current.same_channel(outbound))
+            .is_some_and(|current| current.sender.same_channel(outbound))
     }
 
-    pub fn unregister_session(&self, player_id: i64) {
-        self.sessions.remove(&player_id);
+    pub fn unregister_session(&self, player_id: i64, session: &Arc<SessionHandle>) -> bool {
+        self.sessions
+            .remove_if(&player_id, |_, current| Arc::ptr_eq(current, session))
+            .is_some()
+    }
+
+    pub async fn disconnect_session(&self, player_id: i64) -> bool {
+        let Some((_, session)) = self.sessions.remove(&player_id) else {
+            return false;
+        };
+        let _ = session.sender.send(CommandPacket::Disconnect).await;
+        true
     }
 
     pub fn unregister_session_if_current(
@@ -67,7 +82,7 @@ impl AppState {
     ) -> bool {
         match self.sessions.entry(player_id) {
             dashmap::mapref::entry::Entry::Occupied(entry)
-                if entry.get().same_channel(outbound) =>
+                if entry.get().sender.same_channel(outbound) =>
             {
                 entry.remove();
                 true
@@ -103,14 +118,25 @@ mod tests {
         let state = Arc::new(AppState::new(pool, config::configs::get()));
         let (first, _) = mpsc::channel(1);
         let (replacement, _) = mpsc::channel(1);
+        let first_session = Arc::new(SessionHandle {
+            sender: first.clone(),
+        });
+        let replacement_session = Arc::new(SessionHandle {
+            sender: replacement.clone(),
+        });
 
-        state.register_session(7, first.clone());
+        state.register_session(7, first_session);
         let teardown = state.lock_session(7).await;
         let replacement_state = Arc::clone(&state);
         let replacement_sender = replacement.clone();
         let replacement_task = tokio::spawn(async move {
             let _registration = replacement_state.lock_session(7).await;
-            replacement_state.register_session(7, replacement_sender);
+            replacement_state.register_session(
+                7,
+                Arc::new(SessionHandle {
+                    sender: replacement_sender,
+                }),
+            );
         });
 
         tokio::task::yield_now().await;
