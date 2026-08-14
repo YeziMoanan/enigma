@@ -426,7 +426,10 @@ fn enter_fight_action_point_rule_is_collected_without_runtime_dispatch() {
         }),
         ..Default::default()
     };
-    let mut runtime = BattleRuntime::new(fight);
+    let mut runtime = BattleRuntime::new(
+        crate::catalog::BattleCatalog::new(crate::test_support::game_data()),
+        fight,
+    );
     runtime.extend_battle_rule_skills([crate::engine::fight::rules::OwnedBattleSkill {
         owner_uid: crate::engine::fight::rules::ATTACKER_SIDE_UID,
         skill_id: 2301,

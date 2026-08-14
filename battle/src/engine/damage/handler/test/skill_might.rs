@@ -174,6 +174,8 @@ fn ms_stranger_might_multipliers_apply_in_both_directions() {
                 attack_attributes: shared_attributes.clone(),
                 career_ratio_bonus: 0,
                 attack_career: None,
+                additional_attack_career: None,
+                critical_multiplier_remainder: 0,
                 is_conduit: false,
                 is_crit: false,
                 assassinate: false,

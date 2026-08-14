@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn owned_psychube_uses_its_persisted_amplification_level() {
         init_config();
-        let passives = Passive::psychube(1542, Some(5));
+        let passives = Passive::psychube_from(crate::test_support::game_data(), 1542, Some(5));
 
         assert_eq!(passives.len(), 1);
         assert_eq!(passives[0].skill_id, 434215);

@@ -258,7 +258,7 @@ impl ConduitManager {
     pub(crate) fn configured(catalog: crate::catalog::BattleCatalog, fight: &Fight) -> Self {
         Self::from_fight(
             fight,
-            |model_id| catalog.conduit_device(model_id),
+            |model_id, ex_skill_level| catalog.conduit_device(model_id, ex_skill_level),
             |model_id, skill_groups| {
                 catalog
                     .game_data()
@@ -273,7 +273,9 @@ impl ConduitManager {
     pub fn seed_with_game_data(game_data: &config::GameDB, fight: &Fight) -> Self {
         Self::from_fight(
             fight,
-            |model_id| crate::catalog::configured_conduit_device(game_data, model_id),
+            |model_id, ex_skill_level| {
+                crate::catalog::configured_conduit_device(game_data, model_id, ex_skill_level)
+            },
             |model_id, skill_groups| {
                 game_data
                     .character
@@ -286,7 +288,7 @@ impl ConduitManager {
 
     fn from_fight<F, A>(fight: &Fight, configured: F, aliases: A) -> Self
     where
-        F: Fn(i32) -> Result<Option<Vec<Vec<ConduitSkill>>>, ConduitError>,
+        F: Fn(i32, i32) -> Result<Option<Vec<Vec<ConduitSkill>>>, ConduitError>,
         A: Fn(i32, &[Vec<ConduitSkill>]) -> BTreeMap<i32, i32>,
     {
         let mut manager = Self::default();
@@ -839,7 +841,7 @@ impl ConduitManager {
 
     fn seed_entity(
         &mut self,
-        configured: &impl Fn(i32) -> Result<Option<Vec<Vec<ConduitSkill>>>, ConduitError>,
+        configured: &impl Fn(i32, i32) -> Result<Option<Vec<Vec<ConduitSkill>>>, ConduitError>,
         aliases: &impl Fn(i32, &[Vec<ConduitSkill>]) -> BTreeMap<i32, i32>,
         team: i32,
         entity: &FightEntityInfo,
@@ -847,7 +849,7 @@ impl ConduitManager {
         let (Some(uid), Some(model_id)) = (entity.uid, entity.model_id) else {
             return;
         };
-        let skill_groups = match configured(model_id) {
+        let skill_groups = match configured(model_id, entity.ex_skill_level.unwrap_or_default()) {
             Ok(Some(skill_groups)) => skill_groups,
             Ok(None) => return,
             Err(error) => {
@@ -901,22 +903,6 @@ fn conduit_skill_aliases(
         }
     }
     aliases
-}
-
-fn configured_device_id(
-    configs: &config::GameDB,
-    character: &config::character::Character,
-    ex_skill_level: i32,
-) -> i32 {
-    configs
-        .skill_ex_level
-        .iter()
-        .filter(|row| {
-            row.hero_id == character.id && row.skill_level <= ex_skill_level && row.device_id != 0
-        })
-        .max_by_key(|row| row.skill_level)
-        .map(|row| row.device_id)
-        .unwrap_or(character.device_id)
 }
 
 fn reduced_cost(cost: i32, reduction: i32) -> i32 {
@@ -976,7 +962,7 @@ mod tests {
     fn parses_configured_skill_group_without_losing_cost_identity() {
         crate::test_support::init_config();
         let groups =
-            crate::catalog::configured_conduit_device(crate::test_support::game_data(), 3149)
+            crate::catalog::configured_conduit_device(crate::test_support::game_data(), 3149, 0)
                 .unwrap()
                 .unwrap();
         assert_eq!(

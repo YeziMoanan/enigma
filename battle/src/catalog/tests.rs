@@ -181,6 +181,11 @@ fn normalizes_magic_circle_attributes_and_thresholds() {
     assert_eq!(
         catalog.magic_circle(30001),
         Some(MagicCircleDefinition {
+            circle_type: crate::test_support::game_data()
+                .magic_circle
+                .get(30001)
+                .unwrap()
+                .circle_type,
             duration: 3,
             allied_attributes: vec![(205, 150)],
             enemy_attributes: Vec::new(),

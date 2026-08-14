@@ -40,7 +40,7 @@ fn configured_card_rank_fallback(db: &GameDB, skill_id: i32) -> Option<i32> {
 
 pub fn configured_effect_id(skill_id: i32) -> i32 {
     crate::catalog::BattleCatalog::try_global()
-        .map(|catalog| catalog.skill_effect_id(skill_id))
+        .map(|catalog| configured_effect_id_for_db(catalog.game_data(), skill_id))
         .unwrap_or(skill_id)
 }
 
