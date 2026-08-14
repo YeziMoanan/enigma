@@ -391,8 +391,12 @@ impl BattleRuntime {
                         },
                     ))
                     .ok()?;
-                let pool = crate::engine::skill::target::TargetPool::from_fight(&self.fight)
-                    .runtime_view(&self.managers);
+                let pool = crate::engine::skill::target::TargetPool::from_fight_with_catalog(
+                    self.catalog_data
+                        .expect("battle runtime was not constructed with a catalog"),
+                    &self.fight,
+                )
+                .runtime_view(&self.managers);
                 let result = drain::run_skill(
                     &mut self.managers,
                     &pool,
@@ -412,14 +416,15 @@ impl BattleRuntime {
                 )
                 .inspect_err(|error| tracing::warn!(?error, "Mei Lei Er extra round failed"))
                 .ok()?;
-                let mut steps =
-                    project_changes([change::BattleChange::Buff(Box::new(state))], fight_version)
-                        .inspect_err(
-                            |error| tracing::warn!(%error, "Mei Lei Er charge projection failed"),
-                        )
-                        .ok()?;
+                let mut steps = project_changes(
+                    [change::BattleChange::Buff(Box::new(state))],
+                    fight_version,
+                    absorb_hurt_map_layout,
+                )
+                .inspect_err(|error| tracing::warn!(%error, "Mei Lei Er charge projection failed"))
+                .ok()?;
                 steps.extend(
-                    project_result(result, fight_version)
+                    project_result(result, fight_version, absorb_hurt_map_layout)
                         .inspect_err(
                             |error| tracing::warn!(%error, "Mei Lei Er skill projection failed"),
                         )

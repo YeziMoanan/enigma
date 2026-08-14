@@ -256,26 +256,46 @@ pub struct ConduitManager {
 
 impl ConduitManager {
     pub(crate) fn configured(catalog: crate::catalog::BattleCatalog, fight: &Fight) -> Self {
-        Self::from_fight(fight, |model_id| catalog.conduit_device(model_id))
+        Self::from_fight(
+            fight,
+            |model_id| catalog.conduit_device(model_id),
+            |model_id, skill_groups| {
+                catalog
+                    .game_data()
+                    .character
+                    .get(model_id)
+                    .map(|character| conduit_skill_aliases(character, skill_groups))
+                    .unwrap_or_default()
+            },
+        )
     }
 
     pub fn seed_with_game_data(game_data: &config::GameDB, fight: &Fight) -> Self {
-        Self::from_fight(fight, |model_id| {
-            crate::catalog::configured_conduit_device(game_data, model_id)
-        })
+        Self::from_fight(
+            fight,
+            |model_id| crate::catalog::configured_conduit_device(game_data, model_id),
+            |model_id, skill_groups| {
+                game_data
+                    .character
+                    .get(model_id)
+                    .map(|character| conduit_skill_aliases(character, skill_groups))
+                    .unwrap_or_default()
+            },
+        )
     }
 
-    fn from_fight(
-        fight: &Fight,
-        configured: impl Fn(i32) -> Result<Option<Vec<Vec<ConduitSkill>>>, ConduitError>,
-    ) -> Self {
+    fn from_fight<F, A>(fight: &Fight, configured: F, aliases: A) -> Self
+    where
+        F: Fn(i32) -> Result<Option<Vec<Vec<ConduitSkill>>>, ConduitError>,
+        A: Fn(i32, &[Vec<ConduitSkill>]) -> BTreeMap<i32, i32>,
+    {
         let mut manager = Self::default();
         for (team, fight_team) in [(1, fight.attacker.as_ref()), (2, fight.defender.as_ref())] {
             let Some(fight_team) = fight_team else {
                 continue;
             };
             for entity in &fight_team.entitys {
-                manager.seed_entity(&configured, team, entity);
+                manager.seed_entity(&configured, &aliases, team, entity);
             }
         }
         manager
@@ -820,6 +840,7 @@ impl ConduitManager {
     fn seed_entity(
         &mut self,
         configured: &impl Fn(i32) -> Result<Option<Vec<Vec<ConduitSkill>>>, ConduitError>,
+        aliases: &impl Fn(i32, &[Vec<ConduitSkill>]) -> BTreeMap<i32, i32>,
         team: i32,
         entity: &FightEntityInfo,
     ) {
@@ -834,6 +855,7 @@ impl ConduitManager {
                 return;
             }
         };
+        let skill_aliases = aliases(model_id, &skill_groups);
         self.areas
             .entry(team)
             .or_insert_with(|| ConduitArea {
@@ -1454,11 +1476,13 @@ mod tests {
                         uid: 10,
                         selected_group: 1,
                         skill_groups: Vec::new(),
+                        skill_aliases: BTreeMap::new(),
                     },
                     ConduitDevice {
                         uid: 20,
                         selected_group: 1,
                         skill_groups: Vec::new(),
+                        skill_aliases: BTreeMap::new(),
                     },
                 ],
                 powers: Vec::new(),

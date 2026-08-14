@@ -53,6 +53,7 @@ impl BattleRuntime {
         &mut self,
         request: &BeginRoundRequest,
     ) -> Result<FightRound, String> {
+        self.pending_wave_push = None;
         let battle_catalog = self
             .catalog_data
             .expect("battle runtime was not constructed with a catalog");

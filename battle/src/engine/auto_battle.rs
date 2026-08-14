@@ -244,6 +244,17 @@ fn best_candidate(
             let source = pool.entity(source_uid)?;
             let ultimate = crate::engine::mechanic::card::CardMechanic
                 .is_ultimate_skill(managers, skill_id, source);
+            let uses_action_point =
+                crate::engine::skill::buff_act::skill_no_use_action_point::skill_uses_action_point(
+                    &managers.buff.active_features(&managers.hp),
+                    source_uid,
+                    ultimate,
+                );
+            let normal_ap_cost =
+                i32::from(!card.temp_card.unwrap_or_default() && uses_action_point);
+            if normal_ap_cost > normal_ap {
+                return None;
+            }
             if ultimate
                 && !crate::engine::mechanic::card::CardMechanic.ultimate_ready(managers, source)
             {

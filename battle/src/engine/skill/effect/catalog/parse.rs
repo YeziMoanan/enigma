@@ -7,6 +7,37 @@ pub(super) fn numeric_ids(raw: &str) -> impl Iterator<Item = i32> + '_ {
         .filter(|id| *id > 0)
 }
 
+pub(super) fn configured_effect_id_for_db(db: &GameDB, skill_id: i32) -> i32 {
+    let configured_skill_id =
+        if db.skill.get(skill_id).is_some() || db.skill_effect.get(skill_id).is_some() {
+            skill_id
+        } else {
+            configured_card_rank_fallback(db, skill_id).unwrap_or(skill_id)
+        };
+    db.skill
+        .get(configured_skill_id)
+        .map(|skill| skill.skill_effect)
+        .filter(|id| *id != 0)
+        .unwrap_or(configured_skill_id)
+}
+
+fn configured_card_rank_fallback(db: &GameDB, skill_id: i32) -> Option<i32> {
+    for character in db.character.iter() {
+        for group in [1, 2] {
+            let skills = crate::engine::entity::skill::parse_skill_group(&character.skill, group);
+            let Some(index) = skills.iter().position(|candidate| *candidate == skill_id) else {
+                continue;
+            };
+            return skills[..index]
+                .iter()
+                .rev()
+                .copied()
+                .find(|candidate| db.skill.get(*candidate).is_some());
+        }
+    }
+    None
+}
+
 pub fn configured_effect_id(skill_id: i32) -> i32 {
     crate::catalog::BattleCatalog::try_global()
         .map(|catalog| catalog.skill_effect_id(skill_id))

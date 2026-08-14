@@ -36,7 +36,7 @@ pub fn deploy_rule_ops(
         return Some(Vec::new());
     }
     let initial_level = behavior.arg(1).unwrap_or_else(|| {
-        (row.circle_type == 2)
+        (definition.circle_type == 2)
             .then_some(circle_id % 10)
             .unwrap_or_default()
     });
@@ -53,7 +53,7 @@ pub fn deploy_rule_ops(
         FieldOperation::DeployIfAbsent {
             definition: FieldDefinition {
                 field_id: circle_id,
-                duration: row.round,
+                duration: definition.duration,
             },
             create_uid: source_uid,
             initial_level,
@@ -86,8 +86,15 @@ pub fn deploy_rule_ops(
     let mut ops = current
         .into_iter()
         .flat_map(|field| {
-            let (old_ally_buffs, old_enemy_buffs) =
-                crate::engine::mechanic::magic_circle::linked_buffs(field.definition.field_id);
+            let old_definition = managers.catalog().magic_circle(field.definition.field_id);
+            let old_ally_buffs = old_definition
+                .as_ref()
+                .map(|definition| definition.allied_buffs.as_slice())
+                .unwrap_or_default();
+            let old_enemy_buffs = old_definition
+                .as_ref()
+                .map(|definition| definition.enemy_buffs.as_slice())
+                .unwrap_or_default();
             pool.allies(source_uid)
                 .iter()
                 .flat_map(|entity| {
@@ -149,6 +156,30 @@ fn remove_rule_ops(
     }))])
 }
 
+fn update_wang_qi_rule_ops(
+    behavior: &ParsedBehavior,
+    source_uid: i64,
+    team: i32,
+    managers: &BattleManagers,
+    pool: &TargetPool,
+) -> Option<Vec<RuleOp>> {
+    let delta = behavior.arg(0)?;
+    let current = managers.field.get(team)?;
+    let family = current.definition.field_id / 10;
+    let current_level = current.definition.field_id % 10;
+    let next_level = current_level.saturating_add(delta).clamp(1, 4);
+    let next_id = family.saturating_mul(10).saturating_add(next_level);
+    if next_id == current.definition.field_id {
+        return Some(Vec::new());
+    }
+    let replacement = ParsedBehavior::from_spec(
+        crate::engine::skill::behavior::classify::BehaviorSpec::new(50019, "AddMagicCircle"),
+        vec![next_id, next_level],
+        Vec::new(),
+    );
+    deploy_rule_ops(&replacement, source_uid, team, managers, pool)
+}
+
 pub(crate) fn field_thresholds(
     circle_id: i32,
     team: i32,
@@ -205,6 +236,14 @@ impl BehaviorHandler for Handler {
                     && configured(*circle_id)
             }
             (BehaviorKind::RemoveMagicCircleById, [circle_id]) => configured(*circle_id),
+            (BehaviorKind::UpdateWangQiMagicCircle, [delta]) => *delta > 0,
+            (BehaviorKind::MagicCircleAttr, args) => {
+                !args.is_empty()
+                    && args.len().is_multiple_of(3)
+                    && args
+                        .chunks_exact(3)
+                        .all(|args| matches!(args[0], 1 | 2) && AttrId::from_raw(args[1]).is_some())
+            }
             _ => false,
         }
     }
@@ -220,6 +259,15 @@ impl BehaviorHandler for Handler {
             ),
             BehaviorKind::RemoveMagicCircleById => {
                 remove_rule_ops(behavior, context.source_team, context.managers)
+            }
+            BehaviorKind::UpdateWangQiMagicCircle | BehaviorKind::MagicCircleAttr => {
+                runtime_rule_ops(
+                    behavior,
+                    context.source_uid,
+                    context.source_team,
+                    context.managers,
+                    context.pool,
+                )
             }
             _ => None,
         }

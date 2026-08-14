@@ -9,6 +9,7 @@ const CONTRACT_BOUND_BUFF_MAP: i32 = 31;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MagicCircleDefinition {
+    pub circle_type: i32,
     pub duration: i32,
     pub allied_attributes: Vec<(i32, i32)>,
     pub enemy_attributes: Vec<(i32, i32)>,
@@ -999,6 +1000,7 @@ fn magic_circle_definition(
 ) -> Option<MagicCircleDefinition> {
     let row = game_data.magic_circle.get(circle_id)?;
     Some(MagicCircleDefinition {
+        circle_type: row.circle_type,
         duration: row.round,
         allied_attributes: parse_attribute_pairs(&row.self_attrs),
         enemy_attributes: parse_attribute_pairs(&row.enemy_attrs),
