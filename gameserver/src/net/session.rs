@@ -12,6 +12,8 @@ use tokio::{
     sync::mpsc,
 };
 
+const MAX_CLIENT_PACKET_LEN: usize = 8 * 1024 * 1024;
+
 #[allow(dead_code)]
 pub async fn handle_client(socket: TcpStream, state: &'static AppState) -> anyhow::Result<()> {
     let (mut reader, writer) = socket.into_split();
@@ -27,7 +29,15 @@ pub async fn handle_client(socket: TcpStream, state: &'static AppState) -> anyho
                 break Ok(());
             }
 
-            let packet_len = BE::read_i32(&header) as usize;
+            let raw_packet_len = BE::read_i32(&header);
+            let Some(packet_len) = validated_client_packet_len(raw_packet_len) else {
+                tracing::warn!(
+                    "Rejected invalid client packet length: {} (maximum {} bytes)",
+                    raw_packet_len,
+                    MAX_CLIENT_PACKET_LEN
+                );
+                break Ok(());
+            };
             let mut buffer = vec![0u8; packet_len];
             if let Err(e) = reader.read_exact(&mut buffer).await {
                 tracing::warn!("Failed to read packet body ({} bytes): {e}", packet_len);
@@ -84,6 +94,13 @@ pub async fn handle_client(socket: TcpStream, state: &'static AppState) -> anyho
     result
 }
 
+fn validated_client_packet_len(raw_packet_len: i32) -> Option<usize> {
+    let packet_len = usize::try_from(raw_packet_len).ok()?;
+    (1..=MAX_CLIENT_PACKET_LEN)
+        .contains(&packet_len)
+        .then_some(packet_len)
+}
+
 async fn write_loop<W>(mut writer: W, mut rx: mpsc::Receiver<CommandPacket>) -> anyhow::Result<()>
 where
     W: AsyncWrite + Unpin + Send,
@@ -133,12 +150,28 @@ fn resolve_down_tag(tag: DownTag, next: &mut u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_down_tag, write_loop};
+    use super::{MAX_CLIENT_PACKET_LEN, resolve_down_tag, validated_client_packet_len, write_loop};
     use crate::net::outbound::{CommandPacket, DownTag};
     use byteorder::{BE, ByteOrder};
     use sonettobuf::CmdId;
     use tokio::io::{AsyncReadExt, duplex, split};
     use tokio::sync::mpsc;
+
+    #[test]
+    fn client_packet_length_is_bounded_before_allocation() {
+        assert_eq!(validated_client_packet_len(1), Some(1));
+        assert_eq!(
+            validated_client_packet_len(MAX_CLIENT_PACKET_LEN as i32),
+            Some(MAX_CLIENT_PACKET_LEN)
+        );
+        assert_eq!(validated_client_packet_len(0), None);
+        assert_eq!(validated_client_packet_len(-1), None);
+        assert_eq!(
+            validated_client_packet_len(MAX_CLIENT_PACKET_LEN as i32 + 1),
+            None
+        );
+        assert_eq!(validated_client_packet_len(369_295_617), None);
+    }
 
     #[test]
     fn down_tags_are_connection_local_and_wrap_at_protocol_limit() {
