@@ -4,7 +4,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
 
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{collections::HashMap, io::ErrorKind, path::Path, time::Duration};
 
 use tracing::{info, warn};
 
@@ -55,9 +55,12 @@ pub async fn migrate_or_rescue(settings: &DatabaseSettings) -> anyhow::Result<Sq
     }
 
     let backup = dump_all_tables(&pool).await?;
+    checkpoint_wal(&pool).await?;
     pool.close().await;
+    drop(pool);
 
     let bak_path = format!("{}.bak", settings.db_name);
+    remove_database_sidecars(&settings.db_name)?;
     std::fs::rename(&settings.db_name, &bak_path)
         .map_err(|e| anyhow::anyhow!("Failed to rename DB to .bak: {e}"))?;
     info!("Old DB saved as {bak_path}, recreating schema...");
@@ -74,6 +77,7 @@ pub async fn migrate_or_rescue(settings: &DatabaseSettings) -> anyhow::Result<Sq
     .await;
     if let Err(error) = rescue_result {
         pool.close().await;
+        drop(pool);
         return reinstate_on_error(Err(error), &settings.db_name, &bak_path);
     }
     info!("DB rescue complete");
@@ -81,10 +85,35 @@ pub async fn migrate_or_rescue(settings: &DatabaseSettings) -> anyhow::Result<Sq
     Ok(pool)
 }
 
-fn reinstate_backup(db_path: &str, bak_path: &str) -> std::io::Result<()> {
-    if Path::new(db_path).exists() {
-        std::fs::remove_file(db_path)?;
+async fn checkpoint_wal(pool: &SqlitePool) -> anyhow::Result<()> {
+    let (busy, log_frames, checkpointed_frames): (i64, i64, i64) =
+        sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
+            .fetch_one(pool)
+            .await?;
+    if busy != 0 || log_frames != checkpointed_frames {
+        anyhow::bail!(
+            "Failed to checkpoint database before rescue: busy={busy}, log={log_frames}, checkpointed={checkpointed_frames}"
+        );
     }
+    Ok(())
+}
+
+fn remove_if_exists(path: &str) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_database_sidecars(db_path: &str) -> std::io::Result<()> {
+    remove_if_exists(&format!("{db_path}-wal"))?;
+    remove_if_exists(&format!("{db_path}-shm"))
+}
+
+fn reinstate_backup(db_path: &str, bak_path: &str) -> std::io::Result<()> {
+    remove_if_exists(db_path)?;
+    remove_database_sidecars(db_path)?;
     std::fs::rename(bak_path, db_path)
 }
 
@@ -770,6 +799,32 @@ mod tests {
         );
         assert_eq!(std::fs::read(&db_path).unwrap(), b"original database");
         assert!(!bak_path.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reinstating_backup_discards_replacement_wal_sidecars() {
+        let name = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("enigma-db-sidecar-failure-{name}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("sonetto.db");
+        let bak_path = dir.join("sonetto.db.bak");
+        let wal_path = dir.join("sonetto.db-wal");
+        let shm_path = dir.join("sonetto.db-shm");
+        std::fs::write(&db_path, b"partial replacement").unwrap();
+        std::fs::write(&bak_path, b"original database").unwrap();
+        std::fs::write(&wal_path, b"replacement wal").unwrap();
+        std::fs::write(&shm_path, b"replacement shm").unwrap();
+
+        reinstate_backup(db_path.to_str().unwrap(), bak_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(std::fs::read(&db_path).unwrap(), b"original database");
+        assert!(!bak_path.exists());
+        assert!(!wal_path.exists());
+        assert!(!shm_path.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
