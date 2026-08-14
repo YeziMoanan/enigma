@@ -363,14 +363,30 @@ pub(crate) fn build_gacha_pool(
     }
 
     if summon_type == SummonType::Normal {
-        six_all.extend(
-            eligible_six_stars(tables)
-                .included
-                .into_iter()
-                .map(|hero| hero.id),
-        );
-        six_all.sort_unstable();
-        six_all.dedup();
+        six_all = eligible_six_stars(tables)
+            .included
+            .into_iter()
+            .map(|hero| hero.id)
+            .collect();
+        for character in tables.character.iter().filter(|character| {
+            character.is_online == "1"
+                && character.hero_type > 0
+                && character.skin_id > 0
+                && !character.skill.trim().is_empty()
+                && character.ex_skill > 0
+        }) {
+            match character.rare {
+                4 => five_all.push(character.id),
+                3 => four.push(character.id),
+                2 => three.push(character.id),
+                1 => two.push(character.id),
+                _ => {}
+            }
+        }
+        for ids in [&mut six_all, &mut five_all, &mut four, &mut three, &mut two] {
+            ids.sort_unstable();
+            ids.dedup();
+        }
     }
 
     Ok(GachaPool {
@@ -397,7 +413,7 @@ mod tests {
     use crate::summon::permanent_pool::eligible_six_stars;
 
     #[test]
-    fn normal_pool_contains_every_eligible_six_star() {
+    fn normal_pool_contains_exact_permanent_roster() {
         let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
         let _ = config::init(&data_dir);
         let tables = config::configs::get();
@@ -414,6 +430,39 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(pool.six_normal, expected);
+        assert_eq!(pool.six_normal.len(), 70);
+        assert_eq!(pool.five_normal.len(), 29);
+        assert_eq!(pool.four.len(), 18);
+        assert_eq!(pool.three.len(), 11);
+        assert_eq!(pool.two.len(), 2);
+        assert_eq!(
+            pool.six_normal.len()
+                + pool.five_normal.len()
+                + pool.four.len()
+                + pool.three.len()
+                + pool.two.len(),
+            130
+        );
+
+        for included_id in [3120, 3140, 3144, 3145, 3146, 3147] {
+            assert!(pool.six_normal.contains(&included_id));
+        }
+
+        let all_ids = pool
+            .six_normal
+            .iter()
+            .chain(&pool.five_normal)
+            .chain(&pool.four)
+            .chain(&pool.three)
+            .chain(&pool.two)
+            .copied()
+            .collect::<Vec<_>>();
+        for excluded_id in [3029, 3136, 9998] {
+            assert!(!all_ids.contains(&excluded_id));
+        }
+
+        assert_eq!(tables.character.get(3146).unwrap().name_eng, "Rhiannon");
+        assert_eq!(tables.character.get(3147).unwrap().name_eng, "Ms. Stranger");
     }
 
     #[tokio::test]

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 pub const SOURCE_DATA_SHA: &str = "04ef16b69e0508fe7d62671327350ada222e7323";
+const PERMANENT_SIX_STAR_OVERRIDES: [i32; 6] = [3120, 3140, 3144, 3145, 3146, 3147];
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct PermanentPoolSnapshot {
@@ -43,10 +44,13 @@ pub fn eligible_six_stars(tables: &config::GameDB) -> PermanentPoolSnapshot {
             character.name_eng.clone()
         };
         let reason = exclusion_reason(tables, character);
-        included.push(PermanentHero {
-            id: character.id,
-            name: name.clone(),
-        });
+        if reason.is_none() || PERMANENT_SIX_STAR_OVERRIDES.contains(&character.id) {
+            included.push(PermanentHero {
+                id: character.id,
+                name: name.clone(),
+            });
+        }
+        // Keep diagnostic reasons even for overrides; `included` is the final pool allowlist.
         if let Some(reason) = reason {
             excluded.push(ExcludedHero {
                 id: character.id,
@@ -116,7 +120,7 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     #[test]
-    fn pinned_data_selects_only_playable_online_six_stars() {
+    fn pinned_data_selects_eligible_and_explicitly_overridden_six_stars() {
         let data_dir = format!("{}/../data/excel2json", env!("CARGO_MANIFEST_DIR"));
         let _ = config::init(&data_dir);
 
@@ -131,6 +135,14 @@ mod tests {
         for included_id in [3120, 3140, 3144, 3145, 3146, 3147] {
             assert!(included.contains(&included_id));
         }
+        assert_eq!(
+            snapshot
+                .excluded
+                .iter()
+                .map(|hero| hero.id)
+                .collect::<Vec<_>>(),
+            super::PERMANENT_SIX_STAR_OVERRIDES
+        );
         assert!(
             snapshot
                 .included
