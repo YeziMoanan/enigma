@@ -3,6 +3,7 @@ use anyhow::{Context, Result, bail};
 use axum::http::HeaderMap;
 #[cfg(not(test))]
 use rand::Rng;
+#[cfg(not(test))]
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 
