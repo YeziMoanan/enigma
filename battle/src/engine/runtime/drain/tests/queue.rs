@@ -1,6 +1,69 @@
 use super::*;
 
 #[test]
+fn active_hit_deferral_carries_only_its_primary_skill_hp_loss() {
+    let origin = CommandOrigin {
+        domain: RuleDomain::Skill,
+        key: DefinitionKey::new(1, "SkillDamage"),
+    };
+    let hp_loss = |skill_id, target_uid| BattleEvent::HpLost {
+        origin,
+        source_uid: 10,
+        skill_id,
+        target_uid,
+        amount: 100,
+        buff_uid: None,
+    };
+    let hit = |skill_id, target_uid, damage_from| {
+        BattleEvent::Hit(crate::engine::event::payload::HitEvent {
+            origin,
+            source_uid: 10,
+            target_uid,
+            skill_id,
+            amount: 100,
+            shield_absorbed: 0,
+            career_restraint: false,
+            damage_from,
+            assassinate: false,
+            ignore_riposte: false,
+        })
+    };
+    let primary_loss = hp_loss(1, -1);
+    let primary_hit = hit(1, -1, crate::engine::manager::hp::HurtDamageFromType::Skill);
+    let death = BattleEvent::EntityDied(crate::engine::event::payload::EntityDiedEvent {
+        source_uid: 10,
+        target_uid: -1,
+    });
+    let unrelated_loss = hp_loss(2, -2);
+    let effect_loss = hp_loss(3, -3);
+    let effect_hit = hit(
+        3,
+        -3,
+        crate::engine::manager::hp::HurtDamageFromType::SkillEffect,
+    );
+    let events = vec![
+        primary_loss.clone(),
+        primary_hit.clone(),
+        death.clone(),
+        unrelated_loss.clone(),
+        effect_loss.clone(),
+        effect_hit.clone(),
+    ];
+
+    let (immediate, deferred) = split_active_hit_events(
+        events,
+        vec![
+            vec![primary_loss.clone(), primary_hit.clone(), death.clone()],
+            vec![unrelated_loss.clone()],
+            vec![effect_loss.clone(), effect_hit.clone()],
+        ],
+    );
+
+    assert_eq!(immediate, vec![death, unrelated_loss, effect_loss]);
+    assert_eq!(deferred, vec![primary_loss, primary_hit, effect_hit]);
+}
+
+#[test]
 fn after_skill_reaction_waits_for_remaining_ops_in_the_skill_frame() {
     fn queued(
         skill_id: i32,
