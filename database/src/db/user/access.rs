@@ -62,7 +62,7 @@ pub fn normalize_account(value: &str) -> Result<String, AccountAccessError> {
 pub async fn registration_decision(
     tx: &mut Transaction<'_, Sqlite>,
     account_key: &str,
-    now: i64,
+    _now: i64,
 ) -> Result<RegistrationDecision, AccountAccessError> {
     let blacklisted = sqlx::query_scalar::<_, i64>(
         "SELECT 1 FROM account_blacklist WHERE account_key = ? LIMIT 1",
@@ -75,36 +75,14 @@ pub async fn registration_decision(
         return Err(AccountAccessError::Blacklisted);
     }
 
-    let allowlisted = sqlx::query_scalar::<_, i64>(
-        "SELECT 1 FROM account_allowlist WHERE account_key = ? LIMIT 1",
-    )
-    .bind(account_key)
-    .fetch_optional(&mut **tx)
-    .await?
-    .is_some();
-    if allowlisted {
-        return Ok(RegistrationDecision::Allowed);
-    }
-
-    sqlx::query(
-        "INSERT OR IGNORE INTO account_blacklist
-            (account_key, user_id, source, reason, created_at, created_by)
-         VALUES (?, NULL, 'unauthorized_registration', 'registration attempted without allowlist entry', ?, 'system')",
-    )
-    .bind(account_key)
-    .bind(now)
-    .execute(&mut **tx)
-    .await?;
-
-    Err(AccountAccessError::NotAllowlisted)
+    Ok(RegistrationDecision::Allowed)
 }
 
-/// Check whether an existing account is still permitted to log in.
-/// Blacklists always take precedence; allowlist removal is a rejection, not an
-/// automatic blacklist mutation.
+/// Enforce only the local blacklist. The central access service is the
+/// authoritative allowlist for registrations and existing logins.
 pub async fn require_login_access(
     pool: &SqlitePool,
-    user_id: i64,
+    _user_id: i64,
     account_key: &str,
 ) -> Result<(), AccountAccessError> {
     let blacklisted = sqlx::query_scalar::<_, i64>(
@@ -116,16 +94,6 @@ pub async fn require_login_access(
     .is_some();
     if blacklisted {
         return Err(AccountAccessError::Blacklisted);
-    }
-
-    let activated_user_id = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT activated_user_id FROM account_allowlist WHERE account_key = ? LIMIT 1",
-    )
-    .bind(account_key)
-    .fetch_optional(pool)
-    .await?;
-    if activated_user_id != Some(Some(user_id)) {
-        return Err(AccountAccessError::NotAllowlisted);
     }
 
     Ok(())
@@ -225,17 +193,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn allowlisted_account_is_allowed() {
+    async fn registration_is_allowed_without_legacy_allowlist() {
         let pool = migrated_pool().await;
-        sqlx::query(
-            "INSERT INTO account_allowlist
-                (account_key, display_account, batch_id, imported_at, imported_by)
-             VALUES ('player01', 'Player01', 'batch-1', 10, 'admin')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
         let mut tx = pool.begin().await.unwrap();
         let result = registration_decision(&mut tx, "player01", 30)
             .await
@@ -245,24 +204,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_allowlist_entry_is_recorded_and_rejected() {
+    async fn registration_does_not_recreate_legacy_access_rows() {
         let pool = migrated_pool().await;
         let mut tx = pool.begin().await.unwrap();
 
-        let result = registration_decision(&mut tx, "player01", 30).await;
-        assert!(matches!(result, Err(AccountAccessError::NotAllowlisted)));
-
-        let source: String = sqlx::query_scalar(
-            "SELECT source FROM account_blacklist WHERE account_key = 'player01'",
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .unwrap();
-        assert_eq!(source, "unauthorized_registration");
+        assert_eq!(
+            registration_decision(&mut tx, "player01", 30)
+                .await
+                .unwrap(),
+            RegistrationDecision::Allowed
+        );
+        let allowlist_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM account_allowlist")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        let blacklist_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM account_blacklist")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(allowlist_count, 0);
+        assert_eq!(blacklist_count, 0);
     }
 
     #[tokio::test]
-    async fn existing_login_requires_bound_allowlist_and_prioritizes_blacklist() {
+    async fn existing_login_ignores_legacy_allowlist_and_prioritizes_blacklist() {
         let pool = migrated_pool().await;
         sqlx::query(
             "INSERT INTO users (id, username, email, created_at, updated_at)
@@ -271,24 +236,16 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO account_allowlist
-                (account_key, display_account, batch_id, imported_at, imported_by, activated_user_id)
-             VALUES ('player01', 'Player01', 'batch-1', 10, 'admin', 7)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
         assert!(
             super::require_login_access(&pool, 7, "player01")
                 .await
                 .is_ok()
         );
-        assert!(matches!(
-            super::require_login_access(&pool, 8, "player01").await,
-            Err(AccountAccessError::NotAllowlisted)
-        ));
+        assert!(
+            super::require_login_access(&pool, 8, "player01")
+                .await
+                .is_ok()
+        );
 
         sqlx::query(
             "INSERT INTO account_blacklist

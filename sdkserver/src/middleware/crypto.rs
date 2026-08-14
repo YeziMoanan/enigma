@@ -38,11 +38,9 @@ fn swap_each_two_bytes(bytes: &mut [u8]) {
 }
 
 pub async fn sdk_encryption(req: Request<Body>, next: Next) -> Response<Body> {
-    let method = req.method().clone();
-    let uri = req.uri().clone();
-    let headers = req.headers().clone(); // Preserve original headers
+    let (mut parts, body) = req.into_parts();
 
-    let req_body_bytes = to_bytes(req.into_body(), usize::MAX)
+    let req_body_bytes = to_bytes(body, usize::MAX)
         .await
         .unwrap_or_else(|_| Bytes::new());
 
@@ -59,21 +57,11 @@ pub async fn sdk_encryption(req: Request<Body>, next: Next) -> Response<Body> {
 
     swap_each_two_bytes(&mut decompressed);
 
-    // Build new request with Content-Type header
-    let mut req_builder = Request::builder().method(method).uri(uri);
-
-    // Preserve original headers
-    for (key, value) in headers.iter() {
-        req_builder = req_builder.header(key, value);
-    }
-
-    // Add Content-Type: application/json header
-    req_builder = req_builder.header(
+    parts.headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
     );
-
-    let req = req_builder.body(Body::from(decompressed)).unwrap();
+    let req = Request::from_parts(parts, Body::from(decompressed));
 
     let response = next.run(req).await;
 

@@ -140,16 +140,9 @@ pub async fn create_user(
     validate_password(password)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
-    if let Err(access_error) = access::registration_decision(&mut tx, &email, now).await {
-        if matches!(access_error, access::AccountAccessError::NotAllowlisted) {
-            if let Err(commit_error) = tx.commit().await {
-                return Err(anyhow::Error::new(access::AccountAccessError::Database(
-                    commit_error,
-                )));
-            }
-        }
-        return Err(anyhow::Error::new(access_error));
-    }
+    access::registration_decision(&mut tx, &email, now)
+        .await
+        .map_err(anyhow::Error::new)?;
 
     let password_hash = hash_password(password)?;
 
@@ -194,19 +187,6 @@ pub async fn create_user(
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    let activation = sqlx::query(
-        "UPDATE account_allowlist SET activated_user_id = ?
-         WHERE account_key = ? AND activated_user_id IS NULL",
-    )
-    .bind(user_id)
-    .bind(&email)
-    .execute(&mut *tx)
-    .await?;
-    if activation.rows_affected() != 1 {
-        return Err(anyhow::Error::new(
-            access::AccountAccessError::ActivationConflict,
-        ));
-    }
     starter_data::load_all_starter_data_tx(&mut tx, user_id).await?;
     mail_campaign::deliver_all_campaigns(&mut tx, user_id, now).await?;
     tx.commit().await?;
@@ -311,6 +291,73 @@ pub async fn update_user_login(
     tx.commit().await?;
 
     Ok(())
+}
+
+pub async fn refresh_user_login_token(
+    pool: &SqlitePool,
+    user_id: i64,
+    refresh_token: &str,
+    new_token: &str,
+    expires_at: i64,
+    now: i64,
+) -> Result<bool> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let previous = sqlx::query(
+        "SELECT token, token_expires_at
+         FROM users
+         WHERE id = ?1 AND refresh_token = ?2",
+    )
+    .bind(user_id)
+    .bind(refresh_token)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(previous) = previous else {
+        tx.rollback().await?;
+        return Ok(false);
+    };
+
+    let previous_token: Option<String> = previous.try_get("token")?;
+    let previous_expires_at: Option<i64> = previous.try_get("token_expires_at")?;
+    if let Some(previous_token) = previous_token
+        && !previous_token.is_empty()
+        && previous_token != new_token
+    {
+        sqlx::query(
+            "INSERT INTO user_login_token_history
+                (user_id, token_hash, expires_at, created_at, source)
+             VALUES (?1, ?2, ?3, ?4, 'refresh_token_rotation')
+             ON CONFLICT(user_id, token_hash) DO UPDATE SET
+                expires_at = excluded.expires_at,
+                created_at = excluded.created_at,
+                source = excluded.source",
+        )
+        .bind(user_id)
+        .bind(login_token_hash(&previous_token))
+        .bind(previous_expires_at)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    sqlx::query(
+        "UPDATE users SET
+            token = ?1,
+            token_expires_at = ?2,
+            last_login_at = ?3,
+            updated_at = ?4
+         WHERE id = ?5",
+    )
+    .bind(new_token)
+    .bind(expires_at)
+    .bind(now)
+    .bind(now)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(true)
 }
 
 pub async fn is_user_login_token_valid(
@@ -500,7 +547,7 @@ pub async fn update_user_level(pool: &SqlitePool, user_id: i64, level: i32) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{TokenInfo, handle_user_login, normalize_email};
+    use super::{TokenInfo, handle_user_login, normalize_email, refresh_user_login_token};
     use crate::db::game::mail_campaign;
     use crate::db::user::access::AccountAccessError;
     use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
@@ -575,6 +622,45 @@ mod tests {
             }
         }
         panic!("expected to find a collision in the legacy 9,000,000-ID space");
+    }
+
+    #[tokio::test]
+    async fn refresh_token_rotates_only_the_access_token() {
+        let (pool, database_path) = account_test_pool("refresh-token").await;
+        let user = handle_user_login(&pool, "refresh@example.com", "password", token(), 10)
+            .await
+            .unwrap();
+
+        assert!(
+            refresh_user_login_token(&pool, user.id, "refresh", "rotated", 200, 20)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !refresh_user_login_token(&pool, user.id, "wrong", "ignored", 300, 30)
+                .await
+                .unwrap()
+        );
+
+        let stored: (String, String, i64) =
+            sqlx::query_as("SELECT token, refresh_token, token_expires_at FROM users WHERE id = ?")
+                .bind(user.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let history_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_login_token_history
+             WHERE user_id = ? AND source = 'refresh_token_rotation'",
+        )
+        .bind(user.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored, ("rotated".to_string(), "refresh".to_string(), 200));
+        assert_eq!(history_count, 1);
+
+        pool.close().await;
+        let _ = std::fs::remove_file(database_path);
     }
 
     #[test]
@@ -723,30 +809,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_allowlisted_registration_is_rejected_and_durably_blacklisted() {
-        let (pool, database_path) = account_test_pool("unauthorized-registration").await;
-        let result =
-            handle_user_login(&pool, " blocked@example.com ", "password", token(), 10).await;
-        assert!(matches!(
-            result.unwrap_err().downcast_ref::<AccountAccessError>(),
-            Some(AccountAccessError::NotAllowlisted)
-        ));
-
-        let fresh = SqlitePool::connect_with(
-            sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&database_path)
-                .busy_timeout(Duration::from_secs(10)),
+    async fn registration_does_not_recreate_legacy_allowlist_rows() {
+        let (pool, database_path) = account_test_pool("open-registration").await;
+        handle_user_login(&pool, " open@example.com ", "password", token(), 10)
+            .await
+            .unwrap();
+        let allowlist_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_allowlist WHERE account_key = 'open@example.com'",
         )
+        .fetch_one(&pool)
         .await
         .unwrap();
-        let source: String = sqlx::query_scalar(
-            "SELECT source FROM account_blacklist WHERE account_key = 'blocked@example.com'",
+        let blacklist_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_blacklist WHERE account_key = 'open@example.com'",
         )
-        .fetch_one(&fresh)
+        .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(source, "unauthorized_registration");
-        fresh.close().await;
+        assert_eq!(allowlist_count, 0);
+        assert_eq!(blacklist_count, 0);
         pool.close().await;
         let _ = std::fs::remove_file(database_path);
     }
@@ -832,19 +913,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn allowlist_activation_binds_allocated_user_id() {
+    async fn registration_does_not_activate_legacy_allowlist_rows() {
         let (pool, database_path) = account_test_pool("allowlist-binding").await;
         allow_account(&pool, "bound@example.com").await;
-        let user = handle_user_login(&pool, "BOUND@example.com", "password", token(), 10)
+        handle_user_login(&pool, "BOUND@example.com", "password", token(), 10)
             .await
             .unwrap();
-        let activated: i64 = sqlx::query_scalar(
+        let activated: Option<i64> = sqlx::query_scalar(
             "SELECT activated_user_id FROM account_allowlist WHERE account_key = 'bound@example.com'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(activated, user.id);
+        assert_eq!(activated, None);
         pool.close().await;
         let _ = std::fs::remove_file(database_path);
     }
@@ -867,7 +948,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn existing_login_rejects_removed_allowlist_without_blacklisting() {
+    async fn existing_login_ignores_removed_allowlist_without_blacklisting() {
         let (pool, database_path) = account_test_pool("removed-allowlist").await;
         allow_account(&pool, "removed@example.com").await;
         let user = handle_user_login(&pool, "removed@example.com", "password", token(), 10)
@@ -889,11 +970,8 @@ mod tests {
             },
             20,
         )
-        .await;
-        assert!(matches!(
-            result.unwrap_err().downcast_ref::<AccountAccessError>(),
-            Some(AccountAccessError::NotAllowlisted)
-        ));
+        .await
+        .unwrap();
         let blacklist_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM account_blacklist WHERE account_key = 'removed@example.com'",
         )
@@ -905,8 +983,16 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
+        let restored_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_allowlist WHERE account_key = 'removed@example.com'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(blacklist_count, 0);
-        assert_eq!(stored_token, "token");
+        assert_eq!(result.id, user.id);
+        assert_eq!(stored_token, "rotated");
+        assert_eq!(restored_count, 0);
         pool.close().await;
         let _ = std::fs::remove_file(database_path);
     }

@@ -1,12 +1,20 @@
 use super::helpers::*;
 use crate::AppState;
+use crate::access_control::{authorize, normalize_qq, trusted_client_ip};
 use crate::models::request::AccountAutoLoginReq;
 use crate::models::response::AccountLoginRsp;
-use axum::{extract::State, response::Json};
+use axum::{
+    extract::{ConnectInfo, State},
+    http::HeaderMap,
+    response::Json,
+};
 use common::time::ServerTime;
+use std::net::SocketAddr;
 
 pub async fn post(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     axum::Json(req): axum::Json<AccountAutoLoginReq>,
 ) -> Json<AccountLoginRsp> {
     tracing::info!("Auto-login attempt - User ID: {}", req.user_id);
@@ -19,6 +27,25 @@ pub async fn post(
             return Json(create_auth_error_response());
         }
     };
+
+    let qq = match normalize_qq(&user.email) {
+        Ok(qq) => qq,
+        Err(error) => {
+            tracing::warn!("Auto-login rejected for non-QQ account: {error}");
+            return Json(create_auth_error_response());
+        }
+    };
+    let ip = match trusted_client_ip(&headers, peer) {
+        Ok(ip) => ip,
+        Err(error) => {
+            tracing::warn!("Auto-login rejected because client IP is invalid: {error}");
+            return Json(create_auth_error_response());
+        }
+    };
+    if let Err(error) = authorize(&state, &qq, ip, true).await {
+        tracing::warn!("Central access rejected auto-login for QQ {qq}: {error}");
+        return Json(create_auth_error_response());
+    }
 
     let now = ServerTime::now_ms();
     if let Err(e) =
@@ -39,44 +66,17 @@ pub async fn post(
 mod tests {
     use super::post;
     use crate::{AppState, SdkState};
-    use axum::{Json, extract::State};
+    use axum::{
+        Json,
+        extract::{ConnectInfo, State},
+        http::HeaderMap,
+    };
     use reqwest::Client;
     use sqlx::sqlite::SqlitePoolOptions;
+    use std::net::SocketAddr;
 
-    #[tokio::test]
-    async fn blacklisted_auto_login_is_rejected_without_rotating_token() {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        database::run_migrations(&db).await.unwrap();
-        sqlx::query(
-            "INSERT INTO users
-                (id, username, email, token, refresh_token, token_expires_at, created_at, updated_at)
-             VALUES (7, 'player_7', 'player01', 'original-token', 'original-refresh', 999999, 1, 1)",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO account_allowlist
-                (account_key, display_account, batch_id, imported_at, imported_by, activated_user_id)
-             VALUES ('player01', 'player01', 'test', 1, 'test', 7)",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO account_blacklist
-                (account_key, user_id, source, reason, created_at, created_by)
-             VALUES ('player01', 7, 'manual_ban', 'test', 2, 'test')",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
-
-        let request = serde_json::from_value(serde_json::json!({
+    fn request(user_id: u64, token: &str) -> crate::models::request::AccountAutoLoginReq {
+        serde_json::from_value(serde_json::json!({
             "deviceInfo": {
                 "networkName": "test", "deviceId": "test", "cnadid": "", "oaId": "",
                 "androidId": "", "imsi": "", "imei": "", "uuid": "test",
@@ -93,161 +93,88 @@ mod tests {
                 "channelVersion": "test", "adFid": "", "gclid": "", "dataAppId": ""
             },
             "reactivate": false,
-            "token": "original-token",
-            "userId": 7,
+            "token": token,
+            "userId": user_id,
             "accountType": 10
         }))
-        .unwrap();
-        let state = AppState {
+        .unwrap()
+    }
+
+    async fn state() -> AppState {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        database::run_migrations(&db).await.unwrap();
+        AppState {
             sdk: SdkState {
                 http_client: Client::new(),
             },
-            db: db.clone(),
-        };
+            db,
+        }
+    }
 
-        let response = post(State(state), Json(request)).await.0;
+    async fn auto_login(
+        state: AppState,
+        request: crate::models::request::AccountAutoLoginReq,
+    ) -> crate::models::response::AccountLoginRsp {
+        post(
+            State(state),
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 32019))),
+            HeaderMap::new(),
+            Json(request),
+        )
+        .await
+        .0
+    }
+
+    #[tokio::test]
+    async fn blacklisted_auto_login_is_rejected_without_rotating_token() {
+        let state = state().await;
+        sqlx::query(
+            "INSERT INTO users
+                (id, username, email, token, refresh_token, created_at, updated_at)
+             VALUES (7, 'player_7', '1234507', 'original-token', 'original-refresh', 1, 1);
+             INSERT INTO account_blacklist
+                (account_key, user_id, source, reason, created_at, created_by)
+             VALUES ('1234507', 7, 'manual_ban', 'test', 2, 'test');",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let response = auto_login(state.clone(), request(7, "original-token")).await;
         assert_eq!(response.code, 401);
         let stored_token: String = sqlx::query_scalar("SELECT token FROM users WHERE id = 7")
-            .fetch_one(&db)
+            .fetch_one(&state.db)
             .await
             .unwrap();
         assert_eq!(stored_token, "original-token");
     }
 
     #[tokio::test]
-    async fn repeated_auto_login_is_idempotent() {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        database::run_migrations(&db).await.unwrap();
+    async fn repeated_auto_login_preserves_current_tokens_without_legacy_allowlist() {
+        let state = state().await;
         sqlx::query(
             "INSERT INTO users
-                (id, username, email, token, refresh_token, token_expires_at, created_at, updated_at)
-             VALUES (8, 'player_8', 'player08', 'stable-token', 'stable-refresh', 999999, 1, 1)",
+                (id, username, email, token, refresh_token, created_at, updated_at)
+             VALUES (8, 'player_8', '1234508', 'stable-token', 'stable-refresh', 1, 1)",
         )
-        .execute(&db)
+        .execute(&state.db)
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO account_allowlist
-                (account_key, display_account, batch_id, imported_at, imported_by, activated_user_id)
-             VALUES ('player08', 'player08', 'test', 1, 'test', 8)",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
-
-        let request_json = serde_json::json!({
-            "deviceInfo": {
-                "networkName": "test", "deviceId": "test", "cnadid": "", "oaId": "",
-                "androidId": "", "imsi": "", "imei": "", "uuid": "test",
-                "deviceName": "test", "deviceManufacturer": "test", "osType": 1,
-                "osVersion": "test", "apiLevel": "test", "language": "zh-CN",
-                "displayWidth": "1", "displayHeight": "1", "hardware": "test",
-                "buildName": "test", "distinctId": "test", "anonymousId": "test"
-            },
-            "appPackageInfo": {
-                "appPackageName": "test", "appVersion": 1, "appVersionName": "test",
-                "gameId": 60001, "gameCode": "test", "gameName": "test",
-                "channelId": "200", "subChannelId": "200", "appInstallTime": "1",
-                "appUpdateTime": "1", "appSignature": "test", "sdkVersion": "test",
-                "channelVersion": "test", "adFid": "", "gclid": "", "dataAppId": ""
-            },
-            "reactivate": false,
-            "token": "stable-token",
-            "userId": 8,
-            "accountType": 10
-        });
-        let state = AppState {
-            sdk: SdkState {
-                http_client: Client::new(),
-            },
-            db: db.clone(),
-        };
 
         for _ in 0..2 {
-            let request = serde_json::from_value(request_json.clone()).unwrap();
-            let response = post(State(state.clone()), Json(request)).await.0;
+            let response = auto_login(state.clone(), request(8, "stable-token")).await;
             assert_eq!(response.code, 200);
             assert_eq!(response.data.token, "stable-token");
             assert_eq!(response.data.refresh_token, "stable-refresh");
         }
-
-        let stored_token: String = sqlx::query_scalar("SELECT token FROM users WHERE id = 8")
-            .fetch_one(&db)
+        let allowlist_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM account_allowlist")
+            .fetch_one(&state.db)
             .await
             .unwrap();
-        assert_eq!(stored_token, "stable-token");
-    }
-
-    #[tokio::test]
-    async fn previous_password_login_token_recovers_to_current_token() {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        database::run_migrations(&db).await.unwrap();
-        sqlx::query(
-            "INSERT INTO users
-                (id, username, email, token, refresh_token, token_expires_at, created_at, updated_at)
-             VALUES (9, 'player_9', 'player09', 'previous-token', 'previous-refresh', ?1, 1, 1)",
-        )
-        .bind(i64::MAX / 2)
-        .execute(&db)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO account_allowlist
-                (account_key, display_account, batch_id, imported_at, imported_by, activated_user_id)
-             VALUES ('player09', 'player09', 'test', 1, 'test', 9)",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
-        let current = database::db::user::account::TokenInfo {
-            token: "current-token".to_string(),
-            refresh_token: "current-refresh".to_string(),
-            expires_at: i64::MAX / 2,
-        };
-        database::db::user::account::update_user_login(&db, 9, &current, 2)
-            .await
-            .unwrap();
-
-        let request = serde_json::from_value(serde_json::json!({
-            "deviceInfo": {
-                "networkName": "test", "deviceId": "test", "cnadid": "", "oaId": "",
-                "androidId": "", "imsi": "", "imei": "", "uuid": "test",
-                "deviceName": "test", "deviceManufacturer": "test", "osType": 1,
-                "osVersion": "test", "apiLevel": "test", "language": "zh-CN",
-                "displayWidth": "1", "displayHeight": "1", "hardware": "test",
-                "buildName": "test", "distinctId": "test", "anonymousId": "test"
-            },
-            "appPackageInfo": {
-                "appPackageName": "test", "appVersion": 1, "appVersionName": "test",
-                "gameId": 60001, "gameCode": "test", "gameName": "test",
-                "channelId": "200", "subChannelId": "200", "appInstallTime": "1",
-                "appUpdateTime": "1", "appSignature": "test", "sdkVersion": "test",
-                "channelVersion": "test", "adFid": "", "gclid": "", "dataAppId": ""
-            },
-            "reactivate": false,
-            "token": "previous-token",
-            "userId": 9,
-            "accountType": 10
-        }))
-        .unwrap();
-        let state = AppState {
-            sdk: SdkState {
-                http_client: Client::new(),
-            },
-            db,
-        };
-
-        let response = post(State(state), Json(request)).await.0;
-        assert_eq!(response.code, 200);
-        assert_eq!(response.data.token, "current-token");
-        assert_eq!(response.data.refresh_token, "current-refresh");
+        assert_eq!(allowlist_count, 0);
     }
 }

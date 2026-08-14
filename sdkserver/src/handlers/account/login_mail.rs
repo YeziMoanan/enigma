@@ -1,19 +1,44 @@
 use crate::AppState;
+use crate::access_control::{authorize, normalize_qq, trusted_client_ip};
 use crate::models::request::AccountLoginMailReq;
 use crate::models::response::{AccountLoginRsp, AccountLoginRspData, AccountType, RealNameInfo};
-use axum::{extract::State, response::Json};
+use axum::{
+    extract::{ConnectInfo, State},
+    http::HeaderMap,
+    response::Json,
+};
 use common::time::ServerTime;
-use database::db::user::account::{TokenInfo, handle_user_login};
+use database::db::user::{
+    access,
+    account::{TokenInfo, get_user_by_email, handle_user_login, verify_user_password},
+};
+use std::net::SocketAddr;
 
 pub async fn post(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     axum::Json(req): axum::Json<AccountLoginMailReq>,
 ) -> Json<AccountLoginRsp> {
     let now = ServerTime::now_ms();
+    let qq = match normalize_qq(&req.account) {
+        Ok(qq) => qq,
+        Err(error) => {
+            tracing::warn!("Rejected non-QQ account: {error}");
+            return Json(create_error_response());
+        }
+    };
+    let ip = match trusted_client_ip(&headers, peer) {
+        Ok(ip) => ip,
+        Err(error) => {
+            tracing::warn!("Login rejected because client IP is invalid: {error}");
+            return Json(create_error_response());
+        }
+    };
 
     tracing::info!(
-        "Login attempt - Account: {}, Device: {}, OS: {}",
-        req.account,
+        "Login attempt - QQ: {}, Device: {}, OS: {}",
+        qq,
         req.device_info.device_name,
         req.device_info.os_version
     );
@@ -30,19 +55,45 @@ pub async fn post(
         expires_at: token_expires_at,
     };
 
-    // Handle login with password verification
-    let user = match handle_user_login(&state.db, &req.account, &req.pwd, token_info, now).await {
+    let existing = match get_user_by_email(&state.db, &qq).await {
+        Ok(user) => user,
+        Err(error) => {
+            tracing::error!("Failed to read QQ account before login: {error}");
+            return Json(create_error_response());
+        }
+    };
+    if let Some(user) = &existing {
+        if access::require_login_access(&state.db, user.id, &qq)
+            .await
+            .is_err()
+            || !matches!(
+                verify_user_password(&state.db, &qq, &req.pwd).await,
+                Ok(true)
+            )
+        {
+            return Json(create_error_response());
+        }
+    } else if !(6..=64).contains(&req.pwd.chars().count()) {
+        return Json(create_error_response());
+    }
+    if let Err(error) = authorize(&state, &qq, ip, existing.is_some()).await {
+        tracing::warn!("Central access rejected QQ {qq}: {error}");
+        return Json(create_error_response());
+    }
+
+    // Handle login with password verification after central authorization.
+    let user = match handle_user_login(&state.db, &qq, &req.pwd, token_info, now).await {
         Ok(user) => user,
         Err(e) => {
-            tracing::warn!("Login failed for {}: {}", req.account, e);
+            tracing::warn!("Login failed for QQ {}: {}", qq, e);
             return Json(create_error_response());
         }
     };
 
     tracing::info!(
-        "Login successful - User ID: {}, Account: {}, First join: {}",
+        "Login successful - User ID: {}, QQ: {}, First join: {}",
         user.id,
-        req.account,
+        qq,
         user.first_join
     );
 
@@ -56,7 +107,7 @@ pub async fn post(
             user_id: user.id as u64, // Use actual user ID from database
             account_type: AccountType::Email,
             registration_account_type: 1,
-            account: mask_email(&user.email), // Mask the email from database
+            account: user.email.clone(),
             real_name_info: RealNameInfo {
                 need_real_name: user.need_real_name,
                 real_name_status: user.real_name_status,
@@ -71,20 +122,6 @@ pub async fn post(
     };
 
     Json(rsp)
-}
-
-fn mask_email(email: &str) -> String {
-    if let Some(at_pos) = email.find('@') {
-        let (local, domain) = email.split_at(at_pos);
-        let prefix_len = local.chars().count().min(3);
-        format!(
-            "{}****{}",
-            local.chars().take(prefix_len).collect::<String>(),
-            domain
-        )
-    } else {
-        email.to_string()
-    }
 }
 
 fn generate_token() -> String {
@@ -102,7 +139,7 @@ fn generate_token() -> String {
 fn create_error_response() -> AccountLoginRsp {
     AccountLoginRsp {
         code: 401,
-        msg: "Invalid account or password".to_string(),
+        msg: "Invalid QQ number, password, or access policy".to_string(),
         data: AccountLoginRspData {
             token: String::new(),
             expires_in: 0,

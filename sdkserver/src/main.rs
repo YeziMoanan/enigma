@@ -4,6 +4,7 @@ use reqwest::Client;
 use std::net::SocketAddr;
 use tracing::info;
 
+mod access_control;
 mod handlers;
 mod middleware;
 mod models;
@@ -56,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     info!("SDK is listening on http://{}", addr);
 
     axum_server::bind(addr)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
     Ok(())
 }
