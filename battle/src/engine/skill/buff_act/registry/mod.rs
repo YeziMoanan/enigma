@@ -225,6 +225,7 @@ pub enum BuffActKind {
     RealHurtFix,
     RealDamageKill,
     Rebound,
+    ReplaceEntitySkillGroup,
     ReboundBasedOnDamage,
     Revive,
     Shield,

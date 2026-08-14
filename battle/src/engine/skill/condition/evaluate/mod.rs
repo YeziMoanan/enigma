@@ -556,6 +556,17 @@ fn condition_kind_matches(
                     >= *threshold
             })
         }),
+        ParsedConditionKind::BuffGroupTypeCount {
+            group_ids,
+            compare,
+            threshold,
+        } => managers.is_some_and(|managers| {
+            let amount = condition_targets
+                .iter()
+                .map(|uid| managers.buff.buff_group_type_count(*uid, group_ids))
+                .sum();
+            compare_value(amount, *compare, *threshold)
+        }),
         ParsedConditionKind::BuffGroup(group_ids) => managers.is_some_and(|managers| {
             condition_targets
                 .iter()
@@ -1103,20 +1114,22 @@ fn condition_kind_matches(
             let Some(defender) = pool.entity(defender_uid) else {
                 return false;
             };
-            let forces_restraint = managers.is_some_and(|managers| {
-                managers
-                    .buff
-                    .active_features(&managers.hp)
-                    .iter()
-                    .filter(|feature| feature.owner_uid == attacker.uid)
-                    .any(crate::engine::skill::buff_act::forces_career_restraint)
+            let restrained = context.hit_career_restraint.unwrap_or_else(|| {
+                let forces_restraint = managers.is_some_and(|managers| {
+                    managers
+                        .buff
+                        .active_features(&managers.hp)
+                        .iter()
+                        .filter(|feature| feature.owner_uid == attacker.uid)
+                        .any(crate::engine::skill::buff_act::forces_career_restraint)
+                });
+                forces_restraint
+                    || crate::engine::damage::handler::restrains_target(
+                        pool.catalog(),
+                        attacker.career,
+                        defender,
+                    )
             });
-            let restrained = forces_restraint
-                || crate::engine::damage::handler::restrains_target(
-                    pool.catalog(),
-                    attacker.career,
-                    defender,
-                );
             restrained == matches!(condition.kind, ParsedConditionKind::HurtRestrained)
         }
         ParsedConditionKind::EntityCount {

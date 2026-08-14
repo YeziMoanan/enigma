@@ -9,6 +9,7 @@ const CONTRACT_BOUND_BUFF_MAP: i32 = 31;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MagicCircleDefinition {
+    pub circle_type: i32,
     pub duration: i32,
     pub allied_attributes: Vec<(i32, i32)>,
     pub enemy_attributes: Vec<(i32, i32)>,
@@ -672,11 +673,12 @@ impl BattleCatalog {
     pub(crate) fn conduit_device(
         self,
         model_id: i32,
+        ex_skill_level: i32,
     ) -> Result<
         Option<Vec<Vec<crate::engine::manager::conduit::ConduitSkill>>>,
         crate::engine::manager::conduit::ConduitError,
     > {
-        configured_conduit_device(self.game_data, model_id)
+        configured_conduit_device(self.game_data, model_id, ex_skill_level)
     }
 
     pub(crate) fn boss_rush_target_models(
@@ -999,6 +1001,7 @@ fn magic_circle_definition(
 ) -> Option<MagicCircleDefinition> {
     let row = game_data.magic_circle.get(circle_id)?;
     Some(MagicCircleDefinition {
+        circle_type: row.circle_type,
         duration: row.round,
         allied_attributes: parse_attribute_pairs(&row.self_attrs),
         enemy_attributes: parse_attribute_pairs(&row.enemy_attrs),
@@ -1297,6 +1300,7 @@ pub(crate) fn configured_defender_reservation_count(
 pub(crate) fn configured_conduit_device(
     game_data: &config::GameDB,
     model_id: i32,
+    ex_skill_level: i32,
 ) -> Result<
     Option<Vec<Vec<crate::engine::manager::conduit::ConduitSkill>>>,
     crate::engine::manager::conduit::ConduitError,
@@ -1306,11 +1310,20 @@ pub(crate) fn configured_conduit_device(
     let Some(character) = game_data.character.get(model_id) else {
         return Ok(None);
     };
-    if character.device_id == 0 {
+    let device_id = game_data
+        .skill_ex_level
+        .iter()
+        .filter(|row| {
+            row.hero_id == character.id && row.skill_level <= ex_skill_level && row.device_id != 0
+        })
+        .max_by_key(|row| row.skill_level)
+        .map(|row| row.device_id)
+        .unwrap_or(character.device_id);
+    if device_id == 0 {
         return Ok(None);
     }
-    let Some(definition) = game_data.fight_device.get(character.device_id) else {
-        return Err(ConduitError::MissingDefinition(character.device_id));
+    let Some(definition) = game_data.fight_device.get(device_id) else {
+        return Err(ConduitError::MissingDefinition(device_id));
     };
     let parse_group = |group, value: &str| {
         value
@@ -1318,16 +1331,11 @@ pub(crate) fn configured_conduit_device(
             .map(|entry| {
                 let parts = entry.split('#').collect::<Vec<_>>();
                 if parts.len() != 3 {
-                    return Err(ConduitError::InvalidSkill {
-                        device_id: character.device_id,
-                        group,
-                    });
+                    return Err(ConduitError::InvalidSkill { device_id, group });
                 }
                 let parse = |part: &str| {
-                    part.parse().map_err(|_| ConduitError::InvalidSkill {
-                        device_id: character.device_id,
-                        group,
-                    })
+                    part.parse()
+                        .map_err(|_| ConduitError::InvalidSkill { device_id, group })
                 };
                 Ok(ConduitSkill {
                     skill_id: parse(parts[0])?,
@@ -1351,7 +1359,7 @@ pub(crate) fn configured_conduit_device(
                 }]
             })
             .map_err(|_| ConduitError::InvalidSkill {
-                device_id: character.device_id,
+                device_id,
                 group: ConduitSkillGroup::Unique,
             })
     };

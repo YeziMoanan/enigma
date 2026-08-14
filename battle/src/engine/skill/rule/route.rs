@@ -208,22 +208,9 @@ fn merge_driver(
 ) -> Result<ConditionDriver, RouteError> {
     match (first, second) {
         (ConditionDriver::Trigger(first), ConditionDriver::Trigger(second)) => {
-            if first.event != second.event {
-                // Both events carry the same action context; the pre-effect event owns
-                // a combined route when they describe the same explicit phase.
-                match (first.event, second.event) {
-                    (EventKind::SkillEffectStarted, EventKind::SkillAction)
-                        if first.phase.is_some() && first.phase == second.phase =>
-                    {
-                        Some(ConditionDriver::Trigger(first))
-                    }
-                    (EventKind::SkillAction, EventKind::SkillEffectStarted)
-                        if first.phase.is_some() && first.phase == second.phase =>
-                    {
-                        Some(ConditionDriver::Trigger(second))
-                    }
-                    _ => None,
-                }
+            if first.event != second.event && !share_skill_action_context(first.event, second.event)
+            {
+                None
             } else {
                 match (first.phase, second.phase) {
                     (Some(first_phase), Some(second_phase)) if first_phase != second_phase => None,
@@ -360,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn pre_effect_publication_owns_same_phase_action_conditions() {
+    fn active_skill_action_owns_same_phase_action_conditions() {
         init_config();
         let conditions = parse_conditions(config::configs::get(), "502203#0&34203#1#2&500203#1");
 
@@ -369,8 +356,8 @@ mod tests {
         assert_eq!(
             route.branches[0].driver,
             Some(ConditionDriver::Trigger(ConditionTrigger {
-                key: crate::engine::skill::rule::DefinitionKey::new(34203, "UseSkillEffectTag"),
-                event: EventKind::SkillEffectStarted,
+                key: crate::engine::skill::rule::DefinitionKey::new(502203, "ActiveUseSkill"),
+                event: EventKind::SkillAction,
                 phase: Some(SkillPhase::Immediate),
             }))
         );

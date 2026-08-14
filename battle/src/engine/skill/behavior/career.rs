@@ -84,7 +84,11 @@ fn apply(
             };
             modifiers.attack_career = target.weak_careers.first().copied().or_else(|| {
                 (1..=8).find(|career| {
-                    crate::engine::damage::handler::restrains_target(*career, target)
+                    crate::engine::damage::handler::restrains_target(
+                        pool.catalog(),
+                        *career,
+                        target,
+                    )
                 })
             });
             if modifiers.attack_career.is_none() {

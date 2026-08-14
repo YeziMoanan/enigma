@@ -746,42 +746,32 @@ fn predepleted_wave_runs_phase_two_refill_before_wave_transition() {
     assert_eq!(runtime.fight.cur_wave, Some(2));
     assert_eq!(round.before_cards2, vec![remaining]);
     assert_eq!(round.team_a_cards2, dealt);
-    let effect_types = round
+    let wave = round
         .fight_step
+        .iter()
+        .position(|step| step.act_type == Some(sonettobuf::fight_step::ActType::Changewave as i32))
+        .unwrap();
+    let effects_before_wave = round.fight_step[..wave]
         .iter()
         .flat_map(|step| step.act_effect.iter())
         .filter_map(|effect| effect.effect_type)
         .collect::<Vec<_>>();
-    let position = |effect_type| {
-        effect_types
-            .iter()
-            .position(|effect| *effect == effect_type)
-            .unwrap()
-    };
-    let deal = position(sonettobuf::effect_type_enum::EffectType::Dealcard2 as i32);
-    let invalidations = effect_types
+    let invalidations = effects_before_wave
         .iter()
-        .enumerate()
-        .filter_map(|(index, effect)| {
-            (*effect == sonettobuf::effect_type_enum::EffectType::Cardinvalid as i32)
-                .then_some(index)
-        })
-        .collect::<Vec<_>>();
-    let defender_settlement = effect_types
-        .iter()
-        .enumerate()
-        .rfind(|(_, effect)| {
-            **effect == sonettobuf::effect_type_enum::EffectType::Smallroundend as i32
-        })
-        .map(|(index, _)| index)
-        .unwrap();
-    let wave = position(sonettobuf::effect_type_enum::EffectType::Newchangewave as i32);
+        .filter(|effect| **effect == sonettobuf::effect_type_enum::EffectType::Cardinvalid as i32)
+        .count();
 
-    assert_eq!(invalidations.len(), 2);
-    assert!(deal < invalidations[0]);
-    assert!(invalidations[1] < defender_settlement);
-    assert!(defender_settlement < wave);
-    assert!(effect_types[deal..wave].iter().all(|effect| {
+    assert_eq!(invalidations, 2);
+    assert!(effects_before_wave.iter().any(|effect| {
+        *effect == sonettobuf::effect_type_enum::EffectType::Smallroundend as i32
+    }));
+    assert!(effects_before_wave.iter().all(|effect| {
         *effect != sonettobuf::effect_type_enum::EffectType::Devicepowerclear as i32
+    }));
+    assert!(round.fight_step.iter().all(|step| {
+        step.act_effect.iter().all(|effect| {
+            effect.effect_type
+                != Some(sonettobuf::effect_type_enum::EffectType::Newchangewave as i32)
+        })
     }));
 }

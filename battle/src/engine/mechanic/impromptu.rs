@@ -369,6 +369,11 @@ pub fn build_plan(managers: &BattleManagers, team: i32, emitter_uid: i64) -> Opt
         return None;
     }
     let definition = managers.catalog().impromptu_definition()?;
+    let attack_count = crate::engine::skill::buff_act::emitter_num_change::attack_count_for(
+        &managers.buff,
+        &managers.hp,
+        emitter_uid,
+    );
     Some(ImpromptuPlan {
         source_uid: emitter_uid,
         skill_id: definition.skill_id(),
